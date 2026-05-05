@@ -26,11 +26,22 @@ export default function Login({ onLogin }) {
 
       if (!data || data.length === 0) {
         setErrorMsg('❌ Invalid Name or Student Code. Please try again.');
+      } 
+      
+      if (!data || data.length === 0) {
+        setErrorMsg('❌ Invalid Name or Student Code. Please try again.');
       } else {
-        onLogin(data[0]);
+        const student = data[0]; // Isolate the specific student
+        
+        // 1. Generate the token and save to browser
         const newToken = crypto.randomUUID();
-  localStorage.setItem('local_session_token', newToken);
-  await supabase.from('users').update({ session_token: newToken }).eq('id', data.id); // Change 'data.id' to whatever your student variable is called
+        localStorage.setItem('local_session_token', newToken);
+        
+        // 2. Save to database using student.id
+        await supabase.from('users').update({ session_token: newToken }).eq('id', student.id);
+        
+        // 3. FINALLY, let them into the portal after saving is done!
+        onLogin(student);
       }
       
     } catch (err) {

@@ -1,0 +1,161 @@
+:root {
+  --patts-blue: #0A2342;
+  --patts-gold: #F4D03F;
+  --correct: #27AE60;
+  --incorrect: #E74C3C;
+  --bg-color: #F8F9FA;
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: #333;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  background-color: var(--patts-blue);
+  color: white;
+  padding: 20px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 5px solid var(--patts-gold);
+}
+
+.login-container {
+  max-width: 400px;
+  margin: 100px auto;
+  background: white;
+  padding: 30px;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  border-top: 5px solid var(--patts-blue);
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 15px;
+}
+
+input {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-top: 5px;
+}
+
+button {
+  background-color: var(--patts-gold);
+  color: var(--patts-blue);
+  border: none;
+  padding: 12px;
+  font-weight: bold;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+}
+
+button:hover {
+  background-color: #d4b22c;
+}
+
+.exam-layout {
+  display: flex;
+  gap: 20px;
+}
+
+.main-panel {
+  flex: 2;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.side-panel {
+  flex: 1;
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+  margin-top: 20px;
+  /* Add these 3 lines below to make it scrollable! */
+  max-height: 400px; 
+  overflow-y: auto;  
+  padding-right: 5px;
+}
+
+.grid-item {
+  padding: 10px;
+  text-align: center;
+  background: #eee;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.grid-item.active {
+  background: var(--patts-blue);
+  color: white;
+}
+
+.grid-item.answered {
+  background: var(--patts-gold);
+  color: var(--patts-blue);
+}
+
+.choice-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 10px;
+  background: #fff;
+  border: 1px solid #ccc;
+  color: #333;
+}
+
+.choice-btn.selected {
+  background: var(--patts-blue);
+  color: white;
+  border-color: var(--patts-blue);
+}
+/* --- ANTI-CHEAT FEATURES --- */
+.prevent-select {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Add this to the bottom of your index.css */
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .slider:before {
+  transform: translateX(26px);
+}

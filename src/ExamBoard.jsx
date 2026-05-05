@@ -23,6 +23,23 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [questions, setQuestions] = useState([]); 
   const [isLoading, setIsLoading] = useState(true); 
   const [scoreDisplay, setScoreDisplay] = useState(null); 
+  // --- CLONE GUARD: Check for multiple logins ---
+  useEffect(() => {
+    const checkSession = setInterval(async () => {
+      const localToken = localStorage.getItem('local_session_token');
+      if (!localToken || !student?.id) return;
+
+      const { data } = await supabase.from('users').select('session_token').eq('id', student.id).single();
+      
+      if (data && data.session_token !== localToken) {
+        clearInterval(checkSession);
+        alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
+        window.location.reload(); // Instantly boots them out to the login screen
+      }
+    }, 10000); 
+
+    return () => clearInterval(checkSession);
+  }, [student?.id]);
 
   // SUBMISSION CONTROLS
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -94,20 +111,32 @@ export default function ExamBoard({ student, exam, examSet }) {
   useEffect(() => {
     async function loadQuestions() {
       if (!exam?.id) return; 
-      const { data } = await supabase.from('questions').select('*').eq('exam_id', exam.id).order('id', { ascending: true });
-      if (data) {
-        if (examSet === 'B') {
-          const evens = data.filter((_, i) => i % 2 !== 0);
-          const odds = data.filter((_, i) => i % 2 === 0);
-          setQuestions([...evens, ...odds]);
-        } else {
-          setQuestions(data);
+      const { data, error } = await supabase.from('questions').select('*').eq('exam_id', exam.id).order('id', { ascending: true });
+      
+      if (error) {
+        console.error("Error loading questions:", error);
+      } else if (data) {
+        // --- SEEDED SHUFFLE LOGIC ---
+        // Uses the student's unique ID to scramble the questions the exact same way every time
+        let seed = student?.id ? student.id.charCodeAt(0) + student.id.charCodeAt(student.id.length - 1) : 123;
+        
+        const seededRandom = () => {
+          let x = Math.sin(seed++) * 10000;
+          return x - Math.floor(x);
+        };
+
+        let shuffled = [...data];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(seededRandom() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
+        
+        setQuestions(shuffled);
       }
       setIsLoading(false);
     }
     loadQuestions();
-  }, [exam?.id, examSet]);
+  }, [exam?.id, student?.id]);
 
   // --- 6. THE FIXED SUBMISSION LOGIC ---
   const executeSubmission = async () => {

@@ -28,6 +28,9 @@ export default function Login({ onLogin }) {
         setErrorMsg('❌ Invalid Name or Student Code. Please try again.');
       } else {
         onLogin(data[0]);
+        const newToken = crypto.randomUUID();
+  localStorage.setItem('local_session_token', newToken);
+  await supabase.from('users').update({ session_token: newToken }).eq('id', data.id); // Change 'data.id' to whatever your student variable is called
       }
       
     } catch (err) {

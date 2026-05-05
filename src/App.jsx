@@ -77,7 +77,9 @@ export default function App() {
           </button>
         </div>
         <Login onLogin={setStudent} />
+        
       </div>
+      
     );
   }
 

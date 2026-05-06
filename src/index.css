@@ -207,7 +207,7 @@ input:checked + .slider:before {
 
 /* --- NATIVE PDF EXPORT FORMATTING --- */
 @media print {
-  /* 1. Force background graphics (Progress Bars) and remove the VS Code error */
+  /* 1. Force background graphics (Progress Bars) */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -217,40 +217,45 @@ input:checked + .slider:before {
   body * {
     visibility: hidden; 
   }
+
+  /* 3. CRITICAL FIX: Disable the fixed dark wrapper so it stops squishing Page 2 */
+  .print-modal-overlay {
+    position: static !important;
+    display: block !important;
+    background: none !important;
+  }
   
-  /* 3. Un-hide the specific box we tagged with "print-zone" */
+  /* 4. Un-hide the specific box we tagged with "print-zone" */
   .print-zone, .print-zone * {
     visibility: visible; 
   }
   
-  /* 4. Release the modal from the screen constraints */
+  /* 5. Let the modal flow naturally down the paper like a normal document */
   .print-zone {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
+    position: static !important;
     width: 100% !important;
     height: auto !important;
     max-height: none !important;
     overflow: visible !important;
     background: white !important;
     padding: 0 !important;
+    margin: 0 !important;
   }
   
-  /* 5. FIX THE OVERLAP: Disable the CSS Grid during printing */
+  /* 6. Break the flexbox/grid layout so cards stack cleanly */
   .print-zone > div {
     display: block !important;
   }
 
-  /* 6. Prevent questions from splitting across pages and add spacing back */
+  /* 7. Prevent questions from splitting across pages */
   .print-zone > div > div {
     display: block !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
-    margin-bottom: 30px !important; 
-    position: static !important;
+    margin-bottom: 40px !important; 
   }
   
-  /* 7. Hide the Close/Print buttons on the final PDF */
+  /* 8. Hide the Close/Print buttons on the final PDF */
   .print-zone button {
     display: none !important;
   }

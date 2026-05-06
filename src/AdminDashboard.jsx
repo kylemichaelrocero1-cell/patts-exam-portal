@@ -415,10 +415,9 @@ const deleteResult = async (studentId, examId) => {
       {/* ========================================= */}
       {/* MODAL 2: CLASS ITEM ANALYSIS (STATS)      */}
       {/* ========================================= */}
-{viewingStatsExam && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+      {viewingStatsExam && (
+        <div className="print-modal-overlay" style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
           
-          {/* 1. We added className="print-zone" right here: */}
           <div className="print-zone" style={{ background: '#F4F7F9', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '900px', maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
             
             <button onClick={() => setViewingStatsExam(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: '#E74C3C', width: 'auto', padding: '8px 15px', borderRadius: '6px', color: 'white', border: 'none', cursor: 'pointer' }}>Close</button>

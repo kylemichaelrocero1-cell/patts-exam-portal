@@ -163,6 +163,16 @@ export default function ExamBoard({ student, exam, examSet }) {
           const j = Math.floor(seededRandom() * (i + 1));
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
+
+        // ---> NEW: Shuffle the A, B, C, D choices for each question <---
+        shuffled = shuffled.map(q => {
+          let letters = ['a', 'b', 'c', 'd'];
+          for (let i = letters.length - 1; i > 0; i--) {
+             const j = Math.floor(seededRandom() * (i + 1));
+             [letters[i], letters[j]] = [letters[j], letters[i]];
+          }
+          return { ...q, shuffled_letters: letters };
+        });
         
         setQuestions(shuffled);
       }
@@ -302,16 +312,20 @@ export default function ExamBoard({ student, exam, examSet }) {
         <main className="main-panel">
           <h2>Question {currentQuestion}</h2>
           <p style={{ fontSize: '18px', minHeight: '80px' }}>{currentQ?.question_text}</p>
-          <div className="choices">
-            {['a','b','c','d'].map((letter, idx) => (
-              <button 
-                key={letter}
-                className={`choice-btn ${answers[currentQ?.id] === idx ? 'selected' : ''}`} 
-                onClick={() => setAnswers({...answers, [currentQ.id]: idx})}
-              >
-                {letter.toUpperCase()}. {currentQ[`choice_${letter}`]}
-              </button>
-            ))}
+        <div className="choices">
+            {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
+              // We grab the original index (0,1,2,3) so the database grading math doesn't break!
+              const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
+              return (
+                <button 
+                  key={letter}
+                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`} 
+                  onClick={() => setAnswers({...answers, [currentQ.id]: originalIndex})}
+                >
+                   {currentQ[`choice_${letter}`]}
+                </button>
+              );
+            })}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px' }}>
             <button style={{ width: 'auto', background: '#ccc' }} onClick={() => setCurrentQuestion(q => Math.max(1, q-1))} disabled={currentQuestion === 1}>Previous</button>

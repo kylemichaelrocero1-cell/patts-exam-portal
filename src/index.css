@@ -204,3 +204,35 @@ input:checked + .slider:before {
     padding: 12px !important;
   }
 }
+/* --- NATIVE PDF EXPORT FORMATTING --- */
+
+/* The @media print tag means this CSS is ONLY active when the Print menu opens */
+@media print {
+  
+  /* 1. Hide absolutely everything on the website */
+  body * {
+    visibility: hidden; 
+  }
+  
+  /* 2. Un-hide the specific box we tagged with "print-zone" */
+  .print-zone, .print-zone * {
+    visibility: visible; 
+  }
+  
+  /* 3. Expand the stats box so it perfectly fills an 8.5 x 11 piece of paper */
+  .print-zone {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+    padding: 0 !important;
+  }
+  
+  /* 4. Hide the "Close" and "Save as PDF" buttons so they don't show up on the final paper */
+  .print-zone button {
+    display: none !important;
+  }
+}

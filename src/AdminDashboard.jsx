@@ -19,6 +19,31 @@ export default function AdminDashboard({ onLogout }) {
   // Edit Time State
   const [editingTimes, setEditingTimes] = useState({});
 
+  // --- NEW ANALYTICS STATES ---
+  const [viewingStudent, setViewingStudent] = useState(null); 
+  const [viewingStatsExam, setViewingStatsExam] = useState(null);
+  const [examQuestionsCache, setExamQuestionsCache] = useState({});
+
+  // Helper to load questions only when needed so the dashboard stays fast
+  const loadExamQuestions = async (examId) => {
+    if (examQuestionsCache[examId]) return examQuestionsCache[examId];
+    setIsLoading(true);
+    const { data } = await supabase.from('questions').select('*').eq('exam_id', examId).order('id', { ascending: true });
+    setExamQuestionsCache(prev => ({ ...prev, [examId]: data }));
+    setIsLoading(false);
+    return data;
+  };
+
+  const openStudentDetails = async (row) => {
+    await loadExamQuestions(row.exam_id);
+    setViewingStudent(row);
+  };
+
+  const openExamStats = async (examId) => {
+    await loadExamQuestions(examId);
+    setViewingStatsExam(examId);
+  };
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -225,14 +250,20 @@ const deleteResult = async (studentId, examId) => {
                         <td style={{ padding: '12px', color: row.tab_switches > 0 ? '#E74C3C' : '#27AE60', fontWeight: 'bold' }}>
                           {row.tab_switches > 0 ? `⚠️ ${row.tab_switches} Violations` : '✅ Clean'}
                         </td>
-                        <td style={{ padding: '15px' }}>
-                      <button 
-                        onClick={() => deleteResult(row.student_id, row.exam_id)} 
-                        style={{ background: '#E74C3C', padding: '6px 12px', fontSize: '12px', width: 'auto' }}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                        <td style={{ padding: '15px', display: 'flex', gap: '8px' }}>
+  <button 
+    onClick={() => openStudentDetails(row)} 
+    style={{ background: '#3498DB', padding: '6px 12px', fontSize: '12px', width: 'auto', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold' }}
+  >
+    📄 View Answers
+  </button>
+  <button 
+    onClick={() => deleteResult(row.student_id, row.exam_id)} 
+    style={{ background: '#E74C3C', padding: '6px 12px', fontSize: '12px', width: 'auto', border: 'none', borderRadius: '4px', color: 'white', fontWeight: 'bold' }}
+  >
+    🗑️ Delete
+  </button>
+</td>
                       </tr>
                     );
                   })
@@ -286,6 +317,25 @@ const deleteResult = async (studentId, examId) => {
                       
                       {/* Only shows SAVE button if the value is different from initial */}
                       <button 
+  onClick={() => openExamStats(exam.id)}
+  style={{
+    width: 'auto', 
+    padding: '12px 20px', 
+    background: '#8E44AD', 
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px'
+  }}
+>
+  📊 CLASS STATS
+</button>
+                      
+                      <button 
                         onClick={() => saveTimeLimit(exam.id)}
                         style={{ 
                           background: '#0A2342', color: 'white', opacity: editingTimes[exam.id] != examsList.find(e => e.id === exam.id).duration_minutes ? 1 : 0.5 
@@ -302,6 +352,119 @@ const deleteResult = async (studentId, examId) => {
         )}
 
       </div>
+{/* ========================================= */}
+      {/* MODAL 1: INDIVIDUAL STUDENT ANSWER SHEET  */}
+      {/* ========================================= */}
+      {viewingStudent && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#F4F7F9', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '800px', maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+            <button onClick={() => setViewingStudent(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: '#E74C3C', width: 'auto', padding: '8px 15px', borderRadius: '6px' }}>Close</button>
+            
+            <h2 style={{ color: '#0A2342', marginTop: 0 }}>{students[viewingStudent.student_id]?.name}'s Exam Paper</h2>
+            <div style={{ background: 'white', padding: '15px', borderRadius: '8px', marginBottom: '20px', display: 'inline-block', fontWeight: 'bold', border: '2px solid #0A2342' }}>
+              Final Score: <span style={{ color: viewingStudent.score === 0 ? '#E74C3C' : '#27AE60' }}>{viewingStudent.score} / {viewingStudent.total_items}</span>
+            </div>
+
+            <div style={{ display: 'grid', gap: '15px' }}>
+              {(examQuestionsCache[viewingStudent.exam_id] || []).map((q, idx) => {
+                const sAnswer = viewingStudent.answers_json[q.id];
+                const studentChoice = sAnswer !== undefined ? Number(sAnswer.chosen) : -1;
+                const correctChoice = Number(q.correct_answer);
+                
+                return (
+                  <div key={q.id} style={{ background: 'white', padding: '20px', borderRadius: '8px', borderLeft: studentChoice === correctChoice ? '6px solid #27AE60' : '6px solid #E74C3C', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}>
+                    <p style={{ margin: '0 0 15px 0', fontWeight: 'bold' }}>{idx + 1}. {q.question_text}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      {['a', 'b', 'c', 'd'].map((letter, i) => {
+                        let bgColor = '#F8F9FA';
+                        let borderColor = '#DDD';
+                        let textColor = '#555';
+                        let tag = '';
+
+                        if (i === correctChoice) {
+                          bgColor = '#D5F5E3'; borderColor = '#27AE60'; textColor = '#1E8449'; tag = ' ✅ Correct Answer';
+                        } else if (i === studentChoice && studentChoice !== correctChoice) {
+                          bgColor = '#FADBD8'; borderColor = '#E74C3C'; textColor = '#C0392B'; tag = ' ❌ Student Picked';
+                        }
+
+                        return (
+                          <div key={letter} style={{ padding: '10px', background: bgColor, border: `2px solid ${borderColor}`, borderRadius: '6px', color: textColor, fontSize: '14px' }}>
+                            <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]} {tag}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================= */}
+      {/* MODAL 2: CLASS ITEM ANALYSIS (STATS)      */}
+      {/* ========================================= */}
+      {viewingStatsExam && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#F4F7F9', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '900px', maxHeight: '85vh', overflowY: 'auto', position: 'relative' }}>
+            <button onClick={() => setViewingStatsExam(null)} style={{ position: 'absolute', top: '20px', right: '20px', background: '#E74C3C', width: 'auto', padding: '8px 15px', borderRadius: '6px' }}>Close</button>
+            
+            <h2 style={{ color: '#0A2342', marginTop: 0 }}>Item Analysis & Statistics</h2>
+            <p style={{ color: '#666', marginBottom: '25px' }}>See exactly how many students chose each option.</p>
+
+            <div style={{ display: 'grid', gap: '20px' }}>
+              {(examQuestionsCache[viewingStatsExam] || []).map((q, idx) => {
+                // Calculate Stats for this specific question
+                const examResults = results.filter(r => r.exam_id === viewingStatsExam);
+                const totalAnswers = examResults.length;
+                
+                const counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
+                let unassignedCount = 0;
+
+                examResults.forEach(r => {
+                  const sAnswer = r.answers_json[q.id];
+                  if (sAnswer !== undefined) counts[sAnswer.chosen]++;
+                  else unassignedCount++;
+                });
+
+                return (
+                  <div key={q.id} style={{ background: 'white', padding: '25px', borderRadius: '10px', borderTop: '4px solid #0A2342', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' }}>
+                    <p style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 'bold', color: '#333' }}>{idx + 1}. {q.question_text}</p>
+                    
+                    <div style={{ display: 'grid', gap: '12px' }}>
+                      {['a', 'b', 'c', 'd'].map((letter, i) => {
+                        const count = counts[i];
+                        const percentage = totalAnswers > 0 ? Math.round((count / totalAnswers) * 100) : 0;
+                        const isCorrect = i === Number(q.correct_answer);
+
+                        return (
+                          <div key={letter} style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                            <div style={{ width: '40px', fontWeight: 'bold', color: isCorrect ? '#27AE60' : '#555' }}>
+                              {letter.toUpperCase()}.
+                            </div>
+                            
+                            {/* The Visual Bar */}
+                            <div style={{ flex: 1, background: '#F0F0F0', height: '24px', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
+                              <div style={{ width: `${percentage}%`, height: '100%', background: isCorrect ? '#27AE60' : '#3498DB', transition: 'width 0.5s ease' }}></div>
+                            </div>
+                            
+                            {/* The Numbers */}
+                            <div style={{ width: '80px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#555' }}>
+                              {count} ({percentage}%)
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

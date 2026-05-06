@@ -19,7 +19,7 @@ export default function App() {
   // Handle our custom password form submission
   const handleAdminSubmit = (e) => {
     e.preventDefault(); // Stops the page from refreshing
-    if (adminPassword === "pattsadmin") { // Your password here!
+    if (adminPassword === "pattsaero003") { // Your password here!
       setIsAdminView(true);
       setShowPasswordScreen(false);
       setAdminPassword('');

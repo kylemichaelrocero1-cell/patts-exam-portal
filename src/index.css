@@ -207,11 +207,10 @@ input:checked + .slider:before {
 
 /* --- NATIVE PDF EXPORT FORMATTING --- */
 @media print {
-  /* 1. Force the browser to print background colors (Saves the Progress Bars) */
+  /* 1. Force background graphics (Progress Bars) and remove the VS Code error */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    color-adjust: exact !important;
   }
   
   /* 2. Hide everything else on the website */
@@ -224,28 +223,35 @@ input:checked + .slider:before {
     visibility: visible; 
   }
   
-  /* 4. Allow the box to expand fully down multiple pages */
+  /* 4. Release the modal from the screen constraints */
   .print-zone {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: max-content !important; 
-    max-height: none !important; /* Removes the scroll limitation for paper */
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
     overflow: visible !important;
     background: white !important;
-    padding: 20px !important;
+    padding: 0 !important;
   }
   
-  /* 5. Hide the Close/Print buttons on the final PDF */
-  .print-zone button {
-    display: none !important;
+  /* 5. FIX THE OVERLAP: Disable the CSS Grid during printing */
+  .print-zone > div {
+    display: block !important;
   }
 
-  /* 6. Prevent questions from being sliced in half across page breaks */
+  /* 6. Prevent questions from splitting across pages and add spacing back */
   .print-zone > div > div {
+    display: block !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
-    margin-bottom: 20px !important;
+    margin-bottom: 30px !important; 
+    position: static !important;
+  }
+  
+  /* 7. Hide the Close/Print buttons on the final PDF */
+  .print-zone button {
+    display: none !important;
   }
 }

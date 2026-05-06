@@ -23,7 +23,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [questions, setQuestions] = useState([]); 
   const [isLoading, setIsLoading] = useState(true); 
   const [scoreDisplay, setScoreDisplay] = useState(null); 
-  // --- CLONE GUARD: Check for multiple logins ---
+// --- CLONE GUARD: Check for multiple logins ---
   useEffect(() => {
     const checkSession = setInterval(async () => {
       const localToken = localStorage.getItem('local_session_token');
@@ -31,12 +31,13 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       const { data } = await supabase.from('users').select('session_token').eq('id', student.id).single();
       
-      if (data && data.session_token !== localToken) {
+      // THE FIX: We added "data.session_token" here so it ignores empty database results
+      if (data && data.session_token && data.session_token !== localToken) {
         clearInterval(checkSession);
         alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
-        window.location.reload(); // Instantly boots them out to the login screen
+        window.location.reload(); 
       }
-    }, 10000); 
+    }, 5000); 
 
     return () => clearInterval(checkSession);
   }, [student?.id]);

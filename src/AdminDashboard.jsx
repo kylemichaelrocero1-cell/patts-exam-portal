@@ -364,7 +364,17 @@ const deleteResult = async (studentId, examId) => {
             <div style={{ background: 'white', padding: '15px', borderRadius: '8px', marginBottom: '20px', display: 'inline-block', fontWeight: 'bold', border: '2px solid #0A2342' }}>
               Final Score: <span style={{ color: viewingStudent.score === 0 ? '#E74C3C' : '#27AE60' }}>{viewingStudent.score} / {viewingStudent.total_items}</span>
             </div>
-
+{/* ---> NEW: SECURITY INCIDENT LOG <--- */}
+            {viewingStudent.violation_logs && viewingStudent.violation_logs.length > 0 && (
+              <div style={{ background: '#FADBD8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '2px solid #E74C3C' }}>
+                <h3 style={{ color: '#C0392B', margin: '0 0 10px 0', fontSize: '18px' }}>🚨 Security Incident Log</h3>
+                <ul style={{ margin: 0, paddingLeft: '20px', color: '#C0392B', fontSize: '15px', lineHeight: '1.6' }}>
+                  {viewingStudent.violation_logs.map((log, i) => (
+                    <li key={i}><strong>{log.substring(0, 11)}</strong> {log.substring(12)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div style={{ display: 'grid', gap: '15px' }}>
               {(examQuestionsCache[viewingStudent.exam_id] || []).map((q, idx) => {
                 const sAnswer = viewingStudent.answers_json[q.id];

@@ -16,6 +16,7 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   const [answers, setAnswers] = useState(initialState.answers);
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
+  const [violationLogs, setViolationLogs] = useState([]);
   const endTime = initialState.endTime; 
   const [timeLeft, setTimeLeft] = useState(startingSeconds);
   const [localTime, setLocalTime] = useState(new Date().toLocaleTimeString()); 
@@ -75,17 +76,48 @@ export default function ExamBoard({ student, exam, examSet }) {
     }
   }, [timeLeft, scoreDisplay, isSubmitting, isLoading]);
 
-  // --- 5. ANTI-CHEAT ---
+ // --- UPGRADED ANTI-CHEAT: Tracks Specific Violations with Timestamps ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting) return; 
+
+    // Helper function to record the exact time and reason
+    const logViolation = (reason) => {
+      const timeStr = new Date().toLocaleTimeString();
+      const logEntry = `[${timeStr}] ${reason}`;
+      
+      setViolationLogs(prev => [...prev, logEntry]);
+      setTabSwitchCount(prev => prev + 1);
+    };
+
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        setTabSwitchCount(prev => prev + 1);
-        setTimeout(() => alert("⚠️ SYSTEM WARNING: Tab switch recorded."), 100);
+        logViolation("Tab hidden or switched to another app");
+        alert("⚠️ SYSTEM WARNING: Tab switch detected.");
       }
     };
+
+    const handleBlur = () => {
+      logViolation("Screen lost focus (Split-screen or notifications opened)");
+    };
+
+    const handleKeyDown = (e) => {
+      const forbidden = e.key === 'PrintScreen' || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey);
+      if (forbidden) {
+        e.preventDefault();
+        logViolation("Screenshot or Print shortcut attempted");
+        alert("⚠️ SECURITY VIOLATION: Screenshot/Print disabled.");
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [scoreDisplay, isSubmitting]);
 
   useEffect(() => {
@@ -179,7 +211,8 @@ export default function ExamBoard({ student, exam, examSet }) {
         score: correctCount,
         total_items: questions.length,
         time_taken_seconds: startingSeconds - timeLeft,
-        tab_switches: tabSwitchCount
+        tab_switches: tabSwitchCount,
+        violation_logs: violationLogs
       }]);
 
       if (saveError) throw saveError;

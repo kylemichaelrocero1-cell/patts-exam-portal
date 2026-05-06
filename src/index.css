@@ -204,35 +204,48 @@ input:checked + .slider:before {
     padding: 12px !important;
   }
 }
-/* --- NATIVE PDF EXPORT FORMATTING --- */
 
-/* The @media print tag means this CSS is ONLY active when the Print menu opens */
+/* --- NATIVE PDF EXPORT FORMATTING --- */
 @media print {
+  /* 1. Force the browser to print background colors (Saves the Progress Bars) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
   
-  /* 1. Hide absolutely everything on the website */
+  /* 2. Hide everything else on the website */
   body * {
     visibility: hidden; 
   }
   
-  /* 2. Un-hide the specific box we tagged with "print-zone" */
+  /* 3. Un-hide the specific box we tagged with "print-zone" */
   .print-zone, .print-zone * {
     visibility: visible; 
   }
   
-  /* 3. Expand the stats box so it perfectly fills an 8.5 x 11 piece of paper */
+  /* 4. Allow the box to expand fully down multiple pages */
   .print-zone {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
-    height: auto !important;
+    height: max-content !important; 
+    max-height: none !important; /* Removes the scroll limitation for paper */
     overflow: visible !important;
     background: white !important;
-    padding: 0 !important;
+    padding: 20px !important;
   }
   
-  /* 4. Hide the "Close" and "Save as PDF" buttons so they don't show up on the final paper */
+  /* 5. Hide the Close/Print buttons on the final PDF */
   .print-zone button {
     display: none !important;
+  }
+
+  /* 6. Prevent questions from being sliced in half across page breaks */
+  .print-zone > div > div {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 20px !important;
   }
 }

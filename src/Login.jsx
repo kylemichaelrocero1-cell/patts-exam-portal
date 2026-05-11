@@ -15,12 +15,12 @@ export default function Login({ onLogin }) {
 
     try {
       // 2. Updated the database query to search for 'email' and 'student_id'
+     // 2. Updated the database query to match your exact CSV headers
       const { data, error } = await supabase
         .from('users')
         .select('*')
-        .eq('email', email.trim().toLowerCase()) // Added toLowerCase() so it isn't case-sensitive
-        .eq('student_id', studentId.trim());
-
+        .eq('student_email', email.trim().toLowerCase()) // <--- Changed to student_email
+        .eq('student_code', studentId.trim());           // <--- Changed to student_code
       if (error) {
         console.error("Supabase Error:", error);
         throw error;

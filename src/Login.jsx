@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { supabase } from './supabase';
 
 export default function Login({ onLogin }) {
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
+  // 1. Updated state variables to reflect the new login method
+  const [email, setEmail] = useState('');
+  const [studentId, setStudentId] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -13,11 +14,12 @@ export default function Login({ onLogin }) {
     setErrorMsg('');
 
     try {
+      // 2. Updated the database query to search for 'email' and 'student_id'
       const { data, error } = await supabase
         .from('users')
         .select('*')
-        .eq('full_name', name.trim()) 
-        .eq('student_code', code.trim());
+        .eq('email', email.trim().toLowerCase()) // Added toLowerCase() so it isn't case-sensitive
+        .eq('student_id', studentId.trim());
 
       if (error) {
         console.error("Supabase Error:", error);
@@ -25,22 +27,15 @@ export default function Login({ onLogin }) {
       }
 
       if (!data || data.length === 0) {
-        setErrorMsg('❌ Invalid Name or Student Code. Please try again.');
-      } 
-      
-      if (!data || data.length === 0) {
-        setErrorMsg('❌ Invalid Name or Student Code. Please try again.');
+        setErrorMsg('❌ Invalid Email or Student ID. Please try again.');
       } else {
-        const student = data[0]; // Isolate the specific student
+        const student = data[0]; 
         
-        // 1. Generate the token and save to browser
+        // --- Clone Guard Logic ---
         const newToken = crypto.randomUUID();
         localStorage.setItem('local_session_token', newToken);
-        
-        // 2. Save to database using student.id
         await supabase.from('users').update({ session_token: newToken }).eq('id', student.id);
         
-        // 3. FINALLY, let them into the portal after saving is done!
         onLogin(student);
       }
       
@@ -58,37 +53,39 @@ export default function Login({ onLogin }) {
       <p style={{ marginBottom: '20px' }}>Enter your details to take your exam.</p>
 
       <form onSubmit={handleLogin}>
+        {/* 3. Updated Email Input Field */}
         <div style={{ marginBottom: '15px', textAlign: 'left' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Full Name:</label>
+          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Student Email:</label>
           <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)} 
-            placeholder="e.g. Juan Dela Cruz" /* <-- UPDATED PLACEHOLDER */
+            type="email" /* Changed to type="email" so mobile keyboards show the "@" symbol */
+            value={email} 
+            onChange={(e) => setEmail(e.target.value)} 
+            placeholder="e.g. juan.delacruz@patts.edu.ph"
             required
             style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' }}
           />
         </div>
 
+        {/* 4. Updated Student ID Input Field */}
         <div style={{ marginBottom: '20px', textAlign: 'left' }}>
-          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Student Code:</label>
+          <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Student ID:</label>
           <input 
             type="text" 
-            value={code} 
-            onChange={(e) => setCode(e.target.value)} 
-            placeholder="e.g. PATTS-01-123" /* <-- UPDATED PLACEHOLDER */
+            value={studentId} 
+            onChange={(e) => setStudentId(e.target.value)} 
+            placeholder="e.g. 2021-1-1234"
             required
             style={{ width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid #ccc', boxSizing: 'border-box' }}
           />
         </div>
 
         {errorMsg && (
-          <div style={{ padding: '10px', background: '#fadbd8', color: '#c0392b', borderRadius: '4px', marginBottom: '15px', fontWeight: 'bold' }}>
+          <div style={{ padding: '10px', background: '#FADBD8', color: '#C0392B', borderRadius: '4px', marginBottom: '15px', fontWeight: 'bold' }}>
             {errorMsg}
           </div>
         )}
 
-        <button type="submit" disabled={isLoading} style={{ width: '100%', background: '#0A2342', color: 'white' }}>
+        <button type="submit" disabled={isLoading} style={{ width: '100%', background: '#0A2342', color: 'white', padding: '12px', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}>
           {isLoading ? 'Connecting...' : 'Log In'}
         </button>
       </form>

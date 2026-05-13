@@ -25,7 +25,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [isLoading, setIsLoading] = useState(true); 
   const [scoreDisplay, setScoreDisplay] = useState(null); 
 
-  // --- NEW: LIVE PROCTORING STATES ---
+  // --- LIVE PROCTORING STATES ---
   const [examStatus, setExamStatus] = useState('active'); // 'active' or 'locked'
   const [liveSessionId, setLiveSessionId] = useState(null);
 
@@ -52,13 +52,12 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [confirmText, setConfirmText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false); 
 
-  // --- NEW: LIVE SESSION INITIALIZATION & LISTENER ---
+  // --- FIX 1: LIVE SESSION INITIALIZATION & LISTENER ---
   useEffect(() => {
     if (!student?.id || !exam?.id) return;
     let channel;
 
     const initLiveSession = async () => {
-      // 1. Check if a live session already exists for this attempt
       const { data: existing } = await supabase.from('live_sessions')
         .select('*').eq('student_id', student.id).eq('exam_id', exam.id).single();
 
@@ -66,11 +65,9 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       if (existing) {
         currentSessionId = existing.id;
-        setExamStatus(existing.status);
-        // If they refresh the page to try and escape a lock, enforce the 4-violation rule immediately
-        if (existing.violation_count >= 4) setExamStatus('locked');
+        // Just trust the database! If the instructor unlocked it, keep it active.
+        setExamStatus(existing.status); 
       } else {
-        // 2. Create a new tracking session
         const { data: newSession } = await supabase.from('live_sessions').insert([{
           student_id: student.id,
           exam_id: exam.id,
@@ -84,7 +81,7 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       setLiveSessionId(currentSessionId);
 
-      // 3. Start listening to the Instructor's Dashboard
+      // Start listening to the Instructor's Dashboard
       if (currentSessionId) {
         channel = supabase.channel(`session-${currentSessionId}`)
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_sessions', filter: `id=eq.${currentSessionId}` }, 
@@ -100,30 +97,22 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [student?.id, exam?.id]);
 
-  // --- NEW: LIVE DATA PUSHER (Sends updates to dashboard) ---
+  // --- FIX 2: LIVE DATA PUSHER ---
   useEffect(() => {
     if (!liveSessionId) return;
     
     const pushUpdates = async () => {
-      let currentStatus = examStatus;
-      
-      // AUTO-LOCK RULE: 4 Strikes and you are out!
-      if (tabSwitchCount >= 4) {
-        currentStatus = 'locked';
-        setExamStatus('locked');
-      }
-
       // Send the current stats to the database so the instructor can see them
       await supabase.from('live_sessions').update({
         answers_count: Object.keys(answers).length,
         violation_count: tabSwitchCount,
-        status: currentStatus,
+        status: examStatus, // Sync exactly whatever state the screen is currently in
         updated_at: new Date()
       }).eq('id', liveSessionId);
     };
 
     pushUpdates();
-  }, [answers, tabSwitchCount, liveSessionId]);
+  }, [answers, tabSwitchCount, liveSessionId, examStatus]);
 
   // --- AUTO-SAVER ---
   useEffect(() => {
@@ -151,7 +140,7 @@ export default function ExamBoard({ student, exam, examSet }) {
     }
   }, [timeLeft, scoreDisplay, isSubmitting, isLoading]);
 
-  // --- UPGRADED ANTI-CHEAT: Tracks Specific Violations ---
+  // --- FIX 3: UPGRADED ANTI-CHEAT ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting || examStatus === 'locked') return; 
 
@@ -159,7 +148,15 @@ export default function ExamBoard({ student, exam, examSet }) {
       const timeStr = new Date().toLocaleTimeString();
       const logEntry = `[${timeStr}] ${reason}`;
       setViolationLogs(prev => [...prev, logEntry]);
-      setTabSwitchCount(prev => prev + 1);
+      
+      setTabSwitchCount(prev => {
+        const newCount = prev + 1;
+        // AUTO-LOCK RULE: Lock exactly at 4, 8, 12. This allows the instructor to unlock them without it instantly re-locking!
+        if (newCount > 0 && newCount % 4 === 0) {
+          setExamStatus('locked');
+        }
+        return newCount;
+      });
     };
 
     const handleVisibilityChange = () => {
@@ -269,7 +266,7 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       if (saveError) throw saveError;
 
-      // --- NEW: Mark Live Session as Finished! ---
+      // Mark Live Session as Finished!
       if (liveSessionId) {
         await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
       }
@@ -305,16 +302,22 @@ export default function ExamBoard({ student, exam, examSet }) {
     );
   }
 
-  // --- NEW: THE BLACKOUT LOCK SCREEN ---
+  // --- FIX 4: THE STRICT BLACKOUT LOCK SCREEN ---
   if (examStatus === 'locked') {
     return (
-      <div className="app-container prevent-select" style={{ background: '#000', color: '#fff', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '80px', color: '#E74C3C', margin: 0, border: '5px solid #E74C3C', padding: '20px', borderRadius: '10px' }}>🚨 EXAM LOCKED 🚨</h1>
+      <div className="app-container prevent-select" style={{ background: '#000', color: '#fff', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '20px' }}>
+        <h1 style={{ fontSize: '70px', color: '#E74C3C', margin: 0, border: '5px solid #E74C3C', padding: '20px', borderRadius: '10px' }}>🚨 CHEATING DETECTED 🚨</h1>
         <p style={{ fontSize: '26px', marginTop: '30px', fontWeight: 'bold' }}>Your exam has been paused by the system.</p>
-        <p style={{ fontSize: '20px', color: '#E74C3C', margin: '15px 0' }}>Violations Detected: {tabSwitchCount} / 4</p>
-        <p style={{ fontSize: '18px', color: '#ccc', marginTop: '30px', maxWidth: '600px', lineHeight: '1.6' }}>
-          Please raise your hand or contact your instructor. Your timer is still running. Only your instructor can unlock this screen from the master dashboard.
-        </p>
+        <p style={{ fontSize: '20px', color: '#E74C3C', margin: '15px 0' }}>Violations Recorded: {tabSwitchCount}</p>
+        
+        <div style={{ background: '#1a0000', padding: '30px', borderRadius: '8px', border: '1px solid #E74C3C', marginTop: '20px', maxWidth: '700px' }}>
+          <p style={{ fontSize: '18px', color: '#ccc', margin: 0, lineHeight: '1.6' }}>
+            This system has recorded multiple attempts to bypass security protocols. You are now locked out of the exam. 
+            <br/><br/>
+            In accordance with the <strong>Student Handbook</strong>, academic dishonesty and cheating will be sanctioned accordingly. 
+            Your instructor has been notified of this incident. Please raise your hand and wait for further instructions.
+          </p>
+        </div>
       </div>
     );
   }

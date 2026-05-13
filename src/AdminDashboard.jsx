@@ -10,6 +10,9 @@ export default function AdminDashboard({ onLogout }) {
   const [examsList, setExamsList] = useState([]); // Holds full exam data for the Manage tab
   const [examsDict, setExamsDict] = useState({}); // Holds just titles for the Results tab
   const [students, setStudents] = useState({});
+  const [studentsList, setStudentsList] = useState([]); // Holds the array for the table
+  const [liveSessions, setLiveSessions] = useState([]); // NEW: Live Monitor Data
+const [editingStudentSections, setEditingStudentSections] = useState({}); // Holds the input box text
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter States
@@ -18,6 +21,10 @@ export default function AdminDashboard({ onLogout }) {
 
   // Edit Time State
   const [editingTimes, setEditingTimes] = useState({});
+  const [editingSections, setEditingSections] = useState({});
+  // --- NEW: Create Exam States ---
+const [newTitle, setNewTitle] = useState('');
+const [targetSection, setTargetSection] = useState('');
 
   // --- NEW ANALYTICS STATES ---
   const [viewingStudent, setViewingStudent] = useState(null); 
@@ -46,40 +53,75 @@ export default function AdminDashboard({ onLogout }) {
 
   useEffect(() => {
     fetchDashboardData();
+    fetchLiveSessions();
+
+    // --- NEW: The Supabase Realtime Listener ---
+    const channel = supabase.channel('live-monitor')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, payload => {
+        fetchLiveSessions(); // Instantly refresh the screen when a student does something
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); }; // Cleanup when you close the dashboard
   }, []);
 
-  async function fetchDashboardData() {
+  const fetchLiveSessions = async () => {
+    const { data } = await supabase.from('live_sessions').select('*').neq('status', 'finished').order('updated_at', { ascending: false });
+    if (data) setLiveSessions(data);
+  };
+
+  const toggleStudentLock = async (sessionId, currentStatus) => {
+    const newStatus = currentStatus === 'locked' ? 'active' : 'locked';
+    await supabase.from('live_sessions').update({ status: newStatus, updated_at: new Date() }).eq('id', sessionId);
+  };
+
+async function fetchDashboardData() {
     setIsLoading(true);
     try {
       const { data: resultsData } = await supabase.from('results').select('*');
+      const { data: examsData } = await supabase.from('exams').select('id, title, is_open, duration_minutes, target_section').order('created_at', { ascending: true });
       
-      // NEW: We now fetch is_open and duration_minutes as well!
-      const { data: examsData } = await supabase.from('exams').select('id, title, is_open, duration_minutes').order('created_at', { ascending: true });
-      
-      const { data: studentsData } = await supabase.from('users').select('id, full_name, section');
+      // We added an error checker here to see if Supabase is mad at us
+      const { data: studentsData, error: studentError } = await supabase.from('users').select('id, full_name, section');
+
+      // --- DIAGNOSTIC LOGS ---
+      console.log("Students found in database:", studentsData);
+      if (studentError) console.error("Supabase Error:", studentError);
 
       const dict = {};
       const times = {};
+      const secs = {};
       if (examsData) {
         examsData.forEach(e => {
           dict[e.id] = e.title;
-          times[e.id] = e.duration_minutes; // Store initial times for the input boxes
+          times[e.id] = e.duration_minutes; 
+          secs[e.id] = e.target_section || ''; 
         });
         setExamsList(examsData);
         setEditingTimes(times);
+        setEditingSections(secs); 
       }
 
       const studentDict = {};
+      const studentSecs = {}; 
+      
       if (studentsData) {
-        studentsData.forEach(s => {
+        // FIX: We make a clean, unlocked copy of the list using [...array] before sorting
+        const safeStudentsCopy = [...studentsData];
+        safeStudentsCopy.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+
+        safeStudentsCopy.forEach(s => {
           studentDict[s.id] = { 
             name: s.full_name || 'Unknown', 
             section: s.section || 'Unknown' 
           };
+          studentSecs[s.id] = s.section || ''; 
         });
-      }
 
-      setExamsDict(dict);
+        setStudentsList(safeStudentsCopy); // Use the safe copy here
+        setEditingStudentSections(studentSecs); 
+      }
+      
       setStudents(studentDict);
       setResults(resultsData || []);
     } catch (error) {
@@ -103,6 +145,43 @@ const deleteResult = async (studentId, examId) => {
       }
     }
   };
+
+  // --- NEW: Create Exam Function ---
+  const createExam = async () => {
+    if (!newTitle || !targetSection) return alert("Title and Section are required!");
+    setIsLoading(true);
+
+    const { error } = await supabase.from('exams').insert([{ 
+      title: newTitle, 
+      target_section: targetSection,
+      is_open: false, // Exams default to closed when created
+      duration_minutes: 60 // Default 60 mins
+    }]);
+
+    if (error) {
+      console.error(error);
+      alert("Error creating exam.");
+    } else {
+      setNewTitle(''); // Clears the input box
+      setTargetSection(''); // Clears the section box
+      fetchDashboardData(); // Refreshes the list instantly
+      alert("Exam created successfully!");
+    }
+    setIsLoading(false);
+  };
+
+  // --- NEW: Delete Exam ---
+  const deleteExam = async (examId) => {
+    if (window.confirm("🚨 Are you sure? This will delete the exam, its questions, and all student results associated with it forever!")) {
+      const { error } = await supabase.from('exams').delete().eq('id', examId);
+      if (error) {
+        alert("Error deleting exam: " + error.message);
+      } else {
+        fetchDashboardData(); // Refresh the list
+      }
+    }
+  };
+
   // --- NEW: Toggle Exam Open/Close ---
   const toggleExamStatus = async (examId, currentStatus) => {
     const newStatus = !currentStatus;
@@ -129,7 +208,6 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
 
-    // Update Supabase
     const { error } = await supabase.from('exams').update({ duration_minutes: parseInt(newTime) }).eq('id', examId);
     
     if (error) {
@@ -140,6 +218,42 @@ const deleteResult = async (studentId, examId) => {
 
     alert("Time limit updated successfully!");
     setExamsList(prev => prev.map(e => e.id === examId ? { ...e, duration_minutes: parseInt(newTime) } : e));
+  };
+
+  // --- NEW: Save Section Changes ---
+  const saveSection = async (examId) => {
+    const newSection = editingSections[examId] || '';
+    
+    const { error } = await supabase.from('exams').update({ target_section: newSection }).eq('id', examId);
+
+    if (error) {
+      alert("Error saving section. Please try again.");
+      console.error(error);
+      return;
+    }
+
+    alert("Section updated successfully!");
+    setExamsList(prev => prev.map(e => e.id === examId ? { ...e, target_section: newSection } : e));
+  };
+
+  // --- NEW: Save Student Section ---
+  const saveStudentSection = async (studentId) => {
+    const newSection = editingStudentSections[studentId] || '';
+
+    const { error } = await supabase.from('users').update({ section: newSection }).eq('id', studentId);
+
+    if (error) {
+      alert("Error updating student. Please try again.");
+      console.error(error);
+      return;
+    }
+
+    alert("Student section updated successfully!");
+    setStudentsList(prev => prev.map(s => s.id === studentId ? { ...s, section: newSection } : s));
+    setStudents(prev => ({
+      ...prev,
+      [studentId]: { ...prev[studentId], section: newSection }
+    }));
   };
 
   const handleTimeChange = (examId, value) => {
@@ -190,6 +304,21 @@ const deleteResult = async (studentId, examId) => {
           onClick={() => setActiveTab('manage')}
         >
           ⚙️ Manage Exams
+        </button>
+
+        {/* NEW: Manage Students Button */}
+      <button 
+        style={{ background: activeTab === 'students' ? '#27AE60' : '#ccc', color: activeTab === 'students' ? 'white' : '#333', flex: 1 }}
+        onClick={() => setActiveTab('students')}
+      >
+        🧑‍🎓 Manage Students
+      </button>
+      {/* NEW: Live Monitor Button */}
+        <button 
+          style={{ background: activeTab === 'live' ? '#E74C3C' : '#ccc', color: activeTab === 'live' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
+          onClick={() => setActiveTab('live')}
+        >
+          🔴 Live Monitor
         </button>
       </div>
 
@@ -273,82 +402,194 @@ const deleteResult = async (studentId, examId) => {
           </>
         )}
 
-        {/* --- TAB 2: MANAGE EXAMS --- */}
+{/* --- TAB 2: MANAGE EXAMS --- */}
         {activeTab === 'manage' && (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          <>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr style={{ background: '#0A2342', color: 'white' }}>
-                <th style={{ padding: '12px' }}>Exam Title</th>
-                <th style={{ padding: '12px' }}>Status (Switch)</th>
-                <th style={{ padding: '12px' }}>Time Limit (Minutes)</th>
-              </tr>
+              <th style={{ padding: '12px' }}>Exam Title</th>
+              <th style={{ padding: '12px' }}>Target Section</th> {/* NEW */}
+              <th style={{ padding: '12px' }}>Status</th>
+              <th style={{ padding: '12px' }}>Time Limit</th>
+              <th style={{ padding: '12px' }}>Actions</th> {/* NEW */}
+            </tr>
             </thead>
-            <tbody>
-              {examsList.map((exam) => (
-                <tr key={exam.id} style={{ borderBottom: '1px solid #ddd' }}>
-                  <td style={{ padding: '12px', fontWeight: 'bold' }}>{exam.title}</td>
-                  
-                  {/* Neat Toggle Switch */}
-                  <td style={{ padding: '12px' }}>
-                    <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '60px', height: '34px' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={exam.is_open} 
-                        onChange={() => toggleExamStatus(exam.id, exam.is_open)}
-                        style={{ opacity: 0, width: 0, height: 0 }}
-                      />
-                      <span className="slider" style={{ position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: exam.is_open ? '#27AE60' : '#ccc', transition: '.4s', borderRadius: '34px' }}></span>
-                    </label>
-                    <span style={{ marginLeft: '10px', fontWeight: 'bold', color: exam.is_open ? '#27AE60' : '#666' }}>
-                      {exam.is_open ? 'OPEN' : 'CLOSED'}
-                    </span>
-                  </td>
+           <tbody>
+            {examsList.map((exam) => (
+              <tr key={exam.id} style={{ borderBottom: '1px solid #ddd' }}>
+                <td style={{ padding: '12px', fontWeight: 'bold' }}>{exam.title}</td>
 
-                  {/* Smart Time Input with Save Indicator */}
-                  <td style={{ padding: '12px' }}>
-                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                      <input 
-                        type="number" 
-                        value={editingTimes[exam.id]} 
-                        onChange={(e) => handleTimeChange(exam.id, e.target.value)}
-                        style={{ width: '80px', padding: '8px', border: '1px solid #ccc' }}
-                      />
-                      <span>mins</span>
-                      
-                      {/* Only shows SAVE button if the value is different from initial */}
-                      <button 
-  onClick={() => openExamStats(exam.id)}
-  style={{
-    width: 'auto', 
-    padding: '12px 20px', 
-    background: '#8E44AD', 
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontWeight: 'bold',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px'
-  }}
->
-  📊 CLASS STATS
-</button>
-                      
-                      <button 
-                        onClick={() => saveTimeLimit(exam.id)}
-                        style={{ 
-                          background: '#0A2342', color: 'white', opacity: editingTimes[exam.id] != examsList.find(e => e.id === exam.id).duration_minutes ? 1 : 0.5 
-                        }}
-                      >
-                        {editingTimes[exam.id] != examsList.find(e => e.id === exam.id).duration_minutes ? '💾 Save Changes' : '✅ Saved'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
+               {/* UPGRADED: Editable Section Field */}
+                <td style={{ padding: '12px' }}>
+                  <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                    <input 
+                      type="text" 
+                      value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''} 
+                      onChange={(e) => setEditingSections(prev => ({ ...prev, [exam.id]: e.target.value }))}
+                      placeholder="e.g. Aero 101"
+                      style={{ width: '110px', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                    />
+                    <button 
+                      onClick={() => saveSection(exam.id)}
+                      style={{ background: '#8E44AD', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', opacity: editingSections[exam.id] !== examsList.find(e => e.id === exam.id).target_section ? 1 : 0.5 }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </td>
+
+                {/* Toggle Switch */}
+                <td style={{ padding: '12px' }}>
+                  <label className="switch" style={{ position: 'relative', display: 'inline-block', width: '60px', height: '34px' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={exam.is_open} 
+                      onChange={() => toggleExamStatus(exam.id, exam.is_open)}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span className="slider" style={{ position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: exam.is_open ? '#27AE60' : '#ccc', transition: '.4s', borderRadius: '34px' }}></span>
+                  </label>
+                </td>
+
+                {/* Time Input */}
+                <td style={{ padding: '12px' }}>
+                  <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                    <input 
+                      type="number" 
+                      value={editingTimes[exam.id] || ''} 
+                      onChange={(e) => handleTimeChange(exam.id, e.target.value)}
+                      style={{ width: '60px', padding: '6px', border: '1px solid #ccc' }}
+                    />
+                    <span>min</span>
+                    <button 
+                      onClick={() => saveTimeLimit(exam.id)}
+                      style={{ background: '#0A2342', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', opacity: editingTimes[exam.id] != examsList.find(e => e.id === exam.id).duration_minutes ? 1 : 0.5 }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </td>
+
+                {/* NEW: Action Buttons (Stats and Delete) */}
+                <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                  <button 
+                    onClick={() => openExamStats(exam.id)}
+                    style={{ background: '#8E44AD', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    📊 Stats
+                  </button>
+                  <button 
+                    onClick={() => deleteExam(exam.id)}
+                    style={{ background: '#E74C3C', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    🗑️ Delete
+                  </button>
+                </td>
+              </tr>
+))}
+          </tbody>
           </table>
+        </>
+      )}
+
+      {/* --- TAB 3: MANAGE STUDENTS --- */}        {activeTab === 'students' && (
+          <div style={{ background: '#F8F9FA', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
+            <h3 style={{ marginTop: 0, color: '#0A2342' }}>🧑‍🎓 Full Class Roster</h3>
+            <p style={{ color: '#555', marginBottom: '20px' }}>Update student sections below. Use commas for multiple sections (e.g., Aero 101, Math 202).</p>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: '#0A2342', color: 'white' }}>
+                  <th style={{ padding: '12px' }}>Student Name</th>
+                  <th style={{ padding: '12px' }}>Current Section</th>
+                  <th style={{ padding: '12px' }}>Edit Section</th>
+                </tr>
+              </thead>
+              <tbody>
+                {studentsList.map((student, index) => (
+                  <tr key={student.id} style={{ borderBottom: '1px solid #ddd', background: index % 2 === 0 ? '#fdfdfd' : 'white' }}>
+                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#333' }}>
+                      {student.full_name || 'Unknown'}
+                    </td>
+                    <td style={{ padding: '12px', color: '#8E44AD', fontWeight: 'bold' }}>
+                      {student.section || 'No Section'}
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                        <input 
+                          type="text" 
+                          value={editingStudentSections[student.id] !== undefined ? editingStudentSections[student.id] : ''} 
+                          onChange={(e) => setEditingStudentSections(prev => ({ ...prev, [student.id]: e.target.value }))}
+                          placeholder="e.g. Aero 101"
+                          style={{ width: '180px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                        />
+                        <button 
+                          onClick={() => saveStudentSection(student.id)}
+                          style={{ background: '#0A2342', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', opacity: editingStudentSections[student.id] !== student.section ? 1 : 0.5 }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+{/* --- TAB 4: LIVE MONITOR --- */}
+        {activeTab === 'live' && (
+          <div style={{ background: '#FFF9F9', padding: '20px', borderRadius: '8px', border: '2px solid #E74C3C' }}>
+            <h3 style={{ marginTop: 0, color: '#C0392B', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="live-dot" style={{ width: '12px', height: '12px', background: '#E74C3C', borderRadius: '50%', display: 'inline-block' }}></span>
+              Live Exam Monitor
+            </h3>
+            <p style={{ color: '#555', marginBottom: '20px' }}>Watching students currently taking exams. Auto-updates in real-time.</p>
+
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: '#C0392B', color: 'white' }}>
+                  <th style={{ padding: '12px' }}>Student Name</th>
+                  <th style={{ padding: '12px' }}>Status</th>
+                  <th style={{ padding: '12px' }}>Questions Answered</th>
+                  <th style={{ padding: '12px' }}>Tab Violations</th>
+                  <th style={{ padding: '12px' }}>Action (Kill Switch)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {liveSessions.length === 0 ? (
+                  <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center' }}>No students currently taking an exam.</td></tr>
+                ) : (
+                  liveSessions.map(session => (
+                    <tr key={session.id} style={{ borderBottom: '1px solid #ddd', background: session.status === 'locked' ? '#FADBD8' : 'white' }}>
+                      <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.student_name}</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: session.status === 'locked' ? '#E74C3C' : '#27AE60' }}>
+                        {session.status.toUpperCase()}
+                      </td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.answers_count}</td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: session.violation_count >= 2 ? '#E74C3C' : (session.violation_count === 1 ? '#F39C12' : '#27AE60') }}>
+                        {session.violation_count}
+                      </td>
+                      <td style={{ padding: '12px' }}>
+                        <button 
+                          onClick={() => toggleStudentLock(session.id, session.status)}
+                          style={{ 
+                            background: session.status === 'locked' ? '#27AE60' : '#E74C3C', 
+                            color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' 
+                          }}
+                        >
+                          {session.status === 'locked' ? '🔓 UNLOCK EXAM' : '🔒 LOCK EXAM'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
 
       </div>

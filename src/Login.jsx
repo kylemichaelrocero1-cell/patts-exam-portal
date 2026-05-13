@@ -13,6 +13,13 @@ export default function Login({ onLogin }) {
     setIsLoading(true);
     setErrorMsg('');
 
+    // --- INSTRUCTOR SECRET LOGIN ---
+    // Replace these with whatever you want your admin username and password to be
+    if (email.trim() === 'instructor@patts.edu.ph' && studentId.trim() === 'admin123') {
+      onLogin({ id: 'admin-1', role: 'admin', full_name: 'Instructor' });
+      return; 
+    }
+
     try {
       // 2. Updated the database query to search for 'email' and 'student_id'
      // 2. Updated the database query to match your exact CSV headers

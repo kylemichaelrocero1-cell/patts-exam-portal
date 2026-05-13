@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Login from './Login';
 import ExamList from './ExamList';
 import ExamBoard from './ExamBoard';
+import SectionSelector from './SectionSelector';
 import AdminDashboard from './AdminDashboard'; 
 import './index.css';
 
@@ -9,7 +10,8 @@ export default function App() {
   const [student, setStudent] = useState(null);
   const [selectedExam, setSelectedExam] = useState(null); 
   const [examSet, setExamSet] = useState(null); 
-  
+  const [selectedSection, setSelectedSection] = useState(null);
+
   // Admin States
   const [isAdminView, setIsAdminView] = useState(false);
   const [showPasswordScreen, setShowPasswordScreen] = useState(false);
@@ -66,35 +68,39 @@ export default function App() {
     );
   }
 
-  // 3. Normal Student Login Flow
+// --- THE NEW APP ROUTING LOGIC ---
   if (!student) {
-    return (
-      <div>
-        <div style={{ textAlign: 'right', padding: '10px' }}>
-          {/* Triggers our custom screen instead of window.prompt */}
-          <button style={{ background: '#333', color: 'white', width: 'auto', fontSize: '12px' }} onClick={() => setShowPasswordScreen(true)}>
-            Instructor Portal
-          </button>
-        </div>
-        <Login onLogin={setStudent} />
-        
-      </div>
-      
-    );
+    return <Login onLogin={setStudent} />;
+  }
+  // --- THE INSTRUCTOR PORTAL ROUTE ---
+  if (student && student.role === 'admin') {
+    return <AdminDashboard onLogout={() => { setStudent(null); setSelectedSection(null); }} />;
   }
 
-  // 4. Show Exam List
-  if (!selectedExam || !examSet) {
-    return (
-      <ExamList 
-        student={student} 
-        onSelectExam={setSelectedExam} 
-        onSelectSet={setExamSet} 
-        onLogout={() => { setStudent(null); setSelectedExam(null); setExamSet(null); }} 
-      />
-    );
+  // If logged in, but hasn't picked a section yet
+  if (student && !selectedSection) {
+    return <SectionSelector 
+      student={student} 
+      onSelect={setSelectedSection} 
+    />;
   }
 
-  // 5. Show Active Exam
-  return <ExamBoard student={student} exam={selectedExam} examSet={examSet} />;
+// If logged in AND picked a section, but hasn't started an exam
+  if (student && selectedSection && !selectedExam) {
+    return <ExamList 
+      student={student} 
+      selectedSection={selectedSection} 
+      onStartExam={setSelectedExam} 
+      onLogout={() => { setStudent(null); setSelectedSection(null); }} 
+    />;
+  }
+
+  // If an exam is actively running
+  if (selectedExam) {
+    return <ExamBoard 
+      exam={selectedExam} 
+      student={student} 
+      onFinish={() => setSelectedExam(null)} 
+    />;
+  }
 }

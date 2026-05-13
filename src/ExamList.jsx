@@ -1,28 +1,41 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function ExamList({ student, onSelectExam, onSelectSet, onLogout }) {
-  const [exams, setExams] = useState([]);
+export default function ExamList({ student, selectedSection, onStartExam, onLogout }) {  const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]); 
   const [isLoading, setIsLoading] = useState(true);
 
+  // 1. We added selectedSection to the brackets here so it updates when the section changes
   useEffect(() => {
-    async function loadPortalData() {
-      setIsLoading(true);
-      try {
-        const { data: examsData } = await supabase.from('exams').select('*').eq('is_open', true);
-        const { data: resultsData } = await supabase.from('results').select('exam_id').eq('student_id', student.id);
+    fetchExams();
+  }, [selectedSection]); 
 
-        if (examsData) setExams(examsData);
-        if (resultsData) setCompletedExams(resultsData.map(r => r.exam_id));
-      } catch (err) {
-        console.error("Error loading portal:", err);
-      } finally {
-        setIsLoading(false);
-      }
+  const fetchExams = async () => {
+    setIsLoading(true);
+
+    // 1. Fetch the exams for this section
+    const { data: examsData } = await supabase
+      .from('exams')
+      .select('*')
+      .eq('target_section', selectedSection)
+      .order('created_at', { ascending: false });
+
+    if (examsData) setExams(examsData);
+
+    // 2. NEW: Fetch this student's results to see what they already finished!
+    const { data: resultsData } = await supabase
+      .from('results')
+      .select('exam_id')
+      .eq('student_id', student.id);
+
+    if (resultsData) {
+      // Extract just the exam IDs into an array and save them to the lock-out list
+      const finishedIds = resultsData.map(r => r.exam_id);
+      setCompletedExams(finishedIds);
     }
-    loadPortalData();
-  }, [student.id]);
+
+    setIsLoading(false);
+  };
 
   if (isLoading) return <h2 style={{ textAlign: 'center', marginTop: '100px', color: '#0A2342' }}>Loading Exams...</h2>;
 
@@ -85,7 +98,7 @@ export default function ExamList({ student, onSelectExam, onSelectSet, onLogout 
                       </div>
                     ) : (
                       <div style={{ display: 'flex', gap: '15px' }}>
-                        {/* CHANGED: Set A Button - Explicit White Text on Navy */}
+                        {/* Restored Set A Button (Formality) */}
                         <button 
                           style={{ 
                             width: 'auto', 
@@ -95,13 +108,15 @@ export default function ExamList({ student, onSelectExam, onSelectSet, onLogout 
                             fontWeight: 'bold',
                             fontSize: '15px',
                             border: 'none',
-                            borderRadius: '6px'
+                            borderRadius: '6px',
+                            cursor: 'pointer'
                           }} 
-                          onClick={() => { onSelectExam(exam); onSelectSet('A'); }}
+                          onClick={() => onStartExam(exam)}
                         >
                           Start Set A
                         </button>
-                        {/* CHANGED: Set B Button - Explicit White Text on Gray-Blue */}
+                        
+                        {/* Restored Set B Button (Formality) */}
                         <button 
                           style={{ 
                             width: 'auto', 
@@ -111,9 +126,10 @@ export default function ExamList({ student, onSelectExam, onSelectSet, onLogout 
                             fontWeight: 'bold',
                             fontSize: '15px',
                             border: 'none',
-                            borderRadius: '6px'
+                            borderRadius: '6px',
+                            cursor: 'pointer'
                           }} 
-                          onClick={() => { onSelectExam(exam); onSelectSet('B'); }}
+                          onClick={() => onStartExam(exam)}
                         >
                           Start Set B
                         </button>

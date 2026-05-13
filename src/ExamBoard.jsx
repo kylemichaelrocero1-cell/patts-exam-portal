@@ -24,7 +24,12 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [questions, setQuestions] = useState([]); 
   const [isLoading, setIsLoading] = useState(true); 
   const [scoreDisplay, setScoreDisplay] = useState(null); 
-// --- CLONE GUARD: Check for multiple logins ---
+
+  // --- NEW: LIVE PROCTORING STATES ---
+  const [examStatus, setExamStatus] = useState('active'); // 'active' or 'locked'
+  const [liveSessionId, setLiveSessionId] = useState(null);
+
+  // --- CLONE GUARD: Check for multiple logins ---
   useEffect(() => {
     const checkSession = setInterval(async () => {
       const localToken = localStorage.getItem('local_session_token');
@@ -32,7 +37,6 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       const { data } = await supabase.from('users').select('session_token').eq('id', student.id).single();
       
-      // THE FIX: We added "data.session_token" here so it ignores empty database results
       if (data && data.session_token && data.session_token !== localToken) {
         clearInterval(checkSession);
         alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
@@ -46,16 +50,89 @@ export default function ExamBoard({ student, exam, examSet }) {
   // SUBMISSION CONTROLS
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [confirmText, setConfirmText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false); // THE GUARD
+  const [isSubmitting, setIsSubmitting] = useState(false); 
 
-  // --- 2. AUTO-SAVER ---
+  // --- NEW: LIVE SESSION INITIALIZATION & LISTENER ---
+  useEffect(() => {
+    if (!student?.id || !exam?.id) return;
+    let channel;
+
+    const initLiveSession = async () => {
+      // 1. Check if a live session already exists for this attempt
+      const { data: existing } = await supabase.from('live_sessions')
+        .select('*').eq('student_id', student.id).eq('exam_id', exam.id).single();
+
+      let currentSessionId;
+
+      if (existing) {
+        currentSessionId = existing.id;
+        setExamStatus(existing.status);
+        // If they refresh the page to try and escape a lock, enforce the 4-violation rule immediately
+        if (existing.violation_count >= 4) setExamStatus('locked');
+      } else {
+        // 2. Create a new tracking session
+        const { data: newSession } = await supabase.from('live_sessions').insert([{
+          student_id: student.id,
+          exam_id: exam.id,
+          student_name: student.full_name,
+          status: 'active',
+          violation_count: tabSwitchCount,
+          answers_count: Object.keys(answers).length
+        }]).select().single();
+        if (newSession) currentSessionId = newSession.id;
+      }
+
+      setLiveSessionId(currentSessionId);
+
+      // 3. Start listening to the Instructor's Dashboard
+      if (currentSessionId) {
+        channel = supabase.channel(`session-${currentSessionId}`)
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_sessions', filter: `id=eq.${currentSessionId}` }, 
+          payload => {
+            if (payload.new.status === 'locked') setExamStatus('locked');
+            else if (payload.new.status === 'active') setExamStatus('active');
+          }).subscribe();
+      }
+    };
+
+    initLiveSession();
+
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [student?.id, exam?.id]);
+
+  // --- NEW: LIVE DATA PUSHER (Sends updates to dashboard) ---
+  useEffect(() => {
+    if (!liveSessionId) return;
+    
+    const pushUpdates = async () => {
+      let currentStatus = examStatus;
+      
+      // AUTO-LOCK RULE: 4 Strikes and you are out!
+      if (tabSwitchCount >= 4) {
+        currentStatus = 'locked';
+        setExamStatus('locked');
+      }
+
+      // Send the current stats to the database so the instructor can see them
+      await supabase.from('live_sessions').update({
+        answers_count: Object.keys(answers).length,
+        violation_count: tabSwitchCount,
+        status: currentStatus,
+        updated_at: new Date()
+      }).eq('id', liveSessionId);
+    };
+
+    pushUpdates();
+  }, [answers, tabSwitchCount, liveSessionId]);
+
+  // --- AUTO-SAVER ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting) return; 
     const progressData = { answers, tabSwitchCount, endTime };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
   }, [answers, tabSwitchCount, endTime, storageKey, scoreDisplay, isSubmitting]);
 
-  // --- 3. TIMER & CLOCK ---
+  // --- TIMER & CLOCK ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting) return; 
     const timer = setInterval(() => {
@@ -67,24 +144,20 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => clearInterval(timer);
   }, [scoreDisplay, endTime, isSubmitting]);
 
-  // --- 4. SAFE AUTO-SUBMIT TRIGGER ---
+  // --- SAFE AUTO-SUBMIT TRIGGER ---
   useEffect(() => {
-    // Only fire if time is 0 AND we aren't already in the middle of a submission
     if (timeLeft === 0 && !scoreDisplay && !isSubmitting && !isLoading) {
-      console.log("⏱️ Time up! Triggering auto-submit...");
       executeSubmission();
     }
   }, [timeLeft, scoreDisplay, isSubmitting, isLoading]);
 
- // --- UPGRADED ANTI-CHEAT: Tracks Specific Violations with Timestamps ---
+  // --- UPGRADED ANTI-CHEAT: Tracks Specific Violations ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting) return; 
+    if (scoreDisplay || isSubmitting || examStatus === 'locked') return; 
 
-    // Helper function to record the exact time and reason
     const logViolation = (reason) => {
       const timeStr = new Date().toLocaleTimeString();
       const logEntry = `[${timeStr}] ${reason}`;
-      
       setViolationLogs(prev => [...prev, logEntry]);
       setTabSwitchCount(prev => prev + 1);
     };
@@ -96,9 +169,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
     };
 
-    const handleBlur = () => {
-      logViolation("Screen lost focus (Split-screen or notifications opened)");
-    };
+    const handleBlur = () => logViolation("Screen lost focus (Split-screen or notifications opened)");
 
     const handleKeyDown = (e) => {
       const forbidden = e.key === 'PrintScreen' || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey);
@@ -118,21 +189,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [scoreDisplay, isSubmitting]);
-
-  useEffect(() => {
-    if (scoreDisplay || isSubmitting) return;
-    const handleKeyDown = (e) => {
-      const forbidden = e.key === 'PrintScreen' || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey);
-      if (forbidden) {
-        e.preventDefault();
-        setTabSwitchCount(prev => prev + 1);
-        alert("⚠️ SECURITY VIOLATION: Screenshot/Print disabled.");
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [scoreDisplay, isSubmitting]);
+  }, [scoreDisplay, isSubmitting, examStatus]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
@@ -149,10 +206,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       if (error) {
         console.error("Error loading questions:", error);
       } else if (data) {
-        // --- SEEDED SHUFFLE LOGIC ---
-        // Uses the student's unique ID to scramble the questions the exact same way every time
         let seed = student?.id ? student.id.charCodeAt(0) + student.id.charCodeAt(student.id.length - 1) : 123;
-        
         const seededRandom = () => {
           let x = Math.sin(seed++) * 10000;
           return x - Math.floor(x);
@@ -164,7 +218,6 @@ export default function ExamBoard({ student, exam, examSet }) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // ---> NEW: Shuffle the A, B, C, D choices for each question <---
         shuffled = shuffled.map(q => {
           let letters = ['a', 'b', 'c', 'd'];
           for (let i = letters.length - 1; i > 0; i--) {
@@ -181,39 +234,28 @@ export default function ExamBoard({ student, exam, examSet }) {
     loadQuestions();
   }, [exam?.id, student?.id]);
 
-  // --- 6. THE FIXED SUBMISSION LOGIC ---
   const executeSubmission = async () => {
-    if (isSubmitting) return; // DOOR IS LOCKED - no double submission!
+    if (isSubmitting) return; 
     
     setIsSubmitting(true);
     setIsLoading(true);
 
     try {
-      // 1. Calculate Score
       const { data: answerKey } = await supabase.from('questions').select('id, correct_answer').eq('exam_id', exam.id);
-     let correctCount = 0;
+      let correctCount = 0;
       const formattedAnswers = {};
 
       Object.keys(answers).forEach(qId => {
-        // FIX 1: Force both IDs to be strings so they match perfectly, even if they are UUIDs
         const questionData = answerKey.find(item => String(item.id) === String(qId));
-        
         if (questionData) {
-          // FIX 2: Force both answers to be Numbers (0, 1, 2, or 3) so strict equality doesn't fail
           const correctValue = Number(questionData.correct_answer);
           const studentValue = Number(answers[qId]);
-
           const isCorrect = studentValue === correctValue;
           if (isCorrect) correctCount++;
-
-          formattedAnswers[qId] = { 
-            chosen: studentValue, 
-            is_correct: isCorrect 
-          };
+          formattedAnswers[qId] = { chosen: studentValue, is_correct: isCorrect };
         }
       });
 
-      // 2. Save to Supabase
       const { error: saveError } = await supabase.from('results').insert([{
         student_id: student?.id,
         exam_id: exam.id,
@@ -227,18 +269,17 @@ export default function ExamBoard({ student, exam, examSet }) {
 
       if (saveError) throw saveError;
 
-      // 3. Clear Local Data
+      // --- NEW: Mark Live Session as Finished! ---
+      if (liveSessionId) {
+        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
+      }
+
       localStorage.removeItem(storageKey);
       setScoreDisplay({ score: correctCount, total: questions.length });
 
     } catch (err) {
-      console.error("Submission Error:", err);
-      // If it's the 'already exists' error, just show the finish screen anyway
-      if (err.code === '23505') {
-        setScoreDisplay({ score: 0, total: questions.length });
-      } else {
-        alert("There was an error saving your exam. Please contact your instructor.");
-      }
+      if (err.code === '23505') setScoreDisplay({ score: 0, total: questions.length });
+      else alert("There was an error saving your exam. Please contact your instructor.");
     } finally {
       setIsLoading(false);
       setIsSubmitting(false);
@@ -260,6 +301,20 @@ export default function ExamBoard({ student, exam, examSet }) {
           </div>
           <button onClick={() => window.location.reload()}>Log Out</button>
         </div>
+      </div>
+    );
+  }
+
+  // --- NEW: THE BLACKOUT LOCK SCREEN ---
+  if (examStatus === 'locked') {
+    return (
+      <div className="app-container prevent-select" style={{ background: '#000', color: '#fff', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '80px', color: '#E74C3C', margin: 0, border: '5px solid #E74C3C', padding: '20px', borderRadius: '10px' }}>🚨 EXAM LOCKED 🚨</h1>
+        <p style={{ fontSize: '26px', marginTop: '30px', fontWeight: 'bold' }}>Your exam has been paused by the system.</p>
+        <p style={{ fontSize: '20px', color: '#E74C3C', margin: '15px 0' }}>Violations Detected: {tabSwitchCount} / 4</p>
+        <p style={{ fontSize: '18px', color: '#ccc', marginTop: '30px', maxWidth: '600px', lineHeight: '1.6' }}>
+          Please raise your hand or contact your instructor. Your timer is still running. Only your instructor can unlock this screen from the master dashboard.
+        </p>
       </div>
     );
   }
@@ -314,7 +369,6 @@ export default function ExamBoard({ student, exam, examSet }) {
           <p style={{ fontSize: '18px', minHeight: '80px' }}>{currentQ?.question_text}</p>
         <div className="choices">
             {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
-              // We grab the original index (0,1,2,3) so the database grading math doesn't break!
               const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
               return (
                 <button 

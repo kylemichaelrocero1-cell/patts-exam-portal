@@ -10,14 +10,15 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     fetchExams();
   }, [selectedSection]); 
 
-  const fetchExams = async () => {
+const fetchExams = async () => {
     setIsLoading(true);
 
-    // 1. Fetch the exams for this section
+    // 1. Fetch the exams for this section THAT ARE OPEN
     const { data: examsData } = await supabase
       .from('exams')
       .select('*')
       .eq('target_section', selectedSection)
+      .eq('is_open', true) // <--- THIS IS THE MAGIC FIX LINE
       .order('created_at', { ascending: false });
 
     if (examsData) setExams(examsData);

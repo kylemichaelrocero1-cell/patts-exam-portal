@@ -12,7 +12,13 @@ export default function AdminDashboard({ onLogout }) {
   const [students, setStudents] = useState({});
   const [studentsList, setStudentsList] = useState([]); // Holds the array for the table
   const [liveSessions, setLiveSessions] = useState([]); // NEW: Live Monitor Data
-const [editingStudentSections, setEditingStudentSections] = useState({}); // Holds the input box text
+const [editingStudentSections, setEditingStudentSections] = useState({});
+  const [selectedStudentIds, setSelectedStudentIds] = useState(new Set());
+  const [batchSection, setBatchSection] = useState('');
+  const [isBatchSaving, setIsBatchSaving] = useState(false);
+  const [liveSort, setLiveSort] = useState('name');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter States
@@ -55,24 +61,90 @@ const [targetSection, setTargetSection] = useState('');
     fetchDashboardData();
     fetchLiveSessions();
 
-    // --- NEW: The Supabase Realtime Listener ---
-    const channel = supabase.channel('live-monitor')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'live_sessions' }, payload => {
-        fetchLiveSessions(); // Instantly refresh the screen when a student does something
+    const channel = supabase.channel('admin-realtime')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_sessions' }, payload => {
+        if (payload.new.status === 'finished') {
+          // Student submitted — remove from monitor
+          setLiveSessions(prev => prev.filter(s => s.id !== payload.new.id));
+          return;
+        }
+        setLiveSessions(prev => {
+          const exists = prev.some(s => s.id === payload.new.id);
+          if (exists) {
+            // Normal in-place update — preserves row order
+            return prev.map(s => s.id === payload.new.id ? { ...s, ...payload.new } : s);
+          }
+          // Session was dismissed but student is still active — restore it
+          return [...prev, payload.new];
+        });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_sessions' }, payload => {
+        if (payload.new.status !== 'finished') {
+          setLiveSessions(prev => [...prev, payload.new]);
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'live_sessions' }, payload => {
+        setLiveSessions(prev => prev.filter(s => s.id !== payload.old.id));
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'results' }, payload => {
+        setResults(prev => [...prev, payload.new]);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'results' }, payload => {
+        setResults(prev => prev.map(r =>
+          r.student_id === payload.new.student_id && r.exam_id === payload.new.exam_id
+            ? { ...r, ...payload.new }
+            : r
+        ));
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'results' }, payload => {
+        setResults(prev => prev.filter(r =>
+          !(r.student_id === payload.old.student_id && r.exam_id === payload.old.exam_id)
+        ));
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); }; // Cleanup when you close the dashboard
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchLiveSessions = async () => {
-    const { data } = await supabase.from('live_sessions').select('*').neq('status', 'finished').order('updated_at', { ascending: false });
-    if (data) setLiveSessions(data);
+    const { data } = await supabase.from('live_sessions').select('*').neq('status', 'finished');
+    if (data) {
+      setLiveSessions([...data].sort((a, b) => (a.student_name || '').localeCompare(b.student_name || '')));
+    }
   };
 
   const toggleStudentLock = async (sessionId, currentStatus) => {
     const newStatus = currentStatus === 'locked' ? 'active' : 'locked';
     await supabase.from('live_sessions').update({ status: newStatus, updated_at: new Date() }).eq('id', sessionId);
+  };
+
+  const applyLiveSort = (sortBy) => {
+    setLiveSort(sortBy);
+    setLiveSessions(prev => [...prev].sort((a, b) => {
+      if (sortBy === 'section') {
+        const secA = students[a.student_id]?.section || '';
+        const secB = students[b.student_id]?.section || '';
+        const cmp = secA.localeCompare(secB);
+        if (cmp !== 0) return cmp;
+      }
+      return (a.student_name || '').localeCompare(b.student_name || '');
+    }));
+  };
+
+  const dismissSession = async (sessionId) => {
+    await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
+    setLiveSessions(prev => prev.filter(s => s.id !== sessionId));
+  };
+
+  const clearStuckSessions = async () => {
+    const stuckIds = liveSessions
+      .filter(s => results.some(r => r.student_id === s.student_id && r.exam_id === s.exam_id))
+      .map(s => s.id);
+    if (stuckIds.length === 0) return alert("No stuck sessions found.");
+    await supabase.from('live_sessions').update({ status: 'finished' }).in('id', stuckIds);
+    setLiveSessions(prev => prev.filter(s => !stuckIds.includes(s.id)));
   };
 
 async function fetchDashboardData() {
@@ -98,8 +170,9 @@ async function fetchDashboardData() {
           secs[e.id] = e.target_section || ''; 
         });
         setExamsList(examsData);
+        setExamsDict(dict);
         setEditingTimes(times);
-        setEditingSections(secs); 
+        setEditingSections(secs);
       }
 
       const studentDict = {};
@@ -256,6 +329,35 @@ const deleteResult = async (studentId, examId) => {
     }));
   };
 
+  const batchUpdateSection = async () => {
+    if (selectedStudentIds.size === 0) return alert("Please select at least one student.");
+    if (!batchSection.trim()) return alert("Please enter a section name.");
+    if (!window.confirm(`Assign "${batchSection}" to ${selectedStudentIds.size} student(s)?`)) return;
+
+    setIsBatchSaving(true);
+    const ids = [...selectedStudentIds];
+    const { error } = await supabase.from('users').update({ section: batchSection.trim() }).in('id', ids);
+
+    if (error) {
+      alert("Error updating students: " + error.message);
+    } else {
+      setStudentsList(prev => prev.map(s => selectedStudentIds.has(s.id) ? { ...s, section: batchSection.trim() } : s));
+      setStudents(prev => {
+        const updated = { ...prev };
+        ids.forEach(id => { if (updated[id]) updated[id] = { ...updated[id], section: batchSection.trim() }; });
+        return updated;
+      });
+      setEditingStudentSections(prev => {
+        const updated = { ...prev };
+        ids.forEach(id => { updated[id] = batchSection.trim(); });
+        return updated;
+      });
+      setSelectedStudentIds(new Set());
+      setBatchSection('');
+    }
+    setIsBatchSaving(false);
+  };
+
   const handleTimeChange = (examId, value) => {
     setEditingTimes(prev => ({ ...prev, [examId]: value }));
   };
@@ -287,8 +389,29 @@ const deleteResult = async (studentId, examId) => {
   return (
     <div className="app-container" style={{ padding: '40px', minHeight: '100vh', background: '#f4f6f8' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', background: '#0A2342', padding: '20px', borderRadius: '8px' }}>
-        <h1 style={{ margin: 0, color: 'white' }}>Instructor Dashboard</h1>
-        <button style={{ background: '#E74C3C', width: 'auto' }} onClick={onLogout}>Close Portal</button>
+        <div>
+          <h1 style={{ margin: 0, color: 'white' }}>Instructor Dashboard</h1>
+          {lastRefreshed && (
+            <p style={{ margin: '4px 0 0', color: '#aac4e0', fontSize: '12px' }}>
+              Last refreshed: {lastRefreshed}
+            </p>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            style={{ background: '#2980B9', width: 'auto', opacity: isRefreshing ? 0.7 : 1 }}
+            disabled={isRefreshing}
+            onClick={async () => {
+              setIsRefreshing(true);
+              await Promise.all([fetchDashboardData(), fetchLiveSessions()]);
+              setLastRefreshed(new Date().toLocaleTimeString());
+              setIsRefreshing(false);
+            }}
+          >
+            {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+          </button>
+          <button style={{ background: '#E74C3C', width: 'auto' }} onClick={onLogout}>Close Portal</button>
+        </div>
       </header>
 
       {/* TABS NAVIGATION */}
@@ -494,103 +617,212 @@ const deleteResult = async (studentId, examId) => {
         </>
       )}
 
-      {/* --- TAB 3: MANAGE STUDENTS --- */}        {activeTab === 'students' && (
+      {/* --- TAB 3: MANAGE STUDENTS --- */}
+        {activeTab === 'students' && (
           <div style={{ background: '#F8F9FA', padding: '20px', borderRadius: '8px', border: '1px solid #ddd' }}>
             <h3 style={{ marginTop: 0, color: '#0A2342' }}>🧑‍🎓 Full Class Roster</h3>
-            <p style={{ color: '#555', marginBottom: '20px' }}>Update student sections below. Use commas for multiple sections (e.g., Aero 101, Math 202).</p>
+
+            {/* BATCH EDIT BAR */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', padding: '15px', background: selectedStudentIds.size > 0 ? '#EAF4FB' : '#fff', border: `2px solid ${selectedStudentIds.size > 0 ? '#3498DB' : '#ddd'}`, borderRadius: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 'bold', color: '#0A2342', minWidth: '160px' }}>
+                {selectedStudentIds.size > 0 ? `${selectedStudentIds.size} student(s) selected` : 'Select students to batch edit'}
+              </span>
+              <input
+                type="text"
+                value={batchSection}
+                onChange={e => setBatchSection(e.target.value)}
+                placeholder="New section (e.g. Aero 101)"
+                style={{ flex: 1, minWidth: '180px', padding: '9px 12px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px' }}
+              />
+              <button
+                onClick={batchUpdateSection}
+                disabled={isBatchSaving || selectedStudentIds.size === 0 || !batchSection.trim()}
+                style={{ background: selectedStudentIds.size > 0 && batchSection.trim() ? '#27AE60' : '#aaa', color: 'white', border: 'none', padding: '9px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: selectedStudentIds.size > 0 && batchSection.trim() ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}
+              >
+                {isBatchSaving ? 'Saving...' : 'Apply to Selected'}
+              </button>
+              {selectedStudentIds.size > 0 && (
+                <button
+                  onClick={() => setSelectedStudentIds(new Set())}
+                  style={{ background: '#E74C3C', color: 'white', border: 'none', padding: '9px 14px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: '#0A2342', color: 'white' }}>
+                  <th style={{ padding: '12px', width: '40px' }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      checked={studentsList.length > 0 && selectedStudentIds.size === studentsList.length}
+                      onChange={e => {
+                        if (e.target.checked) setSelectedStudentIds(new Set(studentsList.map(s => s.id)));
+                        else setSelectedStudentIds(new Set());
+                      }}
+                    />
+                  </th>
                   <th style={{ padding: '12px' }}>Student Name</th>
                   <th style={{ padding: '12px' }}>Current Section</th>
-                  <th style={{ padding: '12px' }}>Edit Section</th>
+                  <th style={{ padding: '12px' }}>Edit Section (Individual)</th>
                 </tr>
               </thead>
               <tbody>
-                {studentsList.map((student, index) => (
-                  <tr key={student.id} style={{ borderBottom: '1px solid #ddd', background: index % 2 === 0 ? '#fdfdfd' : 'white' }}>
-                    <td style={{ padding: '12px', fontWeight: 'bold', color: '#333' }}>
-                      {student.full_name || 'Unknown'}
-                    </td>
-                    <td style={{ padding: '12px', color: '#8E44AD', fontWeight: 'bold' }}>
-                      {student.section || 'No Section'}
-                    </td>
-                    <td style={{ padding: '12px' }}>
-                      <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                        <input 
-                          type="text" 
-                          value={editingStudentSections[student.id] !== undefined ? editingStudentSections[student.id] : ''} 
-                          onChange={(e) => setEditingStudentSections(prev => ({ ...prev, [student.id]: e.target.value }))}
-                          placeholder="e.g. Aero 101"
-                          style={{ width: '180px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                {studentsList.map((student, index) => {
+                  const isChecked = selectedStudentIds.has(student.id);
+                  return (
+                    <tr
+                      key={student.id}
+                      style={{ borderBottom: '1px solid #ddd', background: isChecked ? '#D6EAF8' : index % 2 === 0 ? '#fdfdfd' : 'white', cursor: 'pointer' }}
+                      onClick={() => {
+                        setSelectedStudentIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(student.id)) next.delete(student.id);
+                          else next.add(student.id);
+                          return next;
+                        });
+                      }}
+                    >
+                      <td style={{ padding: '12px' }} onClick={e => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                          checked={isChecked}
+                          onChange={() => {
+                            setSelectedStudentIds(prev => {
+                              const next = new Set(prev);
+                              if (next.has(student.id)) next.delete(student.id);
+                              else next.add(student.id);
+                              return next;
+                            });
+                          }}
                         />
-                        <button 
-                          onClick={() => saveStudentSection(student.id)}
-                          style={{ background: '#0A2342', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', opacity: editingStudentSections[student.id] !== student.section ? 1 : 0.5 }}
-                        >
-                          Save
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ padding: '12px', fontWeight: 'bold', color: '#333' }}>
+                        {student.full_name || 'Unknown'}
+                      </td>
+                      <td style={{ padding: '12px', color: '#8E44AD', fontWeight: 'bold' }}>
+                        {student.section || 'No Section'}
+                      </td>
+                      <td style={{ padding: '12px' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            value={editingStudentSections[student.id] !== undefined ? editingStudentSections[student.id] : ''}
+                            onChange={(e) => setEditingStudentSections(prev => ({ ...prev, [student.id]: e.target.value }))}
+                            placeholder="e.g. Aero 101"
+                            style={{ width: '180px', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+                          />
+                          <button
+                            onClick={() => saveStudentSection(student.id)}
+                            style={{ background: '#0A2342', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', opacity: editingStudentSections[student.id] !== student.section ? 1 : 0.5 }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
 
 {/* --- TAB 4: LIVE MONITOR --- */}
-        {activeTab === 'live' && (
-          <div style={{ background: '#FFF9F9', padding: '20px', borderRadius: '8px', border: '2px solid #E74C3C' }}>
-            <h3 style={{ marginTop: 0, color: '#C0392B', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span className="live-dot" style={{ width: '12px', height: '12px', background: '#E74C3C', borderRadius: '50%', display: 'inline-block' }}></span>
-              Live Exam Monitor
-            </h3>
-            <p style={{ color: '#555', marginBottom: '20px' }}>Watching students currently taking exams. Auto-updates in real-time.</p>
+        {activeTab === 'live' && (() => {
+          // Hide sessions only when BOTH a result exists AND the session is not actively locked/being watched
+          // Keeps students visible if they are still in the exam even if a stale result exists
+          const activeSessions = liveSessions.filter(s => {
+            const hasResult = results.some(r => r.student_id === s.student_id && r.exam_id === s.exam_id);
+            // If locked, always keep visible so instructor can manage them
+            if (s.status === 'locked') return true;
+            return !hasResult;
+          });
+          const stuckCount = liveSessions.length - activeSessions.length;
 
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: '#C0392B', color: 'white' }}>
-                  <th style={{ padding: '12px' }}>Student Name</th>
-                  <th style={{ padding: '12px' }}>Status</th>
-                  <th style={{ padding: '12px' }}>Questions Answered</th>
-                  <th style={{ padding: '12px' }}>Tab Violations</th>
-                  <th style={{ padding: '12px' }}>Action (Kill Switch)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveSessions.length === 0 ? (
-                  <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center' }}>No students currently taking an exam.</td></tr>
-                ) : (
-                  liveSessions.map(session => (
-                    <tr key={session.id} style={{ borderBottom: '1px solid #ddd', background: session.status === 'locked' ? '#FADBD8' : 'white' }}>
-                      <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.student_name}</td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: session.status === 'locked' ? '#E74C3C' : '#27AE60' }}>
-                        {session.status.toUpperCase()}
-                      </td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.answers_count}</td>
-                      <td style={{ padding: '12px', fontWeight: 'bold', color: session.violation_count >= 2 ? '#E74C3C' : (session.violation_count === 1 ? '#F39C12' : '#27AE60') }}>
-                        {session.violation_count}
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <button 
-                          onClick={() => toggleStudentLock(session.id, session.status)}
-                          style={{ 
-                            background: session.status === 'locked' ? '#27AE60' : '#E74C3C', 
-                            color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' 
-                          }}
-                        >
-                          {session.status === 'locked' ? '🔓 UNLOCK EXAM' : '🔒 LOCK EXAM'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
+          return (
+            <div style={{ background: '#FFF9F9', padding: '20px', borderRadius: '8px', border: '2px solid #E74C3C' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
+                <h3 style={{ margin: 0, color: '#C0392B', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ width: '12px', height: '12px', background: '#E74C3C', borderRadius: '50%', display: 'inline-block' }}></span>
+                  Live Exam Monitor
+                </h3>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#555', fontWeight: 'bold' }}>Sort:</span>
+                  <button
+                    onClick={() => applyLiveSort('name')}
+                    style={{ background: liveSort === 'name' ? '#0A2342' : '#ddd', color: liveSort === 'name' ? 'white' : '#333', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                  >
+                    A–Z Name
+                  </button>
+                  <button
+                    onClick={() => applyLiveSort('section')}
+                    style={{ background: liveSort === 'section' ? '#0A2342' : '#ddd', color: liveSort === 'section' ? 'white' : '#333', border: 'none', padding: '6px 14px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                  >
+                    By Section
+                  </button>
+                  {stuckCount > 0 && (
+                    <button
+                      onClick={clearStuckSessions}
+                      style={{ background: '#8E44AD', color: 'white', border: 'none', padding: '6px 14px', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                    >
+                      Clear {stuckCount} Finished
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p style={{ color: '#555', marginBottom: '20px' }}>Order is locked once set — student data updates in place without shuffling rows.</p>
+
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ background: '#C0392B', color: 'white' }}>
+                    <th style={{ padding: '12px' }}>Student Name</th>
+                    <th style={{ padding: '12px' }}>Status</th>
+                    <th style={{ padding: '12px' }}>Questions Answered</th>
+                    <th style={{ padding: '12px' }}>Tab Violations</th>
+                    <th style={{ padding: '12px' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeSessions.length === 0 ? (
+                    <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center' }}>No students currently taking an exam.</td></tr>
+                  ) : (
+                    activeSessions.map(session => (
+                      <tr key={session.id} style={{ borderBottom: '1px solid #ddd', background: session.status === 'locked' ? '#FADBD8' : 'white' }}>
+                        <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.student_name}</td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: session.status === 'locked' ? '#E74C3C' : '#27AE60' }}>
+                          {session.status.toUpperCase()}
+                        </td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.answers_count}</td>
+                        <td style={{ padding: '12px', fontWeight: 'bold', color: session.violation_count >= 2 ? '#E74C3C' : (session.violation_count === 1 ? '#F39C12' : '#27AE60') }}>
+                          {session.violation_count}
+                        </td>
+                        <td style={{ padding: '12px', display: 'flex', gap: '8px' }}>
+                          <button
+                            onClick={() => toggleStudentLock(session.id, session.status)}
+                            style={{ background: session.status === 'locked' ? '#27AE60' : '#E74C3C', color: 'white', border: 'none', padding: '8px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            {session.status === 'locked' ? '🔓 UNLOCK' : '🔒 LOCK'}
+                          </button>
+                          <button
+                            onClick={() => dismissSession(session.id)}
+                            style={{ background: '#95A5A6', color: 'white', border: 'none', padding: '8px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+                          >
+                            Dismiss
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
 
       </div>
 {/* ========================================= */}

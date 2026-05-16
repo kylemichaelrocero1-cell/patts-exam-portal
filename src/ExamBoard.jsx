@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 
 export default function ExamBoard({ student, exam, examSet }) {
@@ -8,15 +8,16 @@ export default function ExamBoard({ student, exam, examSet }) {
   // --- 1. INITIAL STATE ---
   const [initialState] = useState(() => {
     const saved = localStorage.getItem(storageKey);
-    if (saved) return JSON.parse(saved); 
-    const newProgress = { answers: {}, tabSwitchCount: 0, endTime: Date.now() + (startingSeconds * 1000) };
+    if (saved) return JSON.parse(saved);
+    const newProgress = { answers: {}, tabSwitchCount: 0, violationLogs: [], examStatus: 'active', endTime: Date.now() + (startingSeconds * 1000) };
     localStorage.setItem(storageKey, JSON.stringify(newProgress));
     return newProgress;
   });
 
   const [answers, setAnswers] = useState(initialState.answers);
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
-  const [violationLogs, setViolationLogs] = useState([]);
+  // Bug fix: restore violation logs from localStorage so they survive page refreshes
+  const [violationLogs, setViolationLogs] = useState(initialState.violationLogs || []);
   const endTime = initialState.endTime; 
   const [timeLeft, setTimeLeft] = useState(startingSeconds);
   const [localTime, setLocalTime] = useState(new Date().toLocaleTimeString()); 
@@ -26,8 +27,16 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [scoreDisplay, setScoreDisplay] = useState(null); 
 
   // --- LIVE PROCTORING STATES ---
-  const [examStatus, setExamStatus] = useState('active'); // 'active' or 'locked'
+  // Restored from localStorage so a locked student sees the lock screen immediately on
+  // page refresh — no bypass window while waiting for initLiveSession to complete.
+  const [examStatus, setExamStatus] = useState(initialState.examStatus || 'active');
   const [liveSessionId, setLiveSessionId] = useState(null);
+
+  // Refs for anti-cheat deduplication (prevent blur+visibilitychange double-counting)
+  const pendingBlurRef = useRef(null);
+  const alertActiveRef = useRef(false);
+  // Tracks the count at mount so the lock only fires on NEW violations, not restored ones
+  const prevViolationCountRef = useRef(initialState.tabSwitchCount);
 
   // --- CLONE GUARD: Check for multiple logins ---
   useEffect(() => {
@@ -58,37 +67,93 @@ export default function ExamBoard({ student, exam, examSet }) {
     let channel;
 
     const initLiveSession = async () => {
-      const { data: existing } = await supabase.from('live_sessions')
-        .select('*').eq('student_id', student.id).eq('exam_id', exam.id).single();
+      // .limit(1) without .order() — safe even if live_sessions has no created_at column.
+      // .order('created_at') was silently failing on some DB setups, returning null rows,
+      // causing the INSERT branch to run and fail (duplicate), leaving liveSessionId null
+      // and making the data + lock pushers no-ops for the entire exam session.
+      const { data: rows } = await supabase.from('live_sessions')
+        .select('*')
+        .eq('student_id', student.id)
+        .eq('exam_id', exam.id)
+        .limit(1);
+      let existing = rows?.[0] || null;
 
       let currentSessionId;
 
       if (existing) {
         currentSessionId = existing.id;
-        // Just trust the database! If the instructor unlocked it, keep it active.
-        setExamStatus(existing.status); 
+
+        if (existing.status === 'finished') {
+          // Check if they already submitted — if so, block re-entry (lock bypass fix)
+          const { data: existingResult } = await supabase.from('results')
+            .select('student_id')
+            .eq('student_id', student.id)
+            .eq('exam_id', exam.id)
+            .limit(1);
+
+          if (existingResult?.length > 0) {
+            setScoreDisplay({ score: 0, total: 0 });
+            return; // liveSessionId intentionally stays null — exam is done
+          }
+
+          // No result — was dismissed by instructor, restore as active
+          await supabase.from('live_sessions').update({
+            status: 'active',
+            answers_count: Object.keys(answers).length,
+            violation_count: tabSwitchCount,
+            updated_at: new Date()
+          }).eq('id', existing.id);
+          setExamStatus('active');
+        } else {
+          setExamStatus(existing.status);
+        }
       } else {
-        const { data: newSession } = await supabase.from('live_sessions').insert([{
-          student_id: student.id,
-          exam_id: exam.id,
-          student_name: student.full_name,
-          status: 'active',
-          violation_count: tabSwitchCount,
-          answers_count: Object.keys(answers).length
-        }]).select().single();
-        if (newSession) currentSessionId = newSession.id;
+        // No existing session — insert. If it fails (race/duplicate), re-fetch instead.
+        const { data: newSession, error: insertError } = await supabase
+          .from('live_sessions')
+          .insert([{
+            student_id: student.id,
+            exam_id: exam.id,
+            student_name: student.full_name,
+            status: 'active',
+            violation_count: tabSwitchCount,
+            answers_count: Object.keys(answers).length
+          }])
+          .select()
+          .single();
+
+        if (insertError) {
+          // Duplicate row — race condition. Re-fetch the real row.
+          const { data: refetch } = await supabase.from('live_sessions')
+            .select('*')
+            .eq('student_id', student.id)
+            .eq('exam_id', exam.id)
+            .limit(1);
+          if (refetch?.[0]) {
+            existing = refetch[0];
+            currentSessionId = existing.id;
+            setExamStatus(existing.status === 'finished' ? 'active' : existing.status);
+          }
+        } else if (newSession) {
+          currentSessionId = newSession.id;
+        }
       }
 
       setLiveSessionId(currentSessionId);
 
-      // Start listening to the Instructor's Dashboard
+      // Listen for instructor lock/unlock commands via postgres_changes.
+      // Safe now because the data pusher no longer writes status — only the
+      // auto-lock effect and the instructor's toggleStudentLock write to that field.
       if (currentSessionId) {
         channel = supabase.channel(`session-${currentSessionId}`)
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'live_sessions', filter: `id=eq.${currentSessionId}` }, 
-          payload => {
+          .on('postgres_changes', {
+            event: 'UPDATE', schema: 'public', table: 'live_sessions',
+            filter: `id=eq.${currentSessionId}`
+          }, payload => {
             if (payload.new.status === 'locked') setExamStatus('locked');
             else if (payload.new.status === 'active') setExamStatus('active');
-          }).subscribe();
+          })
+          .subscribe();
       }
     };
 
@@ -97,29 +162,34 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [student?.id, exam?.id]);
 
-  // --- FIX 2: LIVE DATA PUSHER ---
+  // --- LIVE DATA PUSHER (answers + violations only — status is managed separately) ---
   useEffect(() => {
     if (!liveSessionId) return;
-    
-    const pushUpdates = async () => {
-      // Send the current stats to the database so the instructor can see them
-      await supabase.from('live_sessions').update({
-        answers_count: Object.keys(answers).length,
-        violation_count: tabSwitchCount,
-        status: examStatus, // Sync exactly whatever state the screen is currently in
-        updated_at: new Date()
-      }).eq('id', liveSessionId);
-    };
+    supabase.from('live_sessions').update({
+      answers_count: Object.keys(answers).length,
+      violation_count: tabSwitchCount,
+      updated_at: new Date()
+    }).eq('id', liveSessionId).then(({ error }) => {
+      if (error) console.error('Live data push failed:', error.message);
+    });
+  }, [answers, tabSwitchCount, liveSessionId]);
 
-    pushUpdates();
-  }, [answers, tabSwitchCount, liveSessionId, examStatus]);
+  // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
+  useEffect(() => {
+    if (!liveSessionId || examStatus !== 'locked') return;
+    supabase.from('live_sessions').update({
+      status: 'locked', updated_at: new Date()
+    }).eq('id', liveSessionId).then(({ error }) => {
+      if (error) console.error('Lock status push failed:', error.message);
+    });
+  }, [examStatus, liveSessionId]);
 
   // --- AUTO-SAVER ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting) return; 
-    const progressData = { answers, tabSwitchCount, endTime };
+    if (scoreDisplay || isSubmitting) return;
+    const progressData = { answers, tabSwitchCount, violationLogs, examStatus, endTime };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
-  }, [answers, tabSwitchCount, endTime, storageKey, scoreDisplay, isSubmitting]);
+  }, [answers, tabSwitchCount, violationLogs, examStatus, endTime, storageKey, scoreDisplay, isSubmitting]);
 
   // --- TIMER & CLOCK ---
   useEffect(() => {
@@ -140,36 +210,47 @@ export default function ExamBoard({ student, exam, examSet }) {
     }
   }, [timeLeft, scoreDisplay, isSubmitting, isLoading]);
 
-  // --- FIX 3: UPGRADED ANTI-CHEAT ---
+  // --- ANTI-CHEAT ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting || examStatus === 'locked') return; 
+    if (scoreDisplay || isSubmitting || examStatus === 'locked') return;
 
     const logViolation = (reason) => {
       const timeStr = new Date().toLocaleTimeString();
-      const logEntry = `[${timeStr}] ${reason}`;
-      setViolationLogs(prev => [...prev, logEntry]);
-      
-      setTabSwitchCount(prev => {
-        const newCount = prev + 1;
-        // AUTO-LOCK RULE: Lock exactly at 4, 8, 12. This allows the instructor to unlock them without it instantly re-locking!
-        if (newCount > 0 && newCount % 4 === 0) {
-          setExamStatus('locked');
-        }
-        return newCount;
-      });
+      setViolationLogs(prev => [...prev, `[${timeStr}] ${reason}`]);
+      setTabSwitchCount(prev => prev + 1); // Lock logic is in its own useEffect below
     };
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        logViolation("Tab hidden or switched to another app");
-        alert("⚠️ SYSTEM WARNING: Tab switch detected.");
+      if (!document.hidden) return;
+      // Cancel any pending blur log — visibilitychange is the authoritative tab-switch event
+      if (pendingBlurRef.current) {
+        clearTimeout(pendingBlurRef.current);
+        pendingBlurRef.current = null;
       }
+      logViolation("Tab hidden or switched to another app");
+      alertActiveRef.current = true;
+      alert("⚠️ SYSTEM WARNING: Tab switch detected.");
+      alertActiveRef.current = false;
     };
 
-    const handleBlur = () => logViolation("Screen lost focus (Split-screen or notifications opened)");
+    const handleBlur = () => {
+      // Ignore blur caused by our own alert dialogs
+      if (alertActiveRef.current) return;
+      // Wait 250ms — if visibilitychange fires first it cancels this, preventing double-count
+      if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
+      pendingBlurRef.current = setTimeout(() => {
+        pendingBlurRef.current = null;
+        // Only log if tab is still visible (genuine split-screen / notification focus loss)
+        if (!document.hidden) {
+          logViolation("Screen lost focus (Split-screen or notifications opened)");
+        }
+      }, 250);
+    };
 
     const handleKeyDown = (e) => {
-      const forbidden = e.key === 'PrintScreen' || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's')) || (e.metaKey && e.shiftKey);
+      const forbidden = e.key === 'PrintScreen'
+        || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's'))
+        || (e.metaKey && e.shiftKey);
       if (forbidden) {
         e.preventDefault();
         logViolation("Screenshot or Print shortcut attempted");
@@ -185,8 +266,27 @@ export default function ExamBoard({ student, exam, examSet }) {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("keydown", handleKeyDown);
+      if (pendingBlurRef.current) {
+        clearTimeout(pendingBlurRef.current);
+        pendingBlurRef.current = null;
+      }
     };
   }, [scoreDisplay, isSubmitting, examStatus]);
+
+  // Dedicated lock trigger — only fires when count actually increases (not on page restore).
+  // Locks at every 4th NEW violation: 4, 8, 12, ...
+  // Instructor unlocks give students another 4-violation window before the next lock.
+  useEffect(() => {
+    if (
+      tabSwitchCount > prevViolationCountRef.current &&
+      tabSwitchCount % 4 === 0 &&
+      !scoreDisplay &&
+      !isSubmitting
+    ) {
+      setExamStatus('locked');
+    }
+    prevViolationCountRef.current = tabSwitchCount;
+  }, [tabSwitchCount, scoreDisplay, isSubmitting]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
@@ -264,19 +364,23 @@ export default function ExamBoard({ student, exam, examSet }) {
         violation_logs: violationLogs
       }]);
 
-      if (saveError) throw saveError;
+      // 23505 = duplicate key (already submitted) — treat as success, not a hard error
+      if (saveError && saveError.code !== '23505') throw saveError;
 
-      // Mark Live Session as Finished!
+      // Always mark the live session as finished, even on duplicate submissions
       if (liveSessionId) {
         await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
+      } else {
+        // Fallback: liveSessionId not yet set (e.g. very fast auto-submit), find by student + exam
+        await supabase.from('live_sessions').update({ status: 'finished' })
+          .eq('student_id', student?.id).eq('exam_id', exam.id);
       }
 
       localStorage.removeItem(storageKey);
-      setScoreDisplay({ score: correctCount, total: questions.length });
+      setScoreDisplay({ score: saveError?.code === '23505' ? 0 : correctCount, total: questions.length });
 
     } catch (err) {
-      if (err.code === '23505') setScoreDisplay({ score: 0, total: questions.length });
-      else alert("There was an error saving your exam. Please contact your instructor.");
+      alert("There was an error saving your exam. Please contact your instructor.");
     } finally {
       setIsLoading(false);
       setIsSubmitting(false);

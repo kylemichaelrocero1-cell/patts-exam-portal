@@ -17,6 +17,7 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [batchSection, setBatchSection] = useState('');
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [liveSort, setLiveSort] = useState('name');
+  const [resultSort, setResultSort] = useState('section');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,6 +29,7 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   // Edit Time State
   const [editingTimes, setEditingTimes] = useState({});
   const [editingSections, setEditingSections] = useState({});
+  const [editingPasswords, setEditingPasswords] = useState({});
   // --- NEW: Create Exam States ---
 const [newTitle, setNewTitle] = useState('');
 const [targetSection, setTargetSection] = useState('');
@@ -151,7 +153,7 @@ async function fetchDashboardData() {
     setIsLoading(true);
     try {
       const { data: resultsData } = await supabase.from('results').select('*');
-      const { data: examsData } = await supabase.from('exams').select('id, title, is_open, duration_minutes, target_section').order('created_at', { ascending: true });
+      const { data: examsData } = await supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').order('created_at', { ascending: true });
       
       // We added an error checker here to see if Supabase is mad at us
       const { data: studentsData, error: studentError } = await supabase.from('users').select('id, full_name, section');
@@ -163,16 +165,19 @@ async function fetchDashboardData() {
       const dict = {};
       const times = {};
       const secs = {};
+      const passwords = {};
       if (examsData) {
         examsData.forEach(e => {
           dict[e.id] = e.title;
-          times[e.id] = e.duration_minutes; 
-          secs[e.id] = e.target_section || ''; 
+          times[e.id] = e.duration_minutes;
+          secs[e.id] = e.target_section || '';
+          passwords[e.id] = e.exam_password || '';
         });
         setExamsList(examsData);
         setExamsDict(dict);
         setEditingTimes(times);
         setEditingSections(secs);
+        setEditingPasswords(passwords);
       }
 
       const studentDict = {};
@@ -309,6 +314,18 @@ const deleteResult = async (studentId, examId) => {
     setExamsList(prev => prev.map(e => e.id === examId ? { ...e, target_section: newSection } : e));
   };
 
+  const savePassword = async (examId) => {
+    const newPassword = editingPasswords[examId] || '';
+    const { error } = await supabase.from('exams').update({ exam_password: newPassword || null }).eq('id', examId);
+    if (error) {
+      alert("Error saving password. Please try again.");
+      console.error(error);
+      return;
+    }
+    alert(newPassword ? "Exam password saved!" : "Password cleared — no password required.");
+    setExamsList(prev => prev.map(e => e.id === examId ? { ...e, exam_password: newPassword || null } : e));
+  };
+
   // --- NEW: Save Student Section ---
   const saveStudentSection = async (studentId) => {
     const newSection = editingStudentSections[studentId] || '';
@@ -377,12 +394,59 @@ const deleteResult = async (studentId, examId) => {
       return matchesSection && matchesExam;
     })
     .sort((a, b) => {
-      const secA = students[a.student_id]?.section || 'Z'; 
+      if (resultSort === 'score_desc') {
+        const pctA = a.total_items > 0 ? a.score / a.total_items : 0;
+        const pctB = b.total_items > 0 ? b.score / b.total_items : 0;
+        return pctB - pctA;
+      }
+      if (resultSort === 'score_asc') {
+        const pctA = a.total_items > 0 ? a.score / a.total_items : 0;
+        const pctB = b.total_items > 0 ? b.score / b.total_items : 0;
+        return pctA - pctB;
+      }
+      if (resultSort === 'name') {
+        const nameA = students[a.student_id]?.name || '';
+        const nameB = students[b.student_id]?.name || '';
+        return nameA.localeCompare(nameB);
+      }
+      // default: section
+      const secA = students[a.student_id]?.section || 'Z';
       const secB = students[b.student_id]?.section || 'Z';
-      return secA.localeCompare(secB);
+      const cmp = secA.localeCompare(secB);
+      if (cmp !== 0) return cmp;
+      return (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
     });
 
   const uniqueSections = ['All', ...new Set(Object.values(students).map(s => s.section).filter(Boolean))];
+
+  const exportCSV = () => {
+    const headers = ['Name', 'Section', 'Exam', 'Score', 'Total Items', 'Percentage', 'Time Taken (s)', 'Violations'];
+    const rows = filteredAndSortedResults.map(row => {
+      const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
+      const examTitle = examsDict[row.exam_id] || 'Unknown Exam';
+      const pct = row.total_items > 0 ? Math.round((row.score / row.total_items) * 100) : 0;
+      return [
+        `"${student.name}"`,
+        `"${student.section}"`,
+        `"${examTitle}"`,
+        row.score,
+        row.total_items,
+        `${pct}%`,
+        row.time_taken_seconds ?? '',
+        row.tab_switches ?? 0,
+      ].join(',');
+    });
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const examLabel = selectedExam !== 'All' ? (examsDict[selectedExam] || 'exam').replace(/\s+/g, '_') : 'all_exams';
+    const sectionLabel = selectedSection !== 'All' ? selectedSection.replace(/\s+/g, '_') : 'all_sections';
+    a.download = `results_${examLabel}_${sectionLabel}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   if (isLoading) return <h2 style={{textAlign: 'center', marginTop: '100px', color: '#0A2342'}}>Loading Dashboard...</h2>;
 
@@ -450,7 +514,7 @@ const deleteResult = async (studentId, examId) => {
         {/* --- TAB 1: STUDENT RESULTS --- */}
         {activeTab === 'results' && (
           <>
-            <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', padding: '15px', background: '#F8F9FA', borderRadius: '8px', border: '1px solid #ddd' }}>
+            <div style={{ display: 'flex', gap: '20px', marginBottom: '20px', padding: '15px', background: '#F8F9FA', borderRadius: '8px', border: '1px solid #ddd', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Filter by Exam:</label>
                 <select style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
@@ -468,6 +532,26 @@ const deleteResult = async (studentId, examId) => {
                   ))}
                 </select>
               </div>
+              <div>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px' }}>Sort by:</label>
+                <select style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }} value={resultSort} onChange={e => setResultSort(e.target.value)}>
+                  <option value="section">Section (A–Z)</option>
+                  <option value="name">Name (A–Z)</option>
+                  <option value="score_desc">Score (Highest First)</option>
+                  <option value="score_asc">Score (Lowest First)</option>
+                </select>
+              </div>
+              <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '6px' }}>
+                <span style={{ background: '#0A2342', color: 'white', padding: '5px 14px', borderRadius: '20px', fontWeight: 'bold', fontSize: '14px' }}>
+                  {filteredAndSortedResults.length} student{filteredAndSortedResults.length !== 1 ? 's' : ''}
+                </span>
+                <button
+                  onClick={exportCSV}
+                  style={{ background: '#27AE60', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  ⬇️ Export CSV
+                </button>
+              </div>
             </div>
 
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -484,12 +568,12 @@ const deleteResult = async (studentId, examId) => {
               </thead>
               <tbody>
                 {filteredAndSortedResults.length === 0 ? (
-                  <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center' }}>No results found.</td></tr>
+                  <tr><td colSpan="7" style={{ padding: '20px', textAlign: 'center' }}>No results found.</td></tr>
                 ) : (
                   filteredAndSortedResults.map((row, index) => {
                     const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
                     const examTitle = examsDict[row.exam_id] || 'Unknown Exam';
-                    const percentage = Math.round((row.score / row.total_items) * 100);
+                    const percentage = row.total_items > 0 ? Math.round((row.score / row.total_items) * 100) : 0;
                     return (
                       <tr key={index} style={{ borderBottom: '1px solid #ddd', background: index % 2 === 0 ? '#fdfdfd' : 'white' }}>
                         <td style={{ padding: '12px', fontWeight: 'bold' }}>{student.name}</td>
@@ -533,10 +617,11 @@ const deleteResult = async (studentId, examId) => {
             <thead>
               <tr style={{ background: '#0A2342', color: 'white' }}>
               <th style={{ padding: '12px' }}>Exam Title</th>
-              <th style={{ padding: '12px' }}>Target Section</th> {/* NEW */}
+              <th style={{ padding: '12px' }}>Target Section</th>
               <th style={{ padding: '12px' }}>Status</th>
               <th style={{ padding: '12px' }}>Time Limit</th>
-              <th style={{ padding: '12px' }}>Actions</th> {/* NEW */}
+              <th style={{ padding: '12px' }}>Exam Password</th>
+              <th style={{ padding: '12px' }}>Actions</th>
             </tr>
             </thead>
            <tbody>
@@ -593,6 +678,28 @@ const deleteResult = async (studentId, examId) => {
                       Save
                     </button>
                   </div>
+                </td>
+
+                {/* Exam Password */}
+                <td style={{ padding: '12px' }}>
+                  <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={editingPasswords[exam.id] !== undefined ? editingPasswords[exam.id] : ''}
+                      onChange={(e) => setEditingPasswords(prev => ({ ...prev, [exam.id]: e.target.value }))}
+                      placeholder="No password"
+                      style={{ width: '120px', padding: '6px', border: '1px solid #ccc', borderRadius: '4px', fontFamily: 'monospace', letterSpacing: '1px' }}
+                    />
+                    <button
+                      onClick={() => savePassword(exam.id)}
+                      style={{ background: '#E67E22', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '4px', cursor: 'pointer', opacity: editingPasswords[exam.id] !== (exam.exam_password || '') ? 1 : 0.5 }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#999', marginTop: '3px', display: 'block' }}>
+                    {exam.exam_password ? '🔒 Password set' : '🔓 No password'}
+                  </span>
                 </td>
 
                 {/* NEW: Action Buttons (Stats and Delete) */}
@@ -750,6 +857,9 @@ const deleteResult = async (studentId, examId) => {
                 <h3 style={{ margin: 0, color: '#C0392B', display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ width: '12px', height: '12px', background: '#E74C3C', borderRadius: '50%', display: 'inline-block' }}></span>
                   Live Exam Monitor
+                  <span style={{ background: '#E74C3C', color: 'white', padding: '3px 12px', borderRadius: '20px', fontSize: '14px', fontWeight: 'bold' }}>
+                    {activeSessions.length} active
+                  </span>
                 </h3>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span style={{ fontSize: '13px', color: '#555', fontWeight: 'bold' }}>Sort:</span>
@@ -781,6 +891,7 @@ const deleteResult = async (studentId, examId) => {
                 <thead>
                   <tr style={{ background: '#C0392B', color: 'white' }}>
                     <th style={{ padding: '12px' }}>Student Name</th>
+                    <th style={{ padding: '12px' }}>Exam Taking</th>
                     <th style={{ padding: '12px' }}>Status</th>
                     <th style={{ padding: '12px' }}>Questions Answered</th>
                     <th style={{ padding: '12px' }}>Tab Violations</th>
@@ -789,11 +900,14 @@ const deleteResult = async (studentId, examId) => {
                 </thead>
                 <tbody>
                   {activeSessions.length === 0 ? (
-                    <tr><td colSpan="5" style={{ padding: '20px', textAlign: 'center' }}>No students currently taking an exam.</td></tr>
+                    <tr><td colSpan="6" style={{ padding: '20px', textAlign: 'center' }}>No students currently taking an exam.</td></tr>
                   ) : (
                     activeSessions.map(session => (
                       <tr key={session.id} style={{ borderBottom: '1px solid #ddd', background: session.status === 'locked' ? '#FADBD8' : 'white' }}>
                         <td style={{ padding: '12px', fontWeight: 'bold', fontSize: '16px' }}>{session.student_name}</td>
+                        <td style={{ padding: '12px', color: '#0A2342', fontWeight: 'bold' }}>
+                          {examsDict[session.exam_id] || '—'}
+                        </td>
                         <td style={{ padding: '12px', fontWeight: 'bold', color: session.status === 'locked' ? '#E74C3C' : '#27AE60' }}>
                           {session.status.toUpperCase()}
                         </td>
@@ -929,19 +1043,20 @@ const deleteResult = async (studentId, examId) => {
                         const isCorrect = i === Number(q.correct_answer);
 
                         return (
-                          <div key={letter} style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                            <div style={{ width: '40px', fontWeight: 'bold', color: isCorrect ? '#27AE60' : '#555' }}>
-                              {letter.toUpperCase()}.
+                          <div key={letter} style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '10px 12px', borderRadius: '8px', background: isCorrect ? '#F0FBF4' : '#FAFAFA', border: `2px solid ${isCorrect ? '#27AE60' : '#E8E8E8'}` }}>
+                            {/* Label row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontWeight: 'bold', color: isCorrect ? '#1E8449' : '#555', fontSize: '14px' }}>
+                                {letter.toUpperCase()}. {q[`choice_${letter}`]}
+                                {isCorrect && <span style={{ marginLeft: '8px', fontSize: '12px', background: '#27AE60', color: 'white', padding: '2px 8px', borderRadius: '10px' }}>✓ Correct</span>}
+                              </span>
+                              <span style={{ fontSize: '14px', fontWeight: 'bold', color: '#555', whiteSpace: 'nowrap', marginLeft: '12px' }}>
+                                {count} ({percentage}%)
+                              </span>
                             </div>
-                            
-                            {/* The Visual Bar */}
-                            <div style={{ flex: 1, background: '#F0F0F0', height: '24px', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
+                            {/* Bar */}
+                            <div style={{ background: '#E0E0E0', height: '10px', borderRadius: '6px', overflow: 'hidden' }}>
                               <div style={{ width: `${percentage}%`, height: '100%', background: isCorrect ? '#27AE60' : '#3498DB', transition: 'width 0.5s ease' }}></div>
-                            </div>
-                            
-                            {/* The Numbers */}
-                            <div style={{ width: '80px', textAlign: 'right', fontSize: '14px', fontWeight: 'bold', color: '#555' }}>
-                              {count} ({percentage}%)
                             </div>
                           </div>
                         );

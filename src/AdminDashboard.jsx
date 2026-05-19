@@ -632,12 +632,12 @@ const deleteResult = async (studentId, examId) => {
                {/* UPGRADED: Editable Section Field */}
                 <td style={{ padding: '12px' }}>
                   <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                    <input 
-                      type="text" 
-                      value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''} 
+                    <input
+                      type="text"
+                      value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
                       onChange={(e) => setEditingSections(prev => ({ ...prev, [exam.id]: e.target.value }))}
-                      placeholder="e.g. Aero 101"
-                      style={{ width: '110px', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
+                      placeholder="e.g. Aero 101, Aero 102"
+                      style={{ width: '160px', padding: '6px', border: '1px solid #ccc', borderRadius: '4px' }}
                     />
                     <button 
                       onClick={() => saveSection(exam.id)}

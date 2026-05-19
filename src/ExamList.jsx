@@ -21,11 +21,17 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     const { data: examsData } = await supabase
       .from('exams')
       .select('*')
-      .eq('target_section', selectedSection)
       .eq('is_open', true)
       .order('created_at', { ascending: false });
 
-    if (examsData) setExams(examsData);
+    if (examsData) {
+      const filtered = examsData.filter(exam => {
+        if (!exam.target_section) return false;
+        const sections = exam.target_section.split(',').map(s => s.trim());
+        return sections.includes(selectedSection);
+      });
+      setExams(filtered);
+    }
 
     const { data: resultsData } = await supabase
       .from('results')

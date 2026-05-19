@@ -7,11 +7,15 @@ export default function SectionSelector({ student, onSelect }) {
 
   useEffect(() => {
     async function fetchSections() {
-      // Gets all unique sections that currently have exams attached to them
       const { data } = await supabase.from('exams').select('target_section');
       if (data) {
-        const uniqueSections = [...new Set(data.map(e => e.target_section).filter(Boolean))];
-        setSections(uniqueSections);
+        const allSections = new Set();
+        data.forEach(e => {
+          if (e.target_section) {
+            e.target_section.split(',').map(s => s.trim()).filter(Boolean).forEach(s => allSections.add(s));
+          }
+        });
+        setSections([...allSections].sort());
       }
       setIsLoading(false);
     }

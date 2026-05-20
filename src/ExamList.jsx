@@ -5,6 +5,8 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(false);
 
   // Password gate state
   const [pendingExam, setPendingExam] = useState(null);
@@ -17,48 +19,101 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
 
   const fetchExams = async () => {
     setIsLoading(true);
+    setFetchError(false);
+    try {
+      const { data: examsData, error: examsError } = await supabase
+        .from('exams')
+        .select('*')
+        .eq('is_open', true)
+        .order('created_at', { ascending: false });
 
-    const { data: examsData } = await supabase
-      .from('exams')
-      .select('*')
-      .eq('is_open', true)
-      .order('created_at', { ascending: false });
+      if (examsError) throw examsError;
 
-    if (examsData) {
-      const filtered = examsData.filter(exam => {
-        if (!exam.target_section) return false;
-        const sections = exam.target_section.split(',').map(s => s.trim());
-        return sections.includes(selectedSection);
-      });
-      setExams(filtered);
+      if (examsData) {
+        const filtered = examsData.filter(exam => {
+          if (!exam.target_section) return false;
+          const sections = exam.target_section.split(',').map(s => s.trim());
+          return sections.includes(selectedSection);
+        });
+        setExams(filtered);
+      }
+
+      const { data: resultsData } = await supabase
+        .from('results')
+        .select('exam_id')
+        .eq('student_id', student.id);
+
+      if (resultsData) {
+        setCompletedExams(resultsData.map(r => r.exam_id));
+      }
+    } catch (err) {
+      console.error('Failed to load exams:', err);
+      setFetchError(true);
+    } finally {
+      setIsLoading(false);
     }
-
-    const { data: resultsData } = await supabase
-      .from('results')
-      .select('exam_id')
-      .eq('student_id', student.id);
-
-    if (resultsData) {
-      setCompletedExams(resultsData.map(r => r.exam_id));
-    }
-
-    setIsLoading(false);
   };
 
-  const handleStartClick = (exam) => {
-    if (exam.exam_password) {
-      setPendingExam(exam);
-      setEnteredPassword('');
-      setPasswordError('');
-    } else {
-      onStartExam(exam);
+  const handleStartClick = async (exam, setChoice) => {
+    setIsCheckingSession(true);
+    try {
+      // Re-fetch the exam to get the latest password from DB (prevents stale-data bypass)
+      const { data: freshExam } = await supabase
+        .from('exams')
+        .select('id, title, duration_minutes, target_section, exam_password, is_open')
+        .eq('id', exam.id)
+        .single();
+
+      // If student already has an active live session, skip the password gate (resuming after refresh)
+      const { data: sessions } = await supabase
+        .from('live_sessions')
+        .select('id')
+        .eq('student_id', student.id)
+        .eq('exam_id', exam.id)
+        .neq('status', 'finished')
+        .limit(1);
+
+      const examData = freshExam || exam;
+
+      if (sessions?.length > 0) {
+        onStartExam(examData, setChoice);
+        return;
+      }
+
+      // Check sessionStorage to skip re-entry within the same browser session
+      const sessionKey = `exam_pass_ok_${exam.id}`;
+      if (sessionStorage.getItem(sessionKey)) {
+        onStartExam(examData, setChoice);
+        return;
+      }
+
+      if (examData.exam_password) {
+        setPendingExam({ ...examData, _chosenSet: setChoice });
+        setEnteredPassword('');
+        setPasswordError('');
+      } else {
+        onStartExam(examData, setChoice);
+      }
+    } catch (err) {
+      console.error('Session check failed:', err);
+      // Network error — fall back gracefully: use cached exam data, apply password check
+      if (exam.exam_password) {
+        setPendingExam({ ...exam, _chosenSet: setChoice });
+        setEnteredPassword('');
+        setPasswordError('');
+      } else {
+        onStartExam(exam, setChoice);
+      }
+    } finally {
+      setIsCheckingSession(false);
     }
   };
 
   const handlePasswordSubmit = (e) => {
     e.preventDefault();
     if (enteredPassword === pendingExam.exam_password) {
-      onStartExam(pendingExam);
+      sessionStorage.setItem(`exam_pass_ok_${pendingExam.id}`, '1');
+      onStartExam(pendingExam, pendingExam._chosenSet);
       setPendingExam(null);
     } else {
       setPasswordError('Incorrect password. Please try again.');
@@ -128,7 +183,12 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
       <div style={{ marginTop: '40px' }}>
         <h2 style={{ color: '#0A2342', marginBottom: '25px', borderBottom: '2px solid #0A2342', paddingBottom: '10px' }}>Available Examinations</h2>
 
-        {exams.length === 0 ? (
+        {fetchError ? (
+          <div style={{ background: '#FADBD8', padding: '40px', borderRadius: '12px', textAlign: 'center', border: '2px solid #E74C3C' }}>
+            <p style={{ color: '#C0392B', fontSize: '18px', fontWeight: 'bold' }}>⚠️ Could not load exams. Please check your internet connection and refresh the page.</p>
+            <button onClick={fetchExams} style={{ marginTop: '15px', background: '#E74C3C', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Retry</button>
+          </div>
+        ) : exams.length === 0 ? (
           <div style={{ background: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
             <p style={{ color: '#555', fontSize: '18px' }}>No exams are currently open. Please wait for your instructor.</p>
           </div>
@@ -176,37 +236,39 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
                     ) : (
                       <div style={{ display: 'flex', gap: '15px' }}>
                         <button
+                          disabled={isCheckingSession}
                           style={{
                             width: 'auto',
                             padding: '14px 28px',
-                            background: '#0A2342',
+                            background: isCheckingSession ? '#aaa' : '#0A2342',
                             color: '#FFFFFF',
                             fontWeight: 'bold',
                             fontSize: '15px',
                             border: 'none',
                             borderRadius: '6px',
-                            cursor: 'pointer'
+                            cursor: isCheckingSession ? 'not-allowed' : 'pointer'
                           }}
-                          onClick={() => handleStartClick(exam)}
+                          onClick={() => handleStartClick(exam, 'A')}
                         >
-                          Start Set A
+                          {isCheckingSession ? 'Checking...' : 'Start Set A'}
                         </button>
 
                         <button
+                          disabled={isCheckingSession}
                           style={{
                             width: 'auto',
                             padding: '14px 28px',
-                            background: '#34495E',
+                            background: isCheckingSession ? '#aaa' : '#34495E',
                             color: '#FFFFFF',
                             fontWeight: 'bold',
                             fontSize: '15px',
                             border: 'none',
                             borderRadius: '6px',
-                            cursor: 'pointer'
+                            cursor: isCheckingSession ? 'not-allowed' : 'pointer'
                           }}
-                          onClick={() => handleStartClick(exam)}
+                          onClick={() => handleStartClick(exam, 'B')}
                         >
-                          Start Set B
+                          {isCheckingSession ? 'Checking...' : 'Start Set B'}
                         </button>
                       </div>
                     )}

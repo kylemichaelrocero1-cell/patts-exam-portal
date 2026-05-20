@@ -7,7 +7,7 @@ export default function SectionSelector({ student, onSelect }) {
 
   useEffect(() => {
     async function fetchSections() {
-      const { data } = await supabase.from('exams').select('target_section');
+      const { data } = await supabase.from('exams').select('target_section').eq('is_open', true);
       if (data) {
         const allSections = new Set();
         data.forEach(e => {

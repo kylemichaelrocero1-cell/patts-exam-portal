@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
 
 export default function ExamBoard({ student, exam, examSet }) {
@@ -37,21 +37,25 @@ export default function ExamBoard({ student, exam, examSet }) {
   const alertActiveRef = useRef(false);
   // Tracks the count at mount so the lock only fires on NEW violations, not restored ones
   const prevViolationCountRef = useRef(initialState.tabSwitchCount);
+  // Prevents double-submission when two rapid clicks hit before React re-renders
+  const isSubmittingRef = useRef(false);
+  // Debounce handle for live data pusher
+  const livePushDebounceRef = useRef(null);
 
-  // --- CLONE GUARD: Check for multiple logins ---
+  // --- CLONE GUARD: Check for multiple logins (30s interval reduces DB load for 121 students) ---
   useEffect(() => {
     const checkSession = setInterval(async () => {
       const localToken = localStorage.getItem('local_session_token');
       if (!localToken || !student?.id) return;
 
       const { data } = await supabase.from('users').select('session_token').eq('id', student.id).single();
-      
+
       if (data && data.session_token && data.session_token !== localToken) {
         clearInterval(checkSession);
         alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
-        window.location.reload(); 
+        window.location.reload();
       }
-    }, 5000); 
+    }, 30000);
 
     return () => clearInterval(checkSession);
   }, [student?.id]);
@@ -162,16 +166,23 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [student?.id, exam?.id]);
 
-  // --- LIVE DATA PUSHER (answers + violations only — status is managed separately) ---
+  // --- LIVE DATA PUSHER (debounced 5s — prevents ~6000 DB writes for 121 students) ---
   useEffect(() => {
     if (!liveSessionId) return;
-    supabase.from('live_sessions').update({
-      answers_count: Object.keys(answers).length,
-      violation_count: tabSwitchCount,
-      updated_at: new Date()
-    }).eq('id', liveSessionId).then(({ error }) => {
-      if (error) console.error('Live data push failed:', error.message);
-    });
+    if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
+    livePushDebounceRef.current = setTimeout(() => {
+      livePushDebounceRef.current = null;
+      supabase.from('live_sessions').update({
+        answers_count: Object.keys(answers).length,
+        violation_count: tabSwitchCount,
+        updated_at: new Date()
+      }).eq('id', liveSessionId).then(({ error }) => {
+        if (error) console.error('Live data push failed:', error.message);
+      });
+    }, 5000);
+    return () => {
+      if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
+    };
   }, [answers, tabSwitchCount, liveSessionId]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
@@ -297,12 +308,17 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   useEffect(() => {
     async function loadQuestions() {
-      if (!exam?.id) return; 
+      if (!exam?.id) return;
       const { data, error } = await supabase.from('questions').select('*').eq('exam_id', exam.id).order('id', { ascending: true });
-      
-      if (error) {
+
+      if (error || !data || data.length === 0) {
         console.error("Error loading questions:", error);
-      } else if (data) {
+        alert("⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
+        setIsLoading(false);
+        return;
+      }
+
+      if (data) {
         let seed = student?.id ? student.id.charCodeAt(0) + student.id.charCodeAt(student.id.length - 1) : 123;
         const seededRandom = () => {
           let x = Math.sin(seed++) * 10000;
@@ -331,9 +347,11 @@ export default function ExamBoard({ student, exam, examSet }) {
     loadQuestions();
   }, [exam?.id, student?.id]);
 
-  const executeSubmission = async () => {
-    if (isSubmitting) return; 
-    
+  const executeSubmission = useCallback(async () => {
+    // Ref-based guard catches rapid double-clicks before React state re-renders
+    if (isSubmittingRef.current || isSubmitting) return;
+    isSubmittingRef.current = true;
+
     setIsSubmitting(true);
     setIsLoading(true);
 
@@ -382,11 +400,12 @@ export default function ExamBoard({ student, exam, examSet }) {
     } catch (err) {
       alert("There was an error saving your exam. Please contact your instructor.");
     } finally {
+      isSubmittingRef.current = false;
       setIsLoading(false);
       setIsSubmitting(false);
       setShowSubmitModal(false);
     }
-  };
+  }, [answers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
 
   if (isLoading && !isSubmitting) return <h2 style={{textAlign: 'center', marginTop: '100px'}}>Loading Exam...</h2>;
 

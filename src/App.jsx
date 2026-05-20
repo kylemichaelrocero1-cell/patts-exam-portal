@@ -87,20 +87,21 @@ export default function App() {
 
 // If logged in AND picked a section, but hasn't started an exam
   if (student && selectedSection && !selectedExam) {
-    return <ExamList 
-      student={student} 
-      selectedSection={selectedSection} 
-      onStartExam={setSelectedExam} 
-      onLogout={() => { setStudent(null); setSelectedSection(null); }} 
+    return <ExamList
+      student={student}
+      selectedSection={selectedSection}
+      onStartExam={(exam, set) => { setSelectedExam(exam); setExamSet(set || null); }}
+      onLogout={() => { setStudent(null); setSelectedSection(null); }}
     />;
   }
 
   // If an exam is actively running
   if (selectedExam) {
-    return <ExamBoard 
-      exam={selectedExam} 
-      student={student} 
-      onFinish={() => setSelectedExam(null)} 
+    return <ExamBoard
+      exam={selectedExam}
+      examSet={examSet}
+      student={student}
+      onFinish={() => { setSelectedExam(null); setExamSet(null); }}
     />;
   }
 }

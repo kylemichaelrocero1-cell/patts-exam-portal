@@ -35,18 +35,23 @@ const [newTitle, setNewTitle] = useState('');
 const [targetSection, setTargetSection] = useState('');
 
   // --- NEW ANALYTICS STATES ---
-  const [viewingStudent, setViewingStudent] = useState(null); 
+  const [viewingStudent, setViewingStudent] = useState(null);
   const [viewingStatsExam, setViewingStatsExam] = useState(null);
   const [examQuestionsCache, setExamQuestionsCache] = useState({});
+  const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
 
-  // Helper to load questions only when needed so the dashboard stays fast
+  // --- ATTENDANCE STATES ---
+  const [attendanceExam, setAttendanceExam] = useState('');
+  const [attendanceSection, setAttendanceSection] = useState('All');
+
+  // Helper to load questions — uses a separate loading state so the dashboard never disappears
   const loadExamQuestions = async (examId) => {
     if (examQuestionsCache[examId]) return examQuestionsCache[examId];
-    setIsLoading(true);
+    setIsLoadingQuestions(true);
     const { data } = await supabase.from('questions').select('*').eq('exam_id', examId).order('id', { ascending: true });
-    setExamQuestionsCache(prev => ({ ...prev, [examId]: data }));
-    setIsLoading(false);
-    return data;
+    setExamQuestionsCache(prev => ({ ...prev, [examId]: data || [] }));
+    setIsLoadingQuestions(false);
+    return data || [];
   };
 
   const openStudentDetails = async (row) => {
@@ -155,12 +160,8 @@ async function fetchDashboardData() {
       const { data: resultsData } = await supabase.from('results').select('*');
       const { data: examsData } = await supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').order('created_at', { ascending: true });
       
-      // We added an error checker here to see if Supabase is mad at us
       const { data: studentsData, error: studentError } = await supabase.from('users').select('id, full_name, section');
-
-      // --- DIAGNOSTIC LOGS ---
-      console.log("Students found in database:", studentsData);
-      if (studentError) console.error("Supabase Error:", studentError);
+      if (studentError) console.error("Supabase students error:", studentError);
 
       const dict = {};
       const times = {};
@@ -501,11 +502,18 @@ const deleteResult = async (studentId, examId) => {
         🧑‍🎓 Manage Students
       </button>
       {/* NEW: Live Monitor Button */}
-        <button 
+        <button
           style={{ background: activeTab === 'live' ? '#E74C3C' : '#ccc', color: activeTab === 'live' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
           onClick={() => setActiveTab('live')}
         >
           🔴 Live Monitor
+        </button>
+        {/* NEW: Attendance Button */}
+        <button
+          style={{ background: activeTab === 'attendance' ? '#8E44AD' : '#ccc', color: activeTab === 'attendance' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
+          onClick={() => setActiveTab('attendance')}
+        >
+          📋 Attendance
         </button>
       </div>
 
@@ -938,7 +946,173 @@ const deleteResult = async (studentId, examId) => {
           );
         })()}
 
+      {/* --- TAB 5: ATTENDANCE --- */}
+      {activeTab === 'attendance' && (() => {
+        const examObj = examsList.find(e => e.id === attendanceExam);
+
+        // Students enrolled in this exam's sections
+        let eligibleStudents = studentsList;
+        if (examObj?.target_section) {
+          const examSections = examObj.target_section.split(',').map(s => s.trim());
+          eligibleStudents = studentsList.filter(s => {
+            if (!s.section) return false;
+            const studentSections = s.section.split(',').map(x => x.trim());
+            return studentSections.some(sec => examSections.includes(sec));
+          });
+        }
+
+        if (attendanceSection !== 'All') {
+          eligibleStudents = eligibleStudents.filter(s => {
+            if (!s.section) return false;
+            return s.section.split(',').map(x => x.trim()).includes(attendanceSection);
+          });
+        }
+
+        const getStatus = (studentId) => {
+          if (!attendanceExam) return null;
+          if (results.some(r => r.student_id === studentId && r.exam_id === attendanceExam)) return 'done';
+          const session = liveSessions.find(ls => ls.student_id === studentId && ls.exam_id === attendanceExam);
+          if (session) return session.status === 'locked' ? 'locked' : 'active';
+          return 'absent';
+        };
+
+        const statusCounts = { done: 0, active: 0, locked: 0, absent: 0 };
+        eligibleStudents.forEach(s => {
+          const st = getStatus(s.id);
+          if (st) statusCounts[st]++;
+        });
+
+        const sectionOptions = examObj?.target_section
+          ? ['All', ...new Set(examObj.target_section.split(',').map(s => s.trim()))]
+          : ['All'];
+
+        const exportAttendanceCSV = () => {
+          const headers = ['Student Name', 'Section', 'Status'];
+          const rows = eligibleStudents.map(s => {
+            const st = getStatus(s.id);
+            const label = st === 'done' ? 'Done' : st === 'active' ? 'Taking Exam' : st === 'locked' ? 'LOCKED' : 'Absent';
+            return [`"${s.full_name}"`, `"${s.section || ''}"`, `"${label}"`].join(',');
+          });
+          const csv = [headers.join(','), ...rows].join('\n');
+          const blob = new Blob([csv], { type: 'text/csv' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `attendance_${(examObj?.title || 'exam').replace(/\s+/g, '_')}.csv`;
+          a.click();
+          URL.revokeObjectURL(url);
+        };
+
+        return (
+          <div style={{ background: '#F8F0FF', padding: '20px', borderRadius: '8px', border: '2px solid #8E44AD' }}>
+            <h3 style={{ margin: '0 0 16px 0', color: '#6C3483' }}>📋 Attendance Overview</h3>
+
+            {/* Filters */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div>
+                <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px', color: '#333' }}>Select Exam:</label>
+                <select
+                  value={attendanceExam}
+                  onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}
+                  style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '14px' }}
+                >
+                  <option value="">— Choose an exam —</option>
+                  {examsList.map(e => (
+                    <option key={e.id} value={e.id}>{e.title}</option>
+                  ))}
+                </select>
+              </div>
+              {attendanceExam && (
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '5px', color: '#333' }}>Filter by Section:</label>
+                  <select
+                    value={attendanceSection}
+                    onChange={e => setAttendanceSection(e.target.value)}
+                    style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '14px' }}
+                  >
+                    {sectionOptions.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                  </select>
+                </div>
+              )}
+              {attendanceExam && eligibleStudents.length > 0 && (
+                <button
+                  onClick={exportAttendanceCSV}
+                  style={{ background: '#27AE60', color: 'white', border: 'none', padding: '9px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}
+                >
+                  ⬇️ Export CSV
+                </button>
+              )}
+            </div>
+
+            {!attendanceExam ? (
+              <p style={{ color: '#888', textAlign: 'center', padding: '40px' }}>Select an exam above to see attendance.</p>
+            ) : (
+              <>
+                {/* Summary chips */}
+                <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Total', count: eligibleStudents.length, color: '#0A2342', bg: '#EBF5FB' },
+                    { label: 'Done', count: statusCounts.done, color: '#1E8449', bg: '#D5F5E3' },
+                    { label: 'Taking Exam', count: statusCounts.active, color: '#E67E22', bg: '#FEF9E7' },
+                    { label: 'Locked', count: statusCounts.locked, color: '#E74C3C', bg: '#FADBD8' },
+                    { label: 'Absent', count: statusCounts.absent, color: '#7F8C8D', bg: '#F2F3F4' },
+                  ].map(chip => (
+                    <div key={chip.label} style={{ background: chip.bg, border: `1px solid ${chip.color}`, borderRadius: '20px', padding: '6px 18px', fontWeight: 'bold', color: chip.color, fontSize: '14px' }}>
+                      {chip.label}: {chip.count}
+                    </div>
+                  ))}
+                </div>
+
+                {eligibleStudents.length === 0 ? (
+                  <p style={{ color: '#888', textAlign: 'center', padding: '20px' }}>No students found for this exam's section(s).</p>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: '#6C3483', color: 'white' }}>
+                        <th style={{ padding: '12px' }}>#</th>
+                        <th style={{ padding: '12px' }}>Student Name</th>
+                        <th style={{ padding: '12px' }}>Section</th>
+                        <th style={{ padding: '12px' }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eligibleStudents.map((s, idx) => {
+                        const st = getStatus(s.id);
+                        const statusConfig = {
+                          done:   { label: '✅ Done',        color: '#1E8449', bg: '#D5F5E3' },
+                          active: { label: '📝 Taking Exam', color: '#E67E22', bg: '#FEF9E7' },
+                          locked: { label: '🔒 LOCKED',      color: '#E74C3C', bg: '#FADBD8' },
+                          absent: { label: '❌ Absent',       color: '#7F8C8D', bg: 'white'   },
+                        }[st] || { label: '—', color: '#999', bg: 'white' };
+
+                        return (
+                          <tr key={s.id} style={{ borderBottom: '1px solid #ddd', background: statusConfig.bg }}>
+                            <td style={{ padding: '12px', color: '#999' }}>{idx + 1}</td>
+                            <td style={{ padding: '12px', fontWeight: 'bold', color: '#333' }}>{s.full_name || 'Unknown'}</td>
+                            <td style={{ padding: '12px', color: '#555' }}>{s.section || '—'}</td>
+                            <td style={{ padding: '12px', fontWeight: 'bold', color: statusConfig.color }}>{statusConfig.label}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       </div>
+{/* Loading overlay for question fetches — replaces the old global isLoading flash */}
+      {isLoadingQuestions && (
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>
+          <div style={{ background: 'white', padding: '30px 50px', borderRadius: '12px', textAlign: 'center', fontSize: '18px', fontWeight: 'bold', color: '#0A2342' }}>
+            Loading questions…
+          </div>
+        </div>
+      )}
+
 {/* ========================================= */}
       {/* MODAL 1: INDIVIDUAL STUDENT ANSWER SHEET  */}
       {/* ========================================= */}

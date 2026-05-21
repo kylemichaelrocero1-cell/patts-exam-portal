@@ -558,22 +558,36 @@ const deleteResult = async (studentId, examId) => {
     URL.revokeObjectURL(url);
   };
 
-  if (isLoading) return <h2 style={{textAlign: 'center', marginTop: '100px', color: '#0A2342'}}>Loading Dashboard...</h2>;
+  if (isLoading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
+      <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
+        <p style={{ margin: 0, fontWeight: 600, fontSize: '16px' }}>Loading Dashboard…</p>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="app-container" style={{ padding: '40px', minHeight: '100vh', background: '#f4f6f8' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', background: '#0A2342', padding: '20px', borderRadius: '8px' }}>
-        <div>
-          <h1 style={{ margin: 0, color: 'white' }}>Instructor Dashboard</h1>
-          {lastRefreshed && (
-            <p style={{ margin: '4px 0 0', color: '#aac4e0', fontSize: '12px' }}>
-              Last refreshed: {lastRefreshed}
-            </p>
-          )}
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+
+      {/* Header */}
+      <header className="admin-header" style={{
+        background: 'linear-gradient(110deg, var(--navy-dark) 0%, var(--navy) 55%, var(--navy-mid) 100%)',
+        borderBottom: '3px solid var(--gold)',
+        padding: '16px 32px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        boxShadow: 'var(--s-lg)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: '44px', width: 'auto', objectFit: 'contain' }} />
+          <div>
+            <h1 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: 700 }}>Instructor Dashboard</h1>
+            {lastRefreshed && <p className="admin-header-subtitle" style={{ margin: '2px 0 0', color: 'rgba(255,255,255,.45)', fontSize: '12px' }}>Updated {lastRefreshed}</p>}
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div className="admin-header-btns" style={{ display: 'flex', gap: '10px' }}>
           <button
-            style={{ background: '#2980B9', width: 'auto', opacity: isRefreshing ? 0.7 : 1 }}
+            style={{ background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.25)', color: 'white', width: 'auto', padding: '9px 18px', fontSize: '13px', opacity: isRefreshing ? 0.7 : 1 }}
             disabled={isRefreshing}
             onClick={async () => {
               setIsRefreshing(true);
@@ -582,58 +596,47 @@ const deleteResult = async (studentId, examId) => {
               setIsRefreshing(false);
             }}
           >
-            {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+            {isRefreshing ? '⟳ Refreshing…' : '⟳ Refresh'}
           </button>
-          <button style={{ background: '#E74C3C', width: 'auto' }} onClick={onLogout}>Close Portal</button>
+          <button style={{ background: 'rgba(231,76,60,.8)', border: '1px solid rgba(231,76,60,.5)', color: 'white', width: 'auto', padding: '9px 18px', fontSize: '13px' }} onClick={onLogout}>
+            Close Portal
+          </button>
         </div>
       </header>
 
-      {/* TABS NAVIGATION */}
-      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-        <button 
-          style={{ background: activeTab === 'results' ? '#27AE60' : '#ccc', color: activeTab === 'results' ? 'white' : '#333', flex: 1 }}
-          onClick={() => setActiveTab('results')}
-        >
-          📊 Student Results
-        </button>
-        <button 
-          style={{ background: activeTab === 'manage' ? '#27AE60' : '#ccc', color: activeTab === 'manage' ? 'white' : '#333', flex: 1 }}
-          onClick={() => setActiveTab('manage')}
-        >
-          ⚙️ Manage Exams
-        </button>
-
-        {/* NEW: Manage Students Button */}
-      <button 
-        style={{ background: activeTab === 'students' ? '#27AE60' : '#ccc', color: activeTab === 'students' ? 'white' : '#333', flex: 1 }}
-        onClick={() => setActiveTab('students')}
-      >
-        🧑‍🎓 Manage Students
-      </button>
-      {/* NEW: Live Monitor Button */}
-        <button
-          style={{ background: activeTab === 'live' ? '#E74C3C' : '#ccc', color: activeTab === 'live' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
-          onClick={() => setActiveTab('live')}
-        >
-          🔴 Live Monitor
-        </button>
-        {/* NEW: Attendance Button */}
-        <button
-          style={{ background: activeTab === 'attendance' ? '#8E44AD' : '#ccc', color: activeTab === 'attendance' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
-          onClick={() => setActiveTab('attendance')}
-        >
-          📋 Attendance
-        </button>
-        {/* Questions Tab */}
-        <button
-          style={{ background: activeTab === 'questions' ? '#27AE60' : '#ccc', color: activeTab === 'questions' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
-          onClick={() => setActiveTab('questions')}
-        >
-          📝 Questions
-        </button>
+      {/* Tab Navigation */}
+      <div className="admin-tabs" style={{ background: 'var(--white)', borderBottom: '1px solid var(--border)', padding: '0 32px', boxShadow: 'var(--s-xs)' }}>
+        <div style={{ display: 'flex', gap: '2px', overflowX: 'auto' }}>
+          {[
+            { id: 'results',   label: '📊 Results',   },
+            { id: 'manage',    label: '⚙️ Manage Exams' },
+            { id: 'students',  label: '🧑‍🎓 Students'  },
+            { id: 'live',      label: '🔴 Live Monitor'},
+            { id: 'attendance',label: '📋 Attendance'  },
+            { id: 'questions', label: '📝 Questions'   },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                background: 'none', border: 'none', color: activeTab === tab.id ? 'var(--navy)' : 'var(--text-3)',
+                fontWeight: activeTab === tab.id ? 700 : 500,
+                fontSize: '13.5px', padding: '14px 18px', borderRadius: 0, width: 'auto',
+                borderBottom: activeTab === tab.id ? '3px solid var(--navy)' : '3px solid transparent',
+                transform: 'none', boxShadow: 'none', whiteSpace: 'nowrap',
+                transition: 'color var(--t-fast), border-color var(--t-fast)',
+                marginBottom: '-1px',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div style={{ background: 'white', borderRadius: '8px', padding: '20px', color: '#333', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+      {/* Tab Content */}
+      <div className="admin-content" style={{ padding: '28px 32px' }}>
+      <div style={{ background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: '24px', color: 'var(--text-1)', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)' }}>
         
         {/* --- TAB 1: STUDENT RESULTS --- */}
         {activeTab === 'results' && (
@@ -678,6 +681,7 @@ const deleteResult = async (studentId, examId) => {
               </div>
             </div>
 
+            <div className="table-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: '#0A2342', color: 'white' }}>
@@ -730,6 +734,7 @@ const deleteResult = async (studentId, examId) => {
                 )}
               </tbody>
             </table>
+            </div>{/* end table-scroll */}
           </>
         )}
 
@@ -737,6 +742,7 @@ const deleteResult = async (studentId, examId) => {
         {activeTab === 'manage' && (
           <>
 
+            <div className="table-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr style={{ background: '#0A2342', color: 'white' }}>
@@ -845,6 +851,7 @@ const deleteResult = async (studentId, examId) => {
 ))}
           </tbody>
           </table>
+          </div>{/* end table-scroll */}
         </>
       )}
 
@@ -882,6 +889,7 @@ const deleteResult = async (studentId, examId) => {
               )}
             </div>
 
+            <div className="table-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
                 <tr style={{ background: '#0A2342', color: 'white' }}>
@@ -960,6 +968,7 @@ const deleteResult = async (studentId, examId) => {
                 })}
               </tbody>
             </table>
+            </div>{/* end table-scroll */}
           </div>
         )}
 
@@ -1011,6 +1020,7 @@ const deleteResult = async (studentId, examId) => {
               </div>
               <p style={{ color: '#555', marginBottom: '20px' }}>Order is locked once set — student data updates in place without shuffling rows.</p>
 
+              <div className="table-scroll">
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ background: '#C0392B', color: 'white' }}>
@@ -1058,6 +1068,7 @@ const deleteResult = async (studentId, examId) => {
                   )}
                 </tbody>
               </table>
+              </div>{/* end table-scroll */}
             </div>
           );
         })()}
@@ -1182,6 +1193,7 @@ const deleteResult = async (studentId, examId) => {
                 {eligibleStudents.length === 0 ? (
                   <p style={{ color: '#888', textAlign: 'center', padding: '20px' }}>No students found for this exam's section(s).</p>
                 ) : (
+                  <div className="table-scroll">
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                     <thead>
                       <tr style={{ background: '#6C3483', color: 'white' }}>
@@ -1212,6 +1224,7 @@ const deleteResult = async (studentId, examId) => {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </>
             )}
@@ -1387,6 +1400,8 @@ const deleteResult = async (studentId, examId) => {
       )}
 
       </div>
+      </div>{/* end padding wrapper */}
+
 {/* Loading overlay for question fetches — replaces the old global isLoading flash */}
       {isLoadingQuestions && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2000 }}>

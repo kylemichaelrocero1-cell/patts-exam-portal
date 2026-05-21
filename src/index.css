@@ -1,262 +1,469 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+/* ═══════════════════════════════════════════════
+   PATTS College of Aeronautics — Design System
+   ═══════════════════════════════════════════════ */
 :root {
-  --patts-blue: #0A2342;
-  --patts-gold: #F4D03F;
-  --correct: #27AE60;
-  --incorrect: #E74C3C;
-  --bg-color: #F8F9FA;
+  /* Brand */
+  --navy:       #0A2342;
+  --navy-dark:  #061829;
+  --navy-mid:   #163660;
+  --navy-light: #1e4a82;
+  --navy-tint:  #EDF3FB;
+  --navy-50:    #F4F8FD;
+
+  --gold:       #C49830;
+  --gold-bright:#F4D03F;
+  --gold-pale:  #FDF7E4;
+  --gold-dark:  #9A7620;
+
+  /* Status */
+  --success:    #1B6B3A;
+  --success-bg: #EDF7F2;
+  --success-bd: #A3D9B8;
+  --danger:     #B92B1A;
+  --danger-bright:#E74C3C;
+  --danger-bg:  #FEF3F2;
+  --danger-bd:  #F5B7B1;
+  --warning:    #A56B0A;
+  --warning-bg: #FFF8EC;
+  --warning-bd: #F9C87A;
+  --info:       #1558A8;
+  --info-bg:    #EBF5FF;
+  --info-bd:    #90C2F0;
+  --purple:     #5D2D82;
+  --purple-bg:  #F5EFF8;
+
+  /* Neutrals */
+  --white:      #FFFFFF;
+  --bg:         #ECF0F7;
+  --surface:    #FFFFFF;
+  --surface-2:  #F7FAFC;
+  --border:     #DDE5EF;
+  --border-lt:  #EEF3F9;
+  --text-1:     #0D1B2E;
+  --text-2:     #3A5068;
+  --text-3:     #667E96;
+  --text-4:     #9AAFC2;
+
+  /* Elevation */
+  --s-xs: 0 1px 2px rgba(10,35,66,.07);
+  --s-sm: 0 1px 4px rgba(10,35,66,.08),0 2px 8px rgba(10,35,66,.04);
+  --s-md: 0 3px 12px rgba(10,35,66,.09),0 1px 4px rgba(10,35,66,.05);
+  --s-lg: 0 8px 28px rgba(10,35,66,.11),0 3px 8px rgba(10,35,66,.06);
+  --s-xl: 0 20px 60px rgba(10,35,66,.13),0 8px 20px rgba(10,35,66,.07);
+
+  /* Shape */
+  --r-xs:  4px;
+  --r-sm:  7px;
+  --r-md:  11px;
+  --r-lg:  15px;
+  --r-xl:  20px;
+  --r-2xl: 28px;
+  --r-full:9999px;
+
+  /* Motion */
+  --ease:   cubic-bezier(.4,0,.2,1);
+  --t-fast: 130ms cubic-bezier(.4,0,.2,1);
+  --t:      220ms cubic-bezier(.4,0,.2,1);
+  --t-slow: 340ms cubic-bezier(.4,0,.2,1);
 }
+
+/* ── Reset & Base ───────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  background-color: var(--bg-color);
-  color: #333;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text-1);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* ── Layout ─────────────────────────────────── */
 .app-container {
-  max-width: 1200px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 24px;
 }
 
+/* ── Header ─────────────────────────────────── */
 .header {
-  background-color: var(--patts-blue);
+  background: linear-gradient(110deg, var(--navy-dark) 0%, var(--navy) 55%, var(--navy-mid) 100%);
   color: white;
-  padding: 20px;
-  border-radius: 8px;
+  padding: 18px 28px;
+  border-radius: var(--r-lg);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  border-bottom: 5px solid var(--patts-gold);
+  margin-bottom: 24px;
+  border-bottom: 3px solid var(--gold);
+  box-shadow: var(--s-lg);
 }
 
+/* ── Login Card ──────────────────────────────── */
 .login-container {
-  max-width: 400px;
-  margin: 100px auto;
-  background: white;
-  padding: 30px;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-  border-top: 5px solid var(--patts-blue);
+  max-width: 440px;
+  margin: 60px auto;
+  background: var(--white);
+  border-radius: var(--r-xl);
+  box-shadow: var(--s-xl);
+  overflow: hidden;
+  border: 1px solid var(--border);
 }
 
-.form-group {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 15px;
+/* ── Inputs ──────────────────────────────────── */
+input:not([type='checkbox']):not([type='radio']),
+textarea,
+select {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--r-sm);
+  outline: none;
+  width: 100%;
+  background: var(--white);
+  color: var(--text-1);
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 
-input {
-  padding: 10px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  margin-top: 5px;
+input:not([type='checkbox']):not([type='radio']):focus,
+textarea:focus,
+select:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(10,35,66,.09);
 }
 
+input:disabled, textarea:disabled {
+  background: var(--surface-2);
+  color: var(--text-4);
+  cursor: not-allowed;
+}
+
+/* ── Buttons ─────────────────────────────────── */
 button {
-  background-color: var(--patts-gold);
-  color: var(--patts-blue);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  background: var(--navy);
+  color: var(--white);
   border: none;
-  padding: 12px;
-  font-weight: bold;
-  border-radius: 4px;
+  padding: 10px 20px;
+  border-radius: var(--r-sm);
   cursor: pointer;
   width: 100%;
+  transition: background var(--t-fast), transform var(--t-fast), box-shadow var(--t-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
-button:hover {
-  background-color: #d4b22c;
+button:hover:not(:disabled) {
+  background: var(--navy-mid);
+  box-shadow: var(--s-sm);
+  transform: translateY(-1px);
 }
 
+button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* ── Exam Layout ─────────────────────────────── */
 .exam-layout {
   display: flex;
   gap: 20px;
+  align-items: flex-start;
 }
 
 .main-panel {
   flex: 2;
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: var(--white);
+  padding: 30px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-md);
 }
 
 .side-panel {
   flex: 1;
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  background: var(--white);
+  padding: 22px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--s-md);
+  position: sticky;
+  top: 20px;
 }
 
+/* ── Question Navigator ──────────────────────── */
 .grid-container {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 10px;
-  margin-top: 20px;
-  /* Add these 3 lines below to make it scrollable! */
-  max-height: 400px; 
-  overflow-y: auto;  
-  padding-right: 5px;
+  gap: 7px;
+  margin-top: 14px;
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .grid-item {
-  padding: 10px;
+  padding: 9px;
   text-align: center;
-  background: #eee;
-  border-radius: 4px;
+  background: var(--surface-2);
+  border-radius: var(--r-xs);
   cursor: pointer;
-  font-weight: bold;
+  font-weight: 600;
+  font-size: 13px;
+  border: 1.5px solid transparent;
+  transition: all var(--t-fast);
+  color: var(--text-3);
+}
+
+.grid-item:hover {
+  border-color: var(--navy);
+  color: var(--navy);
+  background: var(--navy-tint);
 }
 
 .grid-item.active {
-  background: var(--patts-blue);
+  background: var(--navy);
   color: white;
+  border-color: var(--navy);
 }
 
 .grid-item.answered {
-  background: var(--patts-gold);
-  color: var(--patts-blue);
+  background: var(--gold-pale);
+  color: var(--gold-dark);
+  border-color: var(--gold);
+  font-weight: 700;
+}
+
+.grid-item.active.answered {
+  background: var(--navy);
+  color: var(--gold-bright);
+  border-color: var(--navy);
+}
+
+/* ── Choices ─────────────────────────────────── */
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .choice-btn {
   display: block;
   width: 100%;
   text-align: left;
-  margin-bottom: 10px;
-  background: #fff;
-  border: 1px solid #ccc;
-  color: #333;
+  background: var(--white);
+  border: 2px solid var(--border);
+  color: var(--text-2);
+  padding: 14px 20px;
+  border-radius: var(--r-md);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.5;
+  transition: all var(--t-fast);
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.choice-btn:hover:not(:disabled) {
+  background: var(--navy-tint);
+  border-color: var(--navy);
+  color: var(--navy);
+  transform: none;
+  box-shadow: none;
 }
 
 .choice-btn.selected {
-  background: var(--patts-blue);
+  background: var(--navy);
   color: white;
-  border-color: var(--patts-blue);
+  border-color: var(--navy);
+  box-shadow: var(--s-sm);
+  font-weight: 500;
 }
-/* --- ANTI-CHEAT FEATURES --- */
+
+/* ── Anti-cheat ──────────────────────────────── */
 .prevent-select {
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
-  -ms-user-select: none;
 }
 
-/* Add this to the bottom of your index.css */
-.slider:before {
+/* ── Admin tab buttons — no lift on hover ───── */
+.admin-tabs button:hover:not(:disabled),
+.admin-tabs button:active:not(:disabled) {
+  transform: none !important;
+  box-shadow: none !important;
+  background: none !important;
+}
+
+/* ── Choice button — tap feedback on touch ───── */
+.choice-btn:active:not(:disabled) {
+  background: var(--navy-tint) !important;
+  border-color: var(--navy) !important;
+  transform: none !important;
+}
+
+/* ── Toggle Switch ───────────────────────────── */
+.slider::before {
   position: absolute;
   content: "";
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
+  height: 26px; width: 26px;
+  left: 4px; bottom: 4px;
+  background: white;
   transition: .4s;
   border-radius: 50%;
 }
+input:checked + .slider::before { transform: translateX(26px); }
 
-input:checked + .slider:before {
-  transform: translateX(26px);
+/* ── Tables ──────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+
+thead tr { background: var(--navy); }
+thead th {
+  padding: 12px 16px;
+  color: white;
+  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-align: left;
 }
-/* --- MOBILE RESPONSIVENESS FOR EXAM BOARD --- */
-/* --- UPGRADED MOBILE RESPONSIVENESS --- */
+
+tbody tr {
+  border-bottom: 1px solid var(--border-lt);
+  transition: background var(--t-fast);
+}
+tbody tr:hover { background: var(--navy-50); }
+tbody td { padding: 12px 16px; vertical-align: middle; }
+
+/* ── Form Group ──────────────────────────────── */
+.form-group { display: flex; flex-direction: column; margin-bottom: 16px; }
+
+/* ── Responsive Utilities ────────────────────── */
+
+/* Horizontal scroll wrapper for tables */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--r-sm);
+}
+
+/* Exam card layout (used in ExamList) */
+.exam-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.exam-card-actions { flex-shrink: 0; margin-left: 20px; }
+.exam-card-btns { display: flex; gap: 10px; }
+
+/* ── iPad Landscape (≤ 1024px) ───────────────── */
+@media (max-width: 1024px) {
+  .app-container { padding: 16px; }
+  .main-panel { padding: 22px; }
+  .side-panel { padding: 16px; position: relative; top: 0; }
+  .header { padding: 14px 20px; }
+}
+
+/* ── iPad Portrait / Large phone (≤ 768px) ───── */
 @media (max-width: 768px) {
-  /* Forces the layout to stack */
-  .exam-layout {
-    display: flex !important;
-    flex-direction: column-reverse !important; 
-    gap: 15px !important;
-  }
+  .app-container { padding: 14px; }
 
-  /* Forces the side panel to shrink into a neat top-box */
+  /* Exam layout stacks */
+  .exam-layout { flex-direction: column-reverse !important; gap: 14px !important; }
   .side-panel {
-    width: 100% !important;
-    max-height: 250px !important;
-    overflow-y: auto !important;
-    padding: 15px !important;
-    border-bottom: 3px solid #0A2342 !important;
-    margin-bottom: 10px !important;
-    position: relative !important;
+    width: 100% !important; max-height: 240px !important;
+    overflow-y: auto !important; padding: 14px !important;
+    position: relative !important; top: 0 !important;
   }
-
-  /* Compresses the question grid */
   .grid-container {
-    grid-template-columns: repeat(auto-fill, minmax(35px, 1fr)) !important;
+    grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)) !important;
     gap: 6px !important;
   }
+  .grid-item { padding: 6px !important; font-size: 12px !important; }
+  .choice-btn { padding: 12px 14px !important; }
 
-  .grid-item {
-    padding: 6px !important;
-    font-size: 14px !important;
-  }
+  /* Hide local-time block in exam header to save space */
+  .exam-header-meta { display: none !important; }
 
-  /* Forces choices to stack fully */
-  .choices {
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 10px !important;
-  }
+  /* Reduce exam layout padding on tablet */
+  .exam-layout { padding: 14px !important; }
 
-  .choice-btn {
-    width: 100% !important;
-    text-align: left !important;
-    padding: 12px !important;
-  }
+  /* Hide tab scrollbar while keeping scroll functional */
+  .admin-tabs > div { scrollbar-width: none; }
+  .admin-tabs > div::-webkit-scrollbar { display: none; }
+
+  /* Exam card stacks vertically */
+  .exam-card { flex-direction: column !important; align-items: stretch !important; gap: 14px !important; }
+  .exam-card-actions { margin-left: 0 !important; width: 100% !important; }
+  .exam-card-btns { width: 100% !important; }
+  .exam-card-btns button { flex: 1 !important; }
+
+  /* Admin padding */
+  .admin-content { padding: 14px !important; }
+  .admin-tabs  { padding: 0 14px !important; }
 }
 
-/* --- NATIVE PDF EXPORT FORMATTING --- */
+/* ── Small phone (≤ 480px) ───────────────────── */
+@media (max-width: 480px) {
+  /* Login fills screen edge-to-edge */
+  .login-container { margin: 0 !important; border-radius: 0 !important; min-height: 100dvh; }
+
+  /* Exam header: hide student name, tighten gaps */
+  .exam-student-name { display: none !important; }
+  .exam-header-right { gap: 8px !important; }
+  .exam-timer { font-size: 18px !important; padding: 5px 10px !important; }
+
+  /* Reduce exam layout padding further on small phones */
+  .exam-layout { padding: 10px !important; }
+
+  /* Admin header compact — hide subtitle, shrink buttons */
+  .admin-header { padding: 12px 14px !important; }
+  .admin-header-subtitle { display: none !important; }
+  .admin-header-btns button { padding: 7px 12px !important; font-size: 12px !important; }
+  .admin-tabs button { padding: 12px 10px !important; font-size: 12px !important; }
+
+  /* Submit modal full width */
+  .submit-modal-inner { border-radius: 0 !important; min-height: 100dvh; justify-content: center; }
+
+  /* Section selector welcome card */
+  .welcome-card { border-radius: 0 !important; }
+}
+
+/* ── Print ───────────────────────────────────── */
 @media print {
-  /* 1. Force background graphics (Progress Bars) */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  
-  /* 2. Hide everything else on the website */
-  body * {
-    visibility: hidden; 
-  }
-
-  /* 3. CRITICAL FIX: Disable the fixed dark wrapper so it stops squishing Page 2 */
-  .print-modal-overlay {
-    position: static !important;
-    display: block !important;
-    background: none !important;
-  }
-  
-  /* 4. Un-hide the specific box we tagged with "print-zone" */
-  .print-zone, .print-zone * {
-    visibility: visible; 
-  }
-  
-  /* 5. Let the modal flow naturally down the paper like a normal document */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body * { visibility: hidden; }
+  .print-modal-overlay { position: static !important; display: block !important; background: none !important; }
+  .print-zone, .print-zone * { visibility: visible; }
   .print-zone {
-    position: static !important;
-    width: 100% !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: white !important;
-    padding: 0 !important;
-    margin: 0 !important;
+    position: static !important; width: 100% !important;
+    height: auto !important; max-height: none !important;
+    overflow: visible !important; background: white !important;
+    padding: 0 !important; margin: 0 !important;
   }
-  
-  /* 6. Break the flexbox/grid layout so cards stack cleanly */
-  .print-zone > div {
-    display: block !important;
-  }
-
-  /* 7. Prevent questions from splitting across pages */
+  .print-zone > div { display: block !important; }
   .print-zone > div > div {
     display: block !important;
     break-inside: avoid !important;
     page-break-inside: avoid !important;
-    margin-bottom: 40px !important; 
+    margin-bottom: 40px !important;
   }
-  
-  /* 8. Hide the Close/Print buttons on the final PDF */
-  .print-zone button {
-    display: none !important;
-  }
+  .print-zone button { display: none !important; }
 }

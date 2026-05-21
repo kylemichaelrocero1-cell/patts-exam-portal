@@ -414,39 +414,62 @@ export default function ExamBoard({ student, exam, examSet }) {
     }
   }, [answers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
 
-  if (isLoading && !isSubmitting) return <h2 style={{textAlign: 'center', marginTop: '100px'}}>Loading Exam...</h2>;
+  if (isLoading && !isSubmitting) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
+      <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
+        <p style={{ margin: 0, fontWeight: 600 }}>Loading Exam…</p>
+      </div>
+    </div>
+  );
 
   if (scoreDisplay) {
     return (
-      <div className="app-container">
-        <header className="header"><h1>PATTS College of Aeronautics</h1></header>
-        <div className="login-container" style={{ textAlign: 'center', marginTop: '50px' }}>
-          <h2>Exam Complete!</h2>
-          <div style={{ margin: '30px 0', padding: '30px', background: '#F8F9FA', borderRadius: '8px', border: '2px solid #0A2342' }}>
-            <h3 style={{ color: '#27AE60' }}>Answers Saved Successfully.</h3>
-            <p>You may now exit the portal.</p>
+      <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
+        <header className="header" style={{ borderRadius: 0, marginBottom: 0, padding: '14px 28px' }}>
+          <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: '38px', width: 'auto', objectFit: 'contain' }} />
+        </header>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
+          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', boxShadow: 'var(--s-xl)', overflow: 'hidden', maxWidth: '480px', width: '100%', border: '1px solid var(--border)' }}>
+            <div style={{ background: 'linear-gradient(135deg, var(--success) 0%, #2E9E5A 100%)', padding: '40px 36px', textAlign: 'center' }}>
+              <div style={{ fontSize: '52px', marginBottom: '12px' }}>✅</div>
+              <h2 style={{ margin: 0, color: 'white', fontSize: '22px', fontWeight: 800 }}>Exam Complete!</h2>
+              <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.8)', fontSize: '14px' }}>Your answers have been saved successfully.</p>
+            </div>
+            <div style={{ padding: '32px 36px', textAlign: 'center' }}>
+              <p style={{ margin: '0 0 24px', color: 'var(--text-3)', fontSize: '14px' }}>You may now close this window or log out.</p>
+              <button onClick={() => window.location.reload()} style={{ background: 'var(--navy)', padding: '13px', fontSize: '15px' }}>
+                Log Out
+              </button>
+            </div>
           </div>
-          <button onClick={() => window.location.reload()}>Log Out</button>
         </div>
       </div>
     );
   }
 
-  // --- FIX 4: THE STRICT BLACKOUT LOCK SCREEN ---
   if (examStatus === 'locked') {
     return (
-      <div className="app-container prevent-select" style={{ background: '#000', color: '#fff', height: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '20px' }}>
-        <h1 style={{ fontSize: '70px', color: '#E74C3C', margin: 0, border: '5px solid #E74C3C', padding: '20px', borderRadius: '10px' }}>🚨 CHEATING DETECTED 🚨</h1>
-        <p style={{ fontSize: '26px', marginTop: '30px', fontWeight: 'bold' }}>Your exam has been paused by the system.</p>
-        <p style={{ fontSize: '20px', color: '#E74C3C', margin: '15px 0' }}>Violations Recorded: {tabSwitchCount}</p>
-        
-        <div style={{ background: '#1a0000', padding: '30px', borderRadius: '8px', border: '1px solid #E74C3C', marginTop: '20px', maxWidth: '700px' }}>
-          <p style={{ fontSize: '18px', color: '#ccc', margin: 0, lineHeight: '1.6' }}>
-            This system has recorded multiple attempts to bypass security protocols. You are now locked out of the exam. 
-            <br/><br/>
-            In accordance with the <strong>Student Handbook</strong>, academic dishonesty and cheating will be sanctioned accordingly. 
-            Your instructor has been notified of this incident. Please raise your hand and wait for further instructions.
-          </p>
+      <div className="prevent-select" style={{ background: '#000', color: '#fff', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
+        <div style={{ maxWidth: '680px', width: '100%' }}>
+          <div style={{ border: '4px solid #E74C3C', borderRadius: '16px', padding: '32px 24px', marginBottom: '24px', background: 'rgba(231,76,60,.08)' }}>
+            <div style={{ fontSize: '56px', marginBottom: '12px' }}>🚨</div>
+            <h1 style={{ fontSize: '32px', color: '#E74C3C', margin: '0 0 8px', fontWeight: 800, letterSpacing: '-.01em' }}>EXAM SUSPENDED</h1>
+            <p style={{ fontSize: '16px', color: 'rgba(255,255,255,.85)', margin: 0 }}>Your exam has been paused by the system.</p>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+            <span style={{ background: 'rgba(231,76,60,.15)', border: '1px solid rgba(231,76,60,.4)', color: '#E74C3C', padding: '8px 20px', borderRadius: '9999px', fontSize: '15px', fontWeight: 700 }}>
+              ⚠️ {tabSwitchCount} Violation{tabSwitchCount !== 1 ? 's' : ''} Recorded
+            </span>
+          </div>
+          <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(231,76,60,.3)', borderRadius: '12px', padding: '24px 28px' }}>
+            <p style={{ fontSize: '15px', color: 'rgba(255,255,255,.75)', margin: 0, lineHeight: '1.7' }}>
+              This system has recorded multiple attempts to bypass security protocols. You are now locked out of the exam.
+              <br /><br />
+              In accordance with the <strong style={{ color: 'white' }}>Student Handbook</strong>, academic dishonesty will be sanctioned accordingly.
+              Your instructor has been notified. Please <strong style={{ color: 'white' }}>raise your hand</strong> and wait for further instructions.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -455,73 +478,122 @@ export default function ExamBoard({ student, exam, examSet }) {
   const currentQ = questions[currentQuestion - 1] || {};
 
   return (
-    <div className="app-container prevent-select" onContextMenu={(e) => e.preventDefault()}>
-      
+    <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--bg)' }} onContextMenu={e => e.preventDefault()}>
+
       {showSubmitModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.8)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: 'white', padding: '30px', borderRadius: '12px', maxWidth: '450px', width: '90%', textAlign: 'center', color: '#333' }}>
-            <h2 style={{ color: '#E74C3C' }}>Final Submission</h2>
-            <p>You have answered <strong>{Object.keys(answers).length} / {questions.length}</strong> questions.</p>
-            <p style={{ fontSize: '14px', color: '#666' }}>To confirm, please type <strong>submit now</strong> below:</p>
-            <input 
-              type="text" 
-              value={confirmText} 
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder="type here..."
-              style={{ width: '100%', padding: '12px', margin: '15px 0', borderRadius: '4px', border: '2px solid #ccc', textAlign: 'center', fontSize: '16px' }}
-            />
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button style={{ background: '#ccc', color: '#333' }} onClick={() => {setShowSubmitModal(false); setConfirmText('');}}>Cancel</button>
-              <button 
-                style={{ background: confirmText.toLowerCase() === 'submit now' ? '#27AE60' : '#aaa' }}
-                disabled={confirmText.toLowerCase() !== 'submit now' || isSubmitting}
-                onClick={executeSubmission}
-              >
-                {isSubmitting ? 'Saving...' : 'Submit Exam'}
-              </button>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
+          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: '440px', width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
+            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '24px 28px', borderBottom: '3px solid var(--gold)' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: 700 }}>Final Submission</h2>
+              <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.7)', fontSize: '13px' }}>
+                {Object.keys(answers).length} of {questions.length} questions answered
+              </p>
+            </div>
+            <div style={{ padding: '28px' }}>
+              {Object.keys(answers).length < questions.length && (
+                <div style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: 'var(--warning)', fontWeight: 500 }}>
+                  ⚠️ {questions.length - Object.keys(answers).length} question{questions.length - Object.keys(answers).length !== 1 ? 's' : ''} left unanswered.
+                </div>
+              )}
+              <p style={{ margin: '0 0 14px', color: 'var(--text-3)', fontSize: '14px', textAlign: 'center' }}>
+                Type <strong style={{ color: 'var(--navy)' }}>submit now</strong> to confirm:
+              </p>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder="type here…"
+                style={{ textAlign: 'center', fontSize: '16px', borderColor: confirmText.toLowerCase() === 'submit now' ? 'var(--success)' : 'var(--border)' }}
+              />
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)', flex: 1 }}
+                  onClick={() => { setShowSubmitModal(false); setConfirmText(''); }}>
+                  Cancel
+                </button>
+                <button
+                  style={{ background: confirmText.toLowerCase() === 'submit now' ? 'var(--success)' : 'var(--text-4)', flex: 1 }}
+                  disabled={confirmText.toLowerCase() !== 'submit now' || isSubmitting}
+                  onClick={executeSubmission}
+                >
+                  {isSubmitting ? 'Saving…' : 'Submit Exam'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '22px' }}>PATTS College of Aeronautics</h1>
-          <p style={{ margin: 0, fontSize: '14px' }}>{student?.full_name} | Set {examSet}</p>
+      <header className="header" style={{ borderRadius: 0, marginBottom: 0, padding: '12px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
+          <p className="exam-student-name" style={{ margin: 0, fontSize: '13px', color: 'rgba(255,255,255,.75)' }}>{student?.full_name} &nbsp;·&nbsp; Set {examSet}</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{ fontSize: '12px', textAlign: 'right' }}>Local Time<br/><strong>{localTime}</strong></div>
-          <div style={{ background: tabSwitchCount > 0 ? '#E74C3C' : 'rgba(255,255,255,0.2)', padding: '5px 12px', borderRadius: '6px', fontWeight: 'bold' }}>⚠️ {tabSwitchCount}</div>
-          <div style={{ fontSize: '24px', fontWeight: 'bold', color: timeLeft <= 300 ? '#E74C3C' : 'white' }}>{formatTime(timeLeft)}</div>
+        <div className="exam-header-right" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="exam-header-meta" style={{ fontSize: '11px', textAlign: 'right', color: 'rgba(255,255,255,.65)', lineHeight: '1.5' }}>
+            Local Time<br /><strong style={{ color: 'white', fontSize: '13px' }}>{localTime}</strong>
+          </div>
+          <div style={{
+            background: tabSwitchCount > 0 ? 'rgba(231,76,60,.25)' : 'rgba(255,255,255,.12)',
+            border: `1px solid ${tabSwitchCount > 0 ? 'rgba(231,76,60,.5)' : 'rgba(255,255,255,.2)'}`,
+            color: tabSwitchCount > 0 ? '#FF8F85' : 'rgba(255,255,255,.8)',
+            padding: '5px 14px', borderRadius: 'var(--r-full)', fontWeight: 700, fontSize: '13px',
+          }}>
+            ⚠️ {tabSwitchCount}
+          </div>
+          <div className="exam-timer" style={{
+            fontSize: '22px', fontWeight: 800, letterSpacing: '-.01em',
+            color: timeLeft <= 300 ? '#FF8F85' : 'white',
+            background: timeLeft <= 300 ? 'rgba(231,76,60,.2)' : 'rgba(255,255,255,.1)',
+            padding: '6px 16px', borderRadius: 'var(--r-sm)',
+            border: timeLeft <= 300 ? '1px solid rgba(231,76,60,.4)' : '1px solid rgba(255,255,255,.15)',
+          }}>
+            {formatTime(timeLeft)}
+          </div>
         </div>
       </header>
 
-      <div className="exam-layout">
+      <div className="exam-layout" style={{ padding: '20px 24px' }}>
         <main className="main-panel">
-          <h2>Question {currentQuestion}</h2>
-          <p style={{ fontSize: '18px', minHeight: '80px' }}>{currentQ?.question_text}</p>
-        <div className="choices">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
+            <span style={{ background: 'var(--navy)', color: 'white', borderRadius: 'var(--r-sm)', padding: '4px 12px', fontSize: '13px', fontWeight: 700 }}>
+              Question {currentQuestion}
+            </span>
+            <span style={{ color: 'var(--text-4)', fontSize: '13px' }}>of {questions.length}</span>
+          </div>
+          <p style={{ fontSize: '17px', lineHeight: '1.65', color: 'var(--text-1)', minHeight: '72px', margin: '0 0 20px' }}>{currentQ?.question_text}</p>
+          <div className="choices">
             {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
               const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
               return (
-                <button 
+                <button
                   key={letter}
-                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`} 
+                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
                   onClick={() => setAnswers({...answers, [currentQ.id]: originalIndex})}
                 >
-                   {currentQ[`choice_${letter}`]}
+                  {currentQ[`choice_${letter}`]}
                 </button>
               );
             })}
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '30px' }}>
-            <button style={{ width: 'auto', background: '#ccc' }} onClick={() => setCurrentQuestion(q => Math.max(1, q-1))} disabled={currentQuestion === 1}>Previous</button>
-            <button style={{ width: 'auto' }} onClick={() => setCurrentQuestion(q => Math.min(questions.length, q+1))} disabled={currentQuestion === questions.length}>Next</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '28px', gap: '12px' }}>
+            <button style={{ width: 'auto', flex: 1, background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}
+              onClick={() => setCurrentQuestion(q => Math.max(1, q-1))} disabled={currentQuestion === 1}>
+              ← Previous
+            </button>
+            <button style={{ width: 'auto', flex: 1 }}
+              onClick={() => setCurrentQuestion(q => Math.min(questions.length, q+1))} disabled={currentQuestion === questions.length}>
+              Next →
+            </button>
           </div>
         </main>
 
         <aside className="side-panel">
-          <h3>Navigator</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Navigator</h3>
+            <span style={{ fontSize: '12px', color: 'var(--text-4)' }}>
+              {Object.keys(answers).length}/{questions.length}
+            </span>
+          </div>
           <div className="grid-container">
             {questions.map((q, i) => (
               <div key={q.id} onClick={() => setCurrentQuestion(i+1)} className={`grid-item ${currentQuestion === i+1 ? 'active' : ''} ${answers[q.id] !== undefined ? 'answered' : ''}`}>
@@ -529,7 +601,28 @@ export default function ExamBoard({ student, exam, examSet }) {
               </div>
             ))}
           </div>
-          <button style={{ marginTop: '20px', background: '#27AE60' }} onClick={() => setShowSubmitModal(true)}>Submit Final Exam</button>
+          <div style={{ marginTop: '16px', padding: '12px', background: 'var(--navy-tint)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-3)', marginBottom: '6px' }}>
+              <span>Answered</span>
+              <span style={{ fontWeight: 700, color: Object.keys(answers).length === questions.length ? 'var(--success)' : 'var(--navy)' }}>
+                {Object.keys(answers).length} / {questions.length}
+              </span>
+            </div>
+            <div style={{ background: 'var(--border)', borderRadius: 'var(--r-full)', height: '5px', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 'var(--r-full)',
+                background: Object.keys(answers).length === questions.length ? 'var(--success)' : 'var(--gold)',
+                width: `${questions.length > 0 ? (Object.keys(answers).length / questions.length) * 100 : 0}%`,
+                transition: 'width var(--t)',
+              }} />
+            </div>
+          </div>
+          <button
+            style={{ marginTop: '14px', background: 'linear-gradient(135deg, var(--success), #25A55A)', boxShadow: 'var(--s-sm)' }}
+            onClick={() => setShowSubmitModal(true)}
+          >
+            Submit Final Exam
+          </button>
         </aside>
       </div>
     </div>

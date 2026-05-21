@@ -15,20 +15,20 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   useEffect(() => {
-    fetchExams();
+    fetchExams(false);
 
-    // Refresh exam list in real time when instructor opens/closes an exam
+    // Silent refresh — no spinner so students aren't disrupted when instructor opens/closes an exam
     const channel = supabase.channel('examlist-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => {
-        fetchExams();
+        fetchExams(true);
       })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [selectedSection]);
 
-  const fetchExams = async () => {
-    setIsLoading(true);
+  const fetchExams = async (silent = false) => {
+    if (!silent) setIsLoading(true);
     setFetchError(false);
     try {
       // Select only safe columns — exam_password is never sent to the client
@@ -150,156 +150,139 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     }
   };
 
-  if (isLoading) return <h2 style={{ textAlign: 'center', marginTop: '100px', color: '#0A2342' }}>Loading Exams...</h2>;
+  if (isLoading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
+      <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
+        <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
+        <p style={{ margin: 0, fontWeight: 600 }}>Loading Exams…</p>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="app-container" style={{ padding: '40px', backgroundColor: '#F4F7F9', minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
 
       {/* PASSWORD GATE MODAL */}
       {pendingExam && (
-        <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
           <form
             onSubmit={handlePasswordSubmit}
-            style={{ background: 'white', padding: '40px', borderRadius: '12px', maxWidth: '420px', width: '90%', textAlign: 'center', color: '#333' }}
+            style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: '400px', width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}
           >
-            <div style={{ fontSize: '48px', marginBottom: '10px' }}>🔒</div>
-            <h2 style={{ color: '#0A2342', marginTop: 0, marginBottom: '8px' }}>Exam Password Required</h2>
-            <p style={{ color: '#555', marginBottom: '6px', fontSize: '15px' }}>
-              <strong>{pendingExam.title}</strong>
-            </p>
-            <p style={{ color: '#777', fontSize: '14px', marginBottom: '24px' }}>
-              Ask your instructor for today's exam password.
-            </p>
-            <input
-              type="password"
-              value={enteredPassword}
-              onChange={(e) => setEnteredPassword(e.target.value)}
-              placeholder="Enter password"
-              autoFocus
-              disabled={isVerifyingPassword}
-              style={{ width: '100%', padding: '14px', borderRadius: '6px', border: `2px solid ${passwordError ? '#E74C3C' : '#ccc'}`, fontSize: '18px', textAlign: 'center', letterSpacing: '3px', boxSizing: 'border-box', marginBottom: '10px' }}
-            />
-            {passwordError && (
-              <p style={{ color: '#E74C3C', fontWeight: 'bold', margin: '0 0 16px 0', fontSize: '14px' }}>{passwordError}</p>
-            )}
-            <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-              <button
-                type="button"
-                onClick={() => setPendingExam(null)}
+            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '28px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
+              <div style={{ fontSize: '36px', marginBottom: '8px' }}>🔒</div>
+              <h2 style={{ color: 'white', margin: 0, fontSize: '18px', fontWeight: 700 }}>Password Required</h2>
+              <p style={{ color: 'rgba(244,208,63,.85)', margin: '6px 0 0', fontSize: '13px', fontWeight: 500 }}>{pendingExam.title}</p>
+            </div>
+            <div style={{ padding: '28px' }}>
+              <p style={{ color: 'var(--text-3)', fontSize: '14px', textAlign: 'center', margin: '0 0 20px' }}>
+                Ask your instructor for today's exam password.
+              </p>
+              <input
+                type="password"
+                value={enteredPassword}
+                onChange={e => setEnteredPassword(e.target.value)}
+                placeholder="Enter password"
+                autoFocus
                 disabled={isVerifyingPassword}
-                style={{ flex: 1, background: '#ccc', color: '#333', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!enteredPassword || isVerifyingPassword}
-                style={{ flex: 1, background: enteredPassword && !isVerifyingPassword ? '#0A2342' : '#aaa', color: 'white', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: enteredPassword ? 'pointer' : 'not-allowed', fontSize: '15px' }}
-              >
-                {isVerifyingPassword ? 'Verifying...' : 'Enter Exam'}
-              </button>
+                style={{ textAlign: 'center', fontSize: '20px', letterSpacing: '4px', padding: '14px', borderColor: passwordError ? 'var(--danger)' : 'var(--border)' }}
+              />
+              {passwordError && (
+                <p style={{ color: 'var(--danger)', fontWeight: 600, margin: '10px 0 0', fontSize: '13px', textAlign: 'center' }}>{passwordError}</p>
+              )}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button type="button" onClick={() => setPendingExam(null)} disabled={isVerifyingPassword}
+                  style={{ flex: 1, background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={!enteredPassword || isVerifyingPassword}
+                  style={{ flex: 1, background: enteredPassword && !isVerifyingPassword ? 'var(--navy)' : 'var(--text-4)' }}>
+                  {isVerifyingPassword ? 'Verifying…' : 'Enter Exam'}
+                </button>
+              </div>
             </div>
           </form>
         </div>
       )}
 
-      <header className="header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0A2342', padding: '20px', borderRadius: '8px' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '24px', color: '#FFFFFF' }}>PATTS College of Aeronautics</h1>
-          <p style={{ margin: 0, color: '#D1D1D1' }}>Welcome, <strong style={{ color: '#FFFFFF' }}>{student.full_name}</strong></p>
+      {/* Header */}
+      <header className="header" style={{ borderRadius: 0, marginBottom: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
+          <p style={{ margin: 0, color: 'rgba(255,255,255,.8)', fontSize: '13.5px' }}>
+            Welcome, <strong style={{ color: 'white' }}>{student.full_name}</strong>
+          </p>
         </div>
-        <button onClick={onLogout} style={{ width: 'auto', background: '#E74C3C', color: '#FFFFFF', fontWeight: 'bold', border: 'none', padding: '10px 20px', borderRadius: '5px', cursor: 'pointer' }}>Log Out</button>
+        <button onClick={onLogout} style={{ background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.25)', color: 'white', padding: '9px 20px', width: 'auto', fontSize: '13px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+          Log Out
+        </button>
       </header>
 
-      <div style={{ marginTop: '40px' }}>
-        <h2 style={{ color: '#0A2342', marginBottom: '25px', borderBottom: '2px solid #0A2342', paddingBottom: '10px' }}>Available Examinations</h2>
+      {/* Content */}
+      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '36px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
+          <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>Available Examinations</h2>
+          <span style={{ background: 'var(--navy-tint)', color: 'var(--navy)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}>
+            {exams.length} open
+          </span>
+        </div>
 
         {fetchError ? (
-          <div style={{ background: '#FADBD8', padding: '40px', borderRadius: '12px', textAlign: 'center', border: '2px solid #E74C3C' }}>
-            <p style={{ color: '#C0392B', fontSize: '18px', fontWeight: 'bold' }}>⚠️ Could not load exams. Please check your internet connection and refresh the page.</p>
-            <button onClick={fetchExams} style={{ marginTop: '15px', background: '#E74C3C', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Retry</button>
+          <div style={{ background: 'var(--danger-bg)', padding: '32px', borderRadius: 'var(--r-lg)', textAlign: 'center', border: '1px solid var(--danger-bd)' }}>
+            <p style={{ color: 'var(--danger)', fontSize: '16px', fontWeight: 600, margin: '0 0 16px' }}>⚠️ Could not load exams. Please check your internet connection.</p>
+            <button onClick={fetchExams} style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '10px 24px' }}>Retry</button>
           </div>
         ) : exams.length === 0 ? (
-          <div style={{ background: 'white', padding: '40px', borderRadius: '12px', textAlign: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
-            <p style={{ color: '#555', fontSize: '18px' }}>No exams are currently open. Please wait for your instructor.</p>
+          <div style={{ background: 'var(--white)', padding: '52px 32px', borderRadius: 'var(--r-xl)', textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
+            <p style={{ color: 'var(--text-2)', fontSize: '17px', fontWeight: 600, margin: 0 }}>No open exams at the moment.</p>
+            <p style={{ color: 'var(--text-3)', fontSize: '14px', margin: '8px 0 0' }}>Please wait for your instructor to open an exam.</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '25px' }}>
+          <div style={{ display: 'grid', gap: '16px' }}>
             {exams.map(exam => {
               const isAlreadyDone = completedExams.includes(exam.id);
-
               return (
-                <div key={exam.id} style={{
-                  background: '#FFFFFF',
-                  padding: '30px',
-                  borderRadius: '12px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
-                  borderLeft: isAlreadyDone ? '10px solid #27AE60' : '10px solid #3498DB'
+                <div key={exam.id} className="exam-card" style={{
+                  background: 'var(--white)',
+                  borderRadius: 'var(--r-lg)',
+                  boxShadow: 'var(--s-sm)',
+                  border: '1px solid var(--border)',
+                  borderLeft: `5px solid ${isAlreadyDone ? 'var(--success)' : 'var(--navy)'}`,
+                  padding: '22px 28px',
+                  transition: 'box-shadow var(--t-fast)',
                 }}>
-                  <div>
-                    <h3 style={{ margin: '0 0 8px 0', color: '#0A2342', fontSize: '22px' }}>{exam.title}</h3>
-                    <p style={{ margin: 0, color: '#444', fontSize: '16px' }}>Time Limit: <strong style={{ color: '#0A2342' }}>{exam.duration_minutes} Minutes</strong></p>
-                    {exam.has_password && !isAlreadyDone && (
-                      <p style={{ margin: '6px 0 0', color: '#E67E22', fontSize: '13px', fontWeight: 'bold' }}>🔒 Password required</p>
-                    )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 style={{ margin: '0 0 6px', color: 'var(--navy)', fontSize: '18px', fontWeight: 700 }}>{exam.title}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        ⏱ <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
+                      </span>
+                      {exam.has_password && !isAlreadyDone && (
+                        <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
+                          🔒 Password required
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div style={{ textAlign: 'right' }}>
+                  <div className="exam-card-actions">
                     {isAlreadyDone ? (
                       <div style={{ textAlign: 'center' }}>
-                        <span style={{
-                          background: '#D5F5E3',
-                          color: '#1E8449',
-                          padding: '12px 24px',
-                          borderRadius: '30px',
-                          fontWeight: '900',
-                          display: 'inline-block',
-                          fontSize: '14px',
-                          border: '1px solid #27AE60'
-                        }}>
-                          ✅ EXAM SUBMITTED
+                        <span style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--success-bd)' }}>
+                          ✅ Submitted
                         </span>
-                        <p style={{ fontSize: '12px', color: '#777', marginTop: '8px' }}>Your responses have been recorded.</p>
+                        <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: '6px', marginBottom: 0 }}>Responses recorded.</p>
                       </div>
                     ) : (
-                      <div style={{ display: 'flex', gap: '15px' }}>
-                        <button
-                          disabled={isCheckingSession}
-                          style={{
-                            width: 'auto',
-                            padding: '14px 28px',
-                            background: isCheckingSession ? '#aaa' : '#0A2342',
-                            color: '#FFFFFF',
-                            fontWeight: 'bold',
-                            fontSize: '15px',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: isCheckingSession ? 'not-allowed' : 'pointer'
-                          }}
-                          onClick={() => handleStartClick(exam, 'A')}
-                        >
-                          {isCheckingSession ? 'Checking...' : 'Start Set A'}
+                      <div className="exam-card-btns">
+                        <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'A')}
+                          style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                          {isCheckingSession ? 'Checking…' : 'Set A'}
                         </button>
-
-                        <button
-                          disabled={isCheckingSession}
-                          style={{
-                            width: 'auto',
-                            padding: '14px 28px',
-                            background: isCheckingSession ? '#aaa' : '#34495E',
-                            color: '#FFFFFF',
-                            fontWeight: 'bold',
-                            fontSize: '15px',
-                            border: 'none',
-                            borderRadius: '6px',
-                            cursor: isCheckingSession ? 'not-allowed' : 'pointer'
-                          }}
-                          onClick={() => handleStartClick(exam, 'B')}
-                        >
-                          {isCheckingSession ? 'Checking...' : 'Start Set B'}
+                        <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'B')}
+                          style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy-mid)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                          {isCheckingSession ? 'Checking…' : 'Set B'}
                         </button>
                       </div>
                     )}

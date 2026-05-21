@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function AdminDashboard({ onLogout }) {
   // Navigation State
@@ -529,6 +530,39 @@ const deleteResult = async (studentId, examId) => {
 
   const uniqueSections = ['All', ...new Set(Object.values(students).map(s => s.section).filter(Boolean))];
 
+  // --- RESULTS STATISTICS ---
+  const resultStats = (() => {
+    const n = filteredAndSortedResults.length;
+    if (n === 0) return null;
+    const pcts = filteredAndSortedResults.map(r => r.total_items > 0 ? (r.score / r.total_items) * 100 : 0);
+    const sorted = [...pcts].sort((a, b) => a - b);
+    const sum = pcts.reduce((a, b) => a + b, 0);
+    const mean = sum / n;
+    const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
+    const variance = pcts.reduce((acc, p) => acc + Math.pow(p - mean, 2), 0) / n;
+    const stdDev = Math.sqrt(variance);
+    const highest = sorted[n - 1];
+    const lowest = sorted[0];
+    const passing = pcts.filter(p => p >= 75).length;
+    const passRate = (passing / n) * 100;
+    const brackets = [
+      { label: '0–49%', min: 0, max: 49, color: '#E74C3C' },
+      { label: '50–59%', min: 50, max: 59, color: '#E67E22' },
+      { label: '60–69%', min: 60, max: 69, color: '#F39C12' },
+      { label: '70–74%', min: 70, max: 74, color: '#F1C40F' },
+      { label: '75–79%', min: 75, max: 79, color: '#2ECC71' },
+      { label: '80–89%', min: 80, max: 89, color: '#27AE60' },
+      { label: '90–100%', min: 90, max: 100, color: '#1A8A4A' },
+    ];
+    const distribution = brackets.map(b => ({
+      ...b,
+      count: pcts.filter(p => p >= b.min && p <= b.max).length,
+    }));
+    const avgTimeSec = filteredAndSortedResults.reduce((a, r) => a + (r.time_taken_seconds || 0), 0) / n;
+    const avgViolations = filteredAndSortedResults.reduce((a, r) => a + (r.tab_switches || 0), 0) / n;
+    return { n, mean, median, stdDev, highest, lowest, passRate, distribution, avgTimeSec, avgViolations };
+  })();
+
   const exportCSV = () => {
     const headers = ['Name', 'Section', 'Exam', 'Score', 'Total Items', 'Percentage', 'Time Taken (s)', 'Violations'];
     const rows = filteredAndSortedResults.map(row => {
@@ -578,9 +612,9 @@ const deleteResult = async (studentId, examId) => {
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         boxShadow: 'var(--s-lg)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <img src="/patts-logo.png" alt="PATTS" style={{ height: '44px', width: 'auto', objectFit: 'contain' }} />
-          <div>
+        <div className="admin-header-left" style={{ display: 'flex', alignItems: 'center', gap: '16px', minWidth: 0 }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: '44px', width: 'auto', objectFit: 'contain', flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: 700 }}>Instructor Dashboard</h1>
             {lastRefreshed && <p className="admin-header-subtitle" style={{ margin: '2px 0 0', color: 'rgba(255,255,255,.45)', fontSize: '12px' }}>Updated {lastRefreshed}</p>}
           </div>
@@ -680,6 +714,53 @@ const deleteResult = async (studentId, examId) => {
                 </button>
               </div>
             </div>
+
+            {/* --- STATS PANEL --- */}
+            {resultStats && (
+              <div style={{ marginBottom: '24px' }}>
+                {/* Stat Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(115px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                  {[
+                    { label: 'Students', value: resultStats.n, color: '#0A2342', sub: 'in filter' },
+                    { label: 'Average', value: `${resultStats.mean.toFixed(1)}%`, color: '#2980B9', sub: 'mean score' },
+                    { label: 'Median', value: `${resultStats.median.toFixed(1)}%`, color: '#8E44AD', sub: '50th percentile' },
+                    { label: 'Highest', value: `${resultStats.highest.toFixed(1)}%`, color: '#27AE60', sub: 'top score' },
+                    { label: 'Lowest', value: `${resultStats.lowest.toFixed(1)}%`, color: '#E74C3C', sub: 'bottom score' },
+                    { label: 'Pass Rate', value: `${resultStats.passRate.toFixed(1)}%`, color: resultStats.passRate >= 75 ? '#27AE60' : '#E67E22', sub: '≥75% passing' },
+                    { label: 'Std Dev', value: `${resultStats.stdDev.toFixed(1)}%`, color: '#7F8C8D', sub: 'score spread' },
+                    { label: 'Avg Time', value: (() => { const m = Math.floor(resultStats.avgTimeSec / 60); const s = Math.round(resultStats.avgTimeSec % 60); return `${m}m ${s}s`; })(), color: '#16A085', sub: 'per student' },
+                    { label: 'Avg Violations', value: resultStats.avgViolations.toFixed(1), color: resultStats.avgViolations > 1 ? '#E74C3C' : '#95A5A6', sub: 'tab switches' },
+                  ].map(card => (
+                    <div key={card.label} style={{ background: 'white', border: `2px solid ${card.color}20`, borderRadius: '10px', padding: '14px 12px', textAlign: 'center', boxShadow: '0 1px 4px rgba(0,0,0,.06)' }}>
+                      <div style={{ fontSize: '11px', color: '#888', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: '6px' }}>{card.label}</div>
+                      <div style={{ fontSize: '22px', fontWeight: 800, color: card.color, lineHeight: 1 }}>{card.value}</div>
+                      <div style={{ fontSize: '11px', color: '#aaa', marginTop: '4px' }}>{card.sub}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Score Distribution Chart */}
+                <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '18px 20px', boxShadow: '0 1px 4px rgba(0,0,0,.06)' }}>
+                  <div style={{ fontWeight: 700, fontSize: '13px', color: '#0A2342', marginBottom: '14px' }}>Score Distribution</div>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={resultStats.distribution} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#555' }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#555' }} />
+                      <Tooltip
+                        formatter={(value) => [`${value} student${value !== 1 ? 's' : ''}`, 'Count']}
+                        contentStyle={{ fontSize: '12px', borderRadius: '6px' }}
+                      />
+                      <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                        {resultStats.distribution.map((entry, i) => (
+                          <Cell key={i} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
 
             <div className="table-scroll">
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>

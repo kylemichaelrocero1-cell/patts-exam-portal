@@ -433,10 +433,13 @@ tbody td { padding: 12px 16px; vertical-align: middle; }
   /* Reduce exam layout padding further on small phones */
   .exam-layout { padding: 10px !important; }
 
-  /* Admin header compact — hide subtitle, shrink buttons */
-  .admin-header { padding: 12px 14px !important; }
+  /* Admin header compact — prevent title wrap, keep buttons visible */
+  .admin-header { padding: 10px 12px !important; }
   .admin-header-subtitle { display: none !important; }
-  .admin-header-btns button { padding: 7px 12px !important; font-size: 12px !important; }
+  .admin-header-btns { flex-shrink: 0 !important; }
+  .admin-header-btns button { padding: 6px 8px !important; font-size: 11px !important; }
+  .admin-header-left { min-width: 0 !important; flex: 1 !important; }
+  .admin-header h1 { font-size: 13px !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .admin-tabs button { padding: 12px 10px !important; font-size: 12px !important; }
 
   /* Submit modal full width */

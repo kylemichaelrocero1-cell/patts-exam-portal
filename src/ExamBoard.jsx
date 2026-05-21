@@ -319,7 +319,14 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
 
       if (data) {
-        let seed = student?.id ? student.id.charCodeAt(0) + student.id.charCodeAt(student.id.length - 1) : 123;
+        let seed = 0;
+        if (student?.id) {
+          for (let i = 0; i < student.id.length; i++) {
+            seed = (seed * 31 + student.id.charCodeAt(i)) >>> 0;
+          }
+        } else {
+          seed = 123;
+        }
         const seededRandom = () => {
           let x = Math.sin(seed++) * 10000;
           return x - Math.floor(x);

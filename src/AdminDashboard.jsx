@@ -44,6 +44,15 @@ const [targetSection, setTargetSection] = useState('');
   const [attendanceExam, setAttendanceExam] = useState('');
   const [attendanceSection, setAttendanceSection] = useState('All');
 
+  // --- QUESTION MANAGEMENT STATES ---
+  const [qExamId, setQExamId] = useState('');
+  const [qList, setQList] = useState([]);
+  const [qLoading, setQLoading] = useState(false);
+  const [qSaving, setQSaving] = useState(false);
+  const [editingQ, setEditingQ] = useState(null); // null = add mode, object = edit mode
+  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', correct_answer: 0 };
+  const [qForm, setQForm] = useState(emptyQ);
+
   // Helper to load questions — uses a separate loading state so the dashboard never disappears
   const loadExamQuestions = async (examId) => {
     if (examQuestionsCache[examId]) return examQuestionsCache[examId];
@@ -87,7 +96,14 @@ const [targetSection, setTargetSection] = useState('');
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'live_sessions' }, payload => {
         if (payload.new.status !== 'finished') {
-          setLiveSessions(prev => [...prev, payload.new]);
+          setLiveSessions(prev => {
+            // Skip if we already have a session for this student+exam
+            const isDuplicate = prev.some(s =>
+              s.student_id === payload.new.student_id && s.exam_id === payload.new.exam_id
+            );
+            if (isDuplicate) return prev;
+            return [...prev, payload.new];
+          });
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'live_sessions' }, payload => {
@@ -118,7 +134,23 @@ const [targetSection, setTargetSection] = useState('');
   const fetchLiveSessions = async () => {
     const { data } = await supabase.from('live_sessions').select('*').neq('status', 'finished');
     if (data) {
-      setLiveSessions([...data].sort((a, b) => (a.student_name || '').localeCompare(b.student_name || '')));
+      // Deduplicate by student+exam: prefer locked status, then most recently updated
+      const sessionMap = new Map();
+      data.forEach(s => {
+        const key = `${s.student_id}_${s.exam_id}`;
+        const existing = sessionMap.get(key);
+        if (!existing) {
+          sessionMap.set(key, s);
+        } else if (s.status === 'locked' && existing.status !== 'locked') {
+          sessionMap.set(key, s);
+        } else if (existing.status !== 'locked') {
+          const existTime = new Date(existing.updated_at || 0).getTime();
+          const newTime = new Date(s.updated_at || 0).getTime();
+          if (newTime > existTime) sessionMap.set(key, s);
+        }
+      });
+      const deduped = [...sessionMap.values()];
+      setLiveSessions(deduped.sort((a, b) => (a.student_name || '').localeCompare(b.student_name || '')));
     }
   };
 
@@ -152,6 +184,76 @@ const [targetSection, setTargetSection] = useState('');
     if (stuckIds.length === 0) return alert("No stuck sessions found.");
     await supabase.from('live_sessions').update({ status: 'finished' }).in('id', stuckIds);
     setLiveSessions(prev => prev.filter(s => !stuckIds.includes(s.id)));
+  };
+
+  // --- QUESTION MANAGEMENT FUNCTIONS ---
+  const loadQuestionList = async (examId) => {
+    if (!examId) { setQList([]); return; }
+    setQLoading(true);
+    const { data } = await supabase.from('questions').select('*').eq('exam_id', examId).order('id', { ascending: true });
+    setQList(data || []);
+    setQLoading(false);
+  };
+
+  const handleQExamChange = (examId) => {
+    setQExamId(examId);
+    setEditingQ(null);
+    setQForm(emptyQ);
+    loadQuestionList(examId);
+  };
+
+  const saveQuestion = async () => {
+    if (!qExamId) return;
+    if (!qForm.question_text.trim()) return alert('Question text is required.');
+    if (!qForm.choice_a.trim() || !qForm.choice_b.trim() || !qForm.choice_c.trim() || !qForm.choice_d.trim())
+      return alert('All four choices are required.');
+
+    setQSaving(true);
+    const payload = {
+      exam_id: qExamId,
+      question_text: qForm.question_text.trim(),
+      choice_a: qForm.choice_a.trim(),
+      choice_b: qForm.choice_b.trim(),
+      choice_c: qForm.choice_c.trim(),
+      choice_d: qForm.choice_d.trim(),
+      correct_answer: Number(qForm.correct_answer),
+    };
+
+    let error;
+    if (editingQ) {
+      ({ error } = await supabase.from('questions').update(payload).eq('id', editingQ.id));
+    } else {
+      ({ error } = await supabase.from('questions').insert([payload]));
+    }
+
+    if (error) {
+      alert('Error saving question: ' + error.message);
+    } else {
+      setEditingQ(null);
+      setQForm(emptyQ);
+      loadQuestionList(qExamId);
+    }
+    setQSaving(false);
+  };
+
+  const deleteQuestion = async (questionId) => {
+    if (!window.confirm('Delete this question permanently?')) return;
+    const { error } = await supabase.from('questions').delete().eq('id', questionId);
+    if (error) alert('Error deleting question: ' + error.message);
+    else loadQuestionList(qExamId);
+  };
+
+  const startEditQuestion = (q) => {
+    setEditingQ(q);
+    setQForm({
+      question_text: q.question_text,
+      choice_a: q.choice_a,
+      choice_b: q.choice_b,
+      choice_c: q.choice_c,
+      choice_d: q.choice_d,
+      correct_answer: Number(q.correct_answer),
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
 async function fetchDashboardData() {
@@ -252,11 +354,15 @@ const deleteResult = async (studentId, examId) => {
   // --- NEW: Delete Exam ---
   const deleteExam = async (examId) => {
     if (window.confirm("🚨 Are you sure? This will delete the exam, its questions, and all student results associated with it forever!")) {
+      // Delete dependents first so no orphaned rows remain regardless of DB cascade config
+      await supabase.from('live_sessions').delete().eq('exam_id', examId);
+      await supabase.from('results').delete().eq('exam_id', examId);
+      await supabase.from('questions').delete().eq('exam_id', examId);
       const { error } = await supabase.from('exams').delete().eq('id', examId);
       if (error) {
         alert("Error deleting exam: " + error.message);
       } else {
-        fetchDashboardData(); // Refresh the list
+        fetchDashboardData();
       }
     }
   };
@@ -317,14 +423,17 @@ const deleteResult = async (studentId, examId) => {
 
   const savePassword = async (examId) => {
     const newPassword = editingPasswords[examId] || '';
-    const { error } = await supabase.from('exams').update({ exam_password: newPassword || null }).eq('id', examId);
+    const { error } = await supabase.from('exams').update({
+      exam_password: newPassword || null,
+      has_password: !!newPassword,
+    }).eq('id', examId);
     if (error) {
       alert("Error saving password. Please try again.");
       console.error(error);
       return;
     }
     alert(newPassword ? "Exam password saved!" : "Password cleared — no password required.");
-    setExamsList(prev => prev.map(e => e.id === examId ? { ...e, exam_password: newPassword || null } : e));
+    setExamsList(prev => prev.map(e => e.id === examId ? { ...e, exam_password: newPassword || null, has_password: !!newPassword } : e));
   };
 
   // --- NEW: Save Student Section ---
@@ -514,6 +623,13 @@ const deleteResult = async (studentId, examId) => {
           onClick={() => setActiveTab('attendance')}
         >
           📋 Attendance
+        </button>
+        {/* Questions Tab */}
+        <button
+          style={{ background: activeTab === 'questions' ? '#27AE60' : '#ccc', color: activeTab === 'questions' ? 'white' : '#333', flex: 1, fontWeight: 'bold' }}
+          onClick={() => setActiveTab('questions')}
+        >
+          📝 Questions
         </button>
       </div>
 
@@ -1103,6 +1219,173 @@ const deleteResult = async (studentId, examId) => {
         );
       })()}
 
+      {/* --- TAB 6: QUESTION MANAGEMENT --- */}
+      {activeTab === 'questions' && (
+        <div style={{ background: '#F0FFF4', padding: '20px', borderRadius: '8px', border: '2px solid #27AE60' }}>
+          <h3 style={{ margin: '0 0 16px 0', color: '#1E8449' }}>📝 Question Management</h3>
+
+          {/* Exam selector */}
+          <div style={{ marginBottom: '20px' }}>
+            <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px', color: '#333' }}>Select Exam to Manage:</label>
+            <select
+              value={qExamId}
+              onChange={e => handleQExamChange(e.target.value)}
+              style={{ padding: '10px 14px', borderRadius: '6px', border: '1px solid #ccc', fontSize: '15px', minWidth: '280px' }}
+            >
+              <option value="">— Choose an exam —</option>
+              {examsList.map(e => (
+                <option key={e.id} value={e.id}>{e.title}</option>
+              ))}
+            </select>
+          </div>
+
+          {qExamId && (
+            <>
+              {/* Add / Edit Form */}
+              <div style={{ background: 'white', padding: '20px', borderRadius: '8px', border: '1px solid #A9DFBF', marginBottom: '24px' }}>
+                <h4 style={{ margin: '0 0 16px 0', color: '#1E8449' }}>
+                  {editingQ ? `✏️ Editing Question #${qList.findIndex(q => q.id === editingQ.id) + 1}` : '➕ Add New Question'}
+                </h4>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>Question Text:</label>
+                  <textarea
+                    value={qForm.question_text}
+                    onChange={e => setQForm(f => ({ ...f, question_text: e.target.value }))}
+                    placeholder="Enter the question..."
+                    rows={3}
+                    style={{ width: '100%', padding: '10px', border: '1px solid #ccc', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box', resize: 'vertical' }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                  {['a', 'b', 'c', 'd'].map((letter, i) => (
+                    <div key={letter}>
+                      <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '4px' }}>
+                        Choice {letter.toUpperCase()}
+                        {Number(qForm.correct_answer) === i && (
+                          <span style={{ marginLeft: '8px', background: '#27AE60', color: 'white', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 'bold' }}>✓ Correct</span>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        value={qForm[`choice_${letter}`]}
+                        onChange={e => setQForm(f => ({ ...f, [`choice_${letter}`]: e.target.value }))}
+                        placeholder={`Choice ${letter.toUpperCase()}...`}
+                        style={{ width: '100%', padding: '9px', border: `2px solid ${Number(qForm.correct_answer) === i ? '#27AE60' : '#ccc'}`, borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginBottom: '16px' }}>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '8px' }}>Correct Answer:</label>
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                    {['A', 'B', 'C', 'D'].map((letter, i) => (
+                      <label key={letter} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: Number(qForm.correct_answer) === i ? 'bold' : 'normal', color: Number(qForm.correct_answer) === i ? '#1E8449' : '#333' }}>
+                        <input
+                          type="radio"
+                          name="correct_answer"
+                          value={i}
+                          checked={Number(qForm.correct_answer) === i}
+                          onChange={() => setQForm(f => ({ ...f, correct_answer: i }))}
+                          style={{ width: '16px', height: '16px' }}
+                        />
+                        Choice {letter}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <button
+                    onClick={saveQuestion}
+                    disabled={qSaving}
+                    style={{ background: '#27AE60', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', opacity: qSaving ? 0.7 : 1 }}
+                  >
+                    {qSaving ? 'Saving...' : editingQ ? 'Update Question' : 'Add Question'}
+                  </button>
+                  {editingQ && (
+                    <button
+                      onClick={() => { setEditingQ(null); setQForm(emptyQ); }}
+                      style={{ background: '#95A5A6', color: 'white', border: 'none', padding: '10px 18px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Question List */}
+              {qLoading ? (
+                <p style={{ textAlign: 'center', color: '#555' }}>Loading questions...</p>
+              ) : qList.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#888', padding: '20px' }}>No questions yet. Add the first one above.</p>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span style={{ fontWeight: 'bold', color: '#1E8449' }}>{qList.length} question{qList.length !== 1 ? 's' : ''} total</span>
+                  </div>
+                  <div style={{ display: 'grid', gap: '12px' }}>
+                    {qList.map((q, idx) => (
+                      <div
+                        key={q.id}
+                        style={{
+                          background: editingQ?.id === q.id ? '#EAF8EE' : 'white',
+                          border: `2px solid ${editingQ?.id === q.id ? '#27AE60' : '#ddd'}`,
+                          borderRadius: '8px',
+                          padding: '16px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                          <p style={{ margin: '0 0 10px 0', fontWeight: 'bold', color: '#333', flex: 1 }}>
+                            <span style={{ color: '#27AE60', marginRight: '8px' }}>{idx + 1}.</span>
+                            {q.question_text}
+                          </p>
+                          <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                            <button
+                              onClick={() => startEditQuestion(q)}
+                              style={{ background: '#3498DB', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={() => deleteQuestion(q.id)}
+                              style={{ background: '#E74C3C', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px' }}
+                            >
+                              🗑️ Delete
+                            </button>
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                          {['a', 'b', 'c', 'd'].map((letter, i) => (
+                            <div
+                              key={letter}
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: '4px',
+                                background: Number(q.correct_answer) === i ? '#D5F5E3' : '#F8F9FA',
+                                border: `1px solid ${Number(q.correct_answer) === i ? '#27AE60' : '#ddd'}`,
+                                fontSize: '13px',
+                                color: Number(q.correct_answer) === i ? '#1E8449' : '#555',
+                                fontWeight: Number(q.correct_answer) === i ? 'bold' : 'normal',
+                              }}
+                            >
+                              <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]}
+                              {Number(q.correct_answer) === i && ' ✓'}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       </div>
 {/* Loading overlay for question fetches — replaces the old global isLoading flash */}
       {isLoadingQuestions && (
@@ -1130,15 +1413,18 @@ const deleteResult = async (studentId, examId) => {
               <div style={{ background: '#FADBD8', padding: '20px', borderRadius: '8px', marginBottom: '20px', border: '2px solid #E74C3C' }}>
                 <h3 style={{ color: '#C0392B', margin: '0 0 10px 0', fontSize: '18px' }}>🚨 Security Incident Log</h3>
                 <ul style={{ margin: 0, paddingLeft: '20px', color: '#C0392B', fontSize: '15px', lineHeight: '1.6' }}>
-                  {viewingStudent.violation_logs.map((log, i) => (
-                    <li key={i}><strong>{log.substring(0, 11)}</strong> {log.substring(12)}</li>
-                  ))}
+                  {viewingStudent.violation_logs.map((log, i) => {
+                    const split = log.indexOf('] ');
+                    const ts = split >= 0 ? log.substring(0, split + 1) : '';
+                    const reason = split >= 0 ? log.substring(split + 2) : log;
+                    return <li key={i}><strong>{ts}</strong> {reason}</li>;
+                  })}
                 </ul>
               </div>
             )}
             <div style={{ display: 'grid', gap: '15px' }}>
               {(examQuestionsCache[viewingStudent.exam_id] || []).map((q, idx) => {
-                const sAnswer = viewingStudent.answers_json[q.id];
+                const sAnswer = (viewingStudent.answers_json || {})[q.id];
                 const studentChoice = sAnswer !== undefined ? Number(sAnswer.chosen) : -1;
                 const correctChoice = Number(q.correct_answer);
                 
@@ -1201,7 +1487,7 @@ const deleteResult = async (studentId, examId) => {
                 let unassignedCount = 0;
 
                 examResults.forEach(r => {
-                  const sAnswer = r.answers_json[q.id];
+                  const sAnswer = (r.answers_json || {})[q.id];
                   if (sAnswer !== undefined) counts[sAnswer.chosen]++;
                   else unassignedCount++;
                 });

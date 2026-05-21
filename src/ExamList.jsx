@@ -12,18 +12,29 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   const [pendingExam, setPendingExam] = useState(null);
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   useEffect(() => {
     fetchExams();
+
+    // Refresh exam list in real time when instructor opens/closes an exam
+    const channel = supabase.channel('examlist-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => {
+        fetchExams();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, [selectedSection]);
 
   const fetchExams = async () => {
     setIsLoading(true);
     setFetchError(false);
     try {
+      // Select only safe columns — exam_password is never sent to the client
       const { data: examsData, error: examsError } = await supabase
         .from('exams')
-        .select('*')
+        .select('id, title, is_open, duration_minutes, target_section, has_password, created_at')
         .eq('is_open', true)
         .order('created_at', { ascending: false });
 
@@ -57,10 +68,10 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   const handleStartClick = async (exam, setChoice) => {
     setIsCheckingSession(true);
     try {
-      // Re-fetch the exam to get the latest password from DB (prevents stale-data bypass)
+      // Re-fetch exam metadata (no password — confirms exam is still open and gets latest has_password)
       const { data: freshExam } = await supabase
         .from('exams')
-        .select('id, title, duration_minutes, target_section, exam_password, is_open')
+        .select('id, title, duration_minutes, target_section, has_password, is_open')
         .eq('id', exam.id)
         .single();
 
@@ -87,7 +98,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
         return;
       }
 
-      if (examData.exam_password) {
+      if (examData.has_password) {
         setPendingExam({ ...examData, _chosenSet: setChoice });
         setEnteredPassword('');
         setPasswordError('');
@@ -96,8 +107,8 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
       }
     } catch (err) {
       console.error('Session check failed:', err);
-      // Network error — fall back gracefully: use cached exam data, apply password check
-      if (exam.exam_password) {
+      // Network error — fall back gracefully using cached exam data
+      if (exam.has_password) {
         setPendingExam({ ...exam, _chosenSet: setChoice });
         setEnteredPassword('');
         setPasswordError('');
@@ -109,15 +120,33 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     }
   };
 
-  const handlePasswordSubmit = (e) => {
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
-    if (enteredPassword === pendingExam.exam_password) {
-      sessionStorage.setItem(`exam_pass_ok_${pendingExam.id}`, '1');
-      onStartExam(pendingExam, pendingExam._chosenSet);
-      setPendingExam(null);
-    } else {
-      setPasswordError('Incorrect password. Please try again.');
-      setEnteredPassword('');
+    setIsVerifyingPassword(true);
+    setPasswordError('');
+
+    try {
+      // Password verified server-side — the actual password never reaches the client
+      const { data: isValid, error } = await supabase.rpc('verify_exam_password', {
+        p_exam_id: pendingExam.id,
+        p_password: enteredPassword,
+      });
+
+      if (error) throw error;
+
+      if (isValid) {
+        sessionStorage.setItem(`exam_pass_ok_${pendingExam.id}`, '1');
+        onStartExam(pendingExam, pendingExam._chosenSet);
+        setPendingExam(null);
+      } else {
+        setPasswordError('Incorrect password. Please try again.');
+        setEnteredPassword('');
+      }
+    } catch (err) {
+      console.error('Password verification failed:', err);
+      setPasswordError('Could not verify password. Check your connection and try again.');
+    } finally {
+      setIsVerifyingPassword(false);
     }
   };
 
@@ -147,6 +176,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
               onChange={(e) => setEnteredPassword(e.target.value)}
               placeholder="Enter password"
               autoFocus
+              disabled={isVerifyingPassword}
               style={{ width: '100%', padding: '14px', borderRadius: '6px', border: `2px solid ${passwordError ? '#E74C3C' : '#ccc'}`, fontSize: '18px', textAlign: 'center', letterSpacing: '3px', boxSizing: 'border-box', marginBottom: '10px' }}
             />
             {passwordError && (
@@ -156,16 +186,17 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
               <button
                 type="button"
                 onClick={() => setPendingExam(null)}
+                disabled={isVerifyingPassword}
                 style={{ flex: 1, background: '#ccc', color: '#333', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '15px' }}
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={!enteredPassword}
-                style={{ flex: 1, background: enteredPassword ? '#0A2342' : '#aaa', color: 'white', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: enteredPassword ? 'pointer' : 'not-allowed', fontSize: '15px' }}
+                disabled={!enteredPassword || isVerifyingPassword}
+                style={{ flex: 1, background: enteredPassword && !isVerifyingPassword ? '#0A2342' : '#aaa', color: 'white', border: 'none', padding: '12px', borderRadius: '6px', fontWeight: 'bold', cursor: enteredPassword ? 'pointer' : 'not-allowed', fontSize: '15px' }}
               >
-                Enter Exam
+                {isVerifyingPassword ? 'Verifying...' : 'Enter Exam'}
               </button>
             </div>
           </form>
@@ -211,7 +242,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
                   <div>
                     <h3 style={{ margin: '0 0 8px 0', color: '#0A2342', fontSize: '22px' }}>{exam.title}</h3>
                     <p style={{ margin: 0, color: '#444', fontSize: '16px' }}>Time Limit: <strong style={{ color: '#0A2342' }}>{exam.duration_minutes} Minutes</strong></p>
-                    {exam.exam_password && !isAlreadyDone && (
+                    {exam.has_password && !isAlreadyDone && (
                       <p style={{ margin: '6px 0 0', color: '#E67E22', fontSize: '13px', fontWeight: 'bold' }}>🔒 Password required</p>
                     )}
                   </div>

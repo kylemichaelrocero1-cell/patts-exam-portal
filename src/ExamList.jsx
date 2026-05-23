@@ -17,9 +17,13 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   useEffect(() => {
     fetchExams(false);
 
-    // Silent refresh — no spinner so students aren't disrupted when instructor opens/closes an exam
+    // Silent refresh — no spinner so students aren't disrupted when instructor opens/closes an exam.
+    // Filter by is_open changes only — avoids re-fetching on unrelated exam edits.
     const channel = supabase.channel('examlist-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => {
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exams', filter: 'is_open=eq.true' }, () => {
+        fetchExams(true);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exams' }, () => {
         fetchExams(true);
       })
       .subscribe();
@@ -31,17 +35,23 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     if (!silent) setIsLoading(true);
     setFetchError(false);
     try {
-      // Select only safe columns — exam_password is never sent to the client
-      const { data: examsData, error: examsError } = await supabase
-        .from('exams')
-        .select('id, title, is_open, duration_minutes, target_section, has_password, created_at')
-        .eq('is_open', true)
-        .order('created_at', { ascending: false });
+      // Fetch exams + completed results in parallel (independent queries)
+      const [examsRes, resultsRes] = await Promise.all([
+        supabase
+          .from('exams')
+          .select('id, title, is_open, duration_minutes, target_section, has_password, created_at')
+          .eq('is_open', true)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('results')
+          .select('exam_id')
+          .eq('student_id', student.id),
+      ]);
 
-      if (examsError) throw examsError;
+      if (examsRes.error) throw examsRes.error;
 
-      if (examsData) {
-        const filtered = examsData.filter(exam => {
+      if (examsRes.data) {
+        const filtered = examsRes.data.filter(exam => {
           if (!exam.target_section) return false;
           const sections = exam.target_section.split(',').map(s => s.trim());
           return sections.includes(selectedSection);
@@ -49,13 +59,8 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
         setExams(filtered);
       }
 
-      const { data: resultsData } = await supabase
-        .from('results')
-        .select('exam_id')
-        .eq('student_id', student.id);
-
-      if (resultsData) {
-        setCompletedExams(resultsData.map(r => r.exam_id));
+      if (resultsRes.data) {
+        setCompletedExams(resultsRes.data.map(r => r.exam_id));
       }
     } catch (err) {
       console.error('Failed to load exams:', err);
@@ -151,10 +156,10 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   };
 
   if (isLoading) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
-      <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
-        <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
-        <p style={{ margin: 0, fontWeight: 600 }}>Loading Exams…</p>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--paper)' }}>
+      <div style={{ textAlign: 'center', color: 'var(--ink-3)' }}>
+        <div style={{ width: 40, height: 40, border: '3px solid var(--line)', borderTopColor: 'var(--navy)', borderRadius: '50%', animation: 'spin 0.7s linear infinite', margin: '0 auto 14px' }} />
+        <p style={{ margin: 0, fontWeight: 600, color: 'var(--ink-2)' }}>Loading Exams…</p>
       </div>
     </div>
   );
@@ -293,6 +298,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
           </div>
         )}
       </div>
+      <p style={{ textAlign: 'center', margin: '0 0 14px', fontSize: '10.5px', color: 'var(--text-4)', letterSpacing: '.14em', fontWeight: 700 }}>KMR</p>
     </div>
   );
 }

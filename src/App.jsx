@@ -24,7 +24,7 @@ export default function App() {
 
   // Admin via Supabase Auth (student.role set in Login.jsx)
   if (student?.role === 'admin') {
-    return <AdminDashboard onLogout={handleLogout} />;
+    return <AdminDashboard instructorId={student.id} instructorName={student.full_name} onLogout={handleLogout} />;
   }
 
   if (!student) {

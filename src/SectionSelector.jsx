@@ -22,7 +22,10 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
             if (e.target_section)
               e.target_section.split(',').map(s => s.trim()).filter(Boolean).forEach(s => openSections.add(s));
           });
-          setSections(enrolledSections.filter(s => openSections.has(s)).sort());
+          const enrolled = student.section
+            ? student.section.split(',').map(s => s.trim()).filter(Boolean)
+            : [];
+          setSections(enrolled.filter(s => openSections.has(s)).sort());
         }
       } catch {
         setFetchError(true);
@@ -31,7 +34,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
       }
     }
     fetchSections();
-  }, [retryCount]);
+  }, [retryCount, student.section]);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
@@ -157,6 +160,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
           )}
         </div>
       </div>
+      <p style={{ textAlign: 'center', margin: '0 0 14px', fontSize: '10.5px', color: 'var(--text-4)', letterSpacing: '.14em', fontWeight: 700 }}>KMR</p>
     </div>
   );
 }

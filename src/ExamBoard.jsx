@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
+import Icon from './components/Icon';
 
 export default function ExamBoard({ student, exam, examSet }) {
   const storageKey = `exam_progress_${student?.id}_${exam?.id}`;
@@ -7,18 +8,27 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   // --- 1. INITIAL STATE ---
   const [initialState] = useState(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (saved) return JSON.parse(saved);
-    const newProgress = { answers: {}, tabSwitchCount: 0, violationLogs: [], examStatus: 'active', endTime: Date.now() + (startingSeconds * 1000) };
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch {
+      localStorage.removeItem(storageKey);
+    }
+    const newProgress = { answers: {}, essayAnswers: {}, tabSwitchCount: 0, violationLogs: [], examStatus: 'active', endTime: Date.now() + (startingSeconds * 1000) };
     localStorage.setItem(storageKey, JSON.stringify(newProgress));
     return newProgress;
   });
 
   const [answers, setAnswers] = useState(initialState.answers);
+  const [essayAnswers, setEssayAnswers] = useState(initialState.essayAnswers || {});
+  const [flaggedQuestions, setFlaggedQuestions] = useState(initialState.flaggedQuestions || {});
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
   // Bug fix: restore violation logs from localStorage so they survive page refreshes
   const [violationLogs, setViolationLogs] = useState(initialState.violationLogs || []);
-  const endTime = initialState.endTime; 
+  const endTimeRef = useRef(initialState.endTime); // mutable so initLiveSession can clamp it
   const [timeLeft, setTimeLeft] = useState(startingSeconds);
   const [localTime, setLocalTime] = useState(new Date().toLocaleTimeString()); 
   const [currentQuestion, setCurrentQuestion] = useState(1);
@@ -39,6 +49,9 @@ export default function ExamBoard({ student, exam, examSet }) {
   const prevViolationCountRef = useRef(initialState.tabSwitchCount);
   // Prevents double-submission when two rapid clicks hit before React re-renders
   const isSubmittingRef = useRef(false);
+  // Snapshot of answers captured when submit modal opens — prevents last-second tampering
+  const answersSnapshotRef = useRef(null);
+  const essaySnapshotRef = useRef(null);
   // Debounce handle for live data pusher
   const livePushDebounceRef = useRef(null);
 
@@ -110,6 +123,20 @@ export default function ExamBoard({ student, exam, examSet }) {
           setExamStatus('active');
         } else {
           setExamStatus(existing.status);
+          // Server violation count is authoritative — prevents localStorage manipulation
+          const serverViolations = existing.violation_count || 0;
+          const effectiveViolations = Math.max(tabSwitchCount, serverViolations);
+          if (serverViolations > tabSwitchCount) setTabSwitchCount(serverViolations);
+          // Clamp endTime to server-authoritative max — prevents localStorage inflation
+          if (existing.created_at) {
+            const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;
+            if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
+          }
+          await supabase.from('live_sessions').update({
+            answers_count: Object.keys(answers).length,
+            violation_count: effectiveViolations,
+            updated_at: new Date()
+          }).eq('id', existing.id);
         }
       } else {
         // No existing session — insert. If it fails (race/duplicate), re-fetch instead.
@@ -175,6 +202,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       supabase.from('live_sessions').update({
         answers_count: Object.keys(answers).length,
         violation_count: tabSwitchCount,
+        violation_log: violationLogs,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
         if (error) console.error('Live data push failed:', error.message);
@@ -183,7 +211,7 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => {
       if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     };
-  }, [answers, tabSwitchCount, liveSessionId]);
+  }, [answers, tabSwitchCount, violationLogs, liveSessionId]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {
@@ -195,12 +223,21 @@ export default function ExamBoard({ student, exam, examSet }) {
     });
   }, [examStatus, liveSessionId]);
 
+  const toggleFlag = (questionId) => {
+    setFlaggedQuestions(prev => {
+      const next = { ...prev };
+      if (next[questionId]) delete next[questionId];
+      else next[questionId] = true;
+      return next;
+    });
+  };
+
   // --- AUTO-SAVER ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting) return;
-    const progressData = { answers, tabSwitchCount, violationLogs, examStatus, endTime };
+    const progressData = { answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
-  }, [answers, tabSwitchCount, violationLogs, examStatus, endTime, storageKey, scoreDisplay, isSubmitting]);
+  }, [answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting]);
 
   // --- TIMER & CLOCK ---
   useEffect(() => {
@@ -208,18 +245,88 @@ export default function ExamBoard({ student, exam, examSet }) {
     const timer = setInterval(() => {
       const now = Date.now();
       setLocalTime(new Date(now).toLocaleTimeString());
-      const secondsRemaining = Math.max(0, Math.floor((endTime - now) / 1000));
+      const secondsRemaining = Math.max(0, Math.floor((endTimeRef.current - now) / 1000));
       setTimeLeft(secondsRemaining);
     }, 1000);
     return () => clearInterval(timer);
-  }, [scoreDisplay, endTime, isSubmitting]);
+  }, [scoreDisplay, isSubmitting]);
+
+  // --- SUBMIT HANDLER (declared before the auto-submit effect that depends on it) ---
+  const executeSubmission = useCallback(async () => {
+    if (isSubmittingRef.current || isSubmitting) return;
+    isSubmittingRef.current = true;
+
+    setIsSubmitting(true);
+    setIsLoading(true);
+
+    try {
+      // Use snapshot captured at modal-open time; fall back to live state for auto-submit
+      const submittedAnswers = answersSnapshotRef.current ?? answers;
+      const submittedEssayAnswers = essaySnapshotRef.current ?? essayAnswers;
+      const { data: answerKey } = await supabase.from('questions').select('id, correct_answer, question_type').eq('exam_id', exam.id);
+      let correctCount = 0;
+      let mcTotal = 0;
+      const formattedAnswers = {};
+
+      (answerKey || []).forEach(questionData => {
+        const qId = String(questionData.id);
+        if ((questionData.question_type || 'multiple_choice') === 'essay') {
+          const essayText = submittedEssayAnswers[qId];
+          if (essayText?.trim()) {
+            formattedAnswers[qId] = { type: 'essay', text: essayText.trim() };
+          }
+        } else {
+          mcTotal++;
+          if (submittedAnswers[qId] !== undefined) {
+            const correctValue = Number(questionData.correct_answer);
+            const studentValue = Number(submittedAnswers[qId]);
+            const isCorrect = studentValue === correctValue;
+            if (isCorrect) correctCount++;
+            formattedAnswers[qId] = { chosen: studentValue, is_correct: isCorrect };
+          }
+        }
+      });
+
+      const { error: saveError } = await supabase.from('results').insert([{
+        student_id: student?.id,
+        exam_id: exam.id,
+        answers_json: formattedAnswers,
+        score: correctCount,
+        total_items: mcTotal,
+        time_taken_seconds: startingSeconds - timeLeft,
+        tab_switches: tabSwitchCount,
+        violation_logs: violationLogs
+      }]);
+
+      if (saveError && saveError.code !== '23505') throw saveError;
+
+      if (liveSessionId) {
+        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
+      } else {
+        await supabase.from('live_sessions').update({ status: 'finished' })
+          .eq('student_id', student?.id).eq('exam_id', exam.id);
+      }
+
+      localStorage.removeItem(storageKey);
+      setScoreDisplay({ score: saveError?.code === '23505' ? 0 : correctCount, total: questions.length });
+
+    } catch (err) {
+      alert("There was an error saving your exam. Please contact your instructor.");
+    } finally {
+      isSubmittingRef.current = false;
+      setIsLoading(false);
+      setIsSubmitting(false);
+      setShowSubmitModal(false);
+    }
+  }, [answers, essayAnswers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
+  // answersSnapshotRef / essaySnapshotRef intentionally excluded — refs are stable
 
   // --- SAFE AUTO-SUBMIT TRIGGER ---
   useEffect(() => {
     if (timeLeft === 0 && !scoreDisplay && !isSubmitting && !isLoading) {
       executeSubmission();
     }
-  }, [timeLeft, scoreDisplay, isSubmitting, isLoading]);
+  }, [timeLeft, scoreDisplay, isSubmitting, isLoading, executeSubmission]);
 
   // --- ANTI-CHEAT ---
   useEffect(() => {
@@ -354,116 +461,76 @@ export default function ExamBoard({ student, exam, examSet }) {
     loadQuestions();
   }, [exam?.id, student?.id]);
 
-  const executeSubmission = useCallback(async () => {
-    // Ref-based guard catches rapid double-clicks before React state re-renders
-    if (isSubmittingRef.current || isSubmitting) return;
-    isSubmittingRef.current = true;
-
-    setIsSubmitting(true);
-    setIsLoading(true);
-
-    try {
-      const { data: answerKey } = await supabase.from('questions').select('id, correct_answer').eq('exam_id', exam.id);
-      let correctCount = 0;
-      const formattedAnswers = {};
-
-      Object.keys(answers).forEach(qId => {
-        const questionData = answerKey.find(item => String(item.id) === String(qId));
-        if (questionData) {
-          const correctValue = Number(questionData.correct_answer);
-          const studentValue = Number(answers[qId]);
-          const isCorrect = studentValue === correctValue;
-          if (isCorrect) correctCount++;
-          formattedAnswers[qId] = { chosen: studentValue, is_correct: isCorrect };
-        }
-      });
-
-      const { error: saveError } = await supabase.from('results').insert([{
-        student_id: student?.id,
-        exam_id: exam.id,
-        answers_json: formattedAnswers,
-        score: correctCount,
-        total_items: questions.length,
-        time_taken_seconds: startingSeconds - timeLeft,
-        tab_switches: tabSwitchCount,
-        violation_logs: violationLogs
-      }]);
-
-      // 23505 = duplicate key (already submitted) — treat as success, not a hard error
-      if (saveError && saveError.code !== '23505') throw saveError;
-
-      // Always mark the live session as finished, even on duplicate submissions
-      if (liveSessionId) {
-        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
-      } else {
-        // Fallback: liveSessionId not yet set (e.g. very fast auto-submit), find by student + exam
-        await supabase.from('live_sessions').update({ status: 'finished' })
-          .eq('student_id', student?.id).eq('exam_id', exam.id);
-      }
-
-      localStorage.removeItem(storageKey);
-      setScoreDisplay({ score: saveError?.code === '23505' ? 0 : correctCount, total: questions.length });
-
-    } catch (err) {
-      alert("There was an error saving your exam. Please contact your instructor.");
-    } finally {
-      isSubmittingRef.current = false;
-      setIsLoading(false);
-      setIsSubmitting(false);
-      setShowSubmitModal(false);
-    }
-  }, [answers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
-
   if (isLoading && !isSubmitting) return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' }}>
-      <div style={{ textAlign: 'center', color: 'var(--text-3)' }}>
-        <div style={{ fontSize: '36px', marginBottom: '12px' }}>⏳</div>
-        <p style={{ margin: 0, fontWeight: 600 }}>Loading Exam…</p>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)' }}>
+      <div style={{ textAlign: 'center', color: 'var(--ink-3)' }}>
+        <Icon name="clipboard" size={38} color="var(--navy)" style={{ opacity: 0.22, marginBottom: 14 }} />
+        <p style={{ margin: 0, fontWeight: 600, fontSize: 15, color: 'var(--ink-2)' }}>Loading Exam…</p>
       </div>
     </div>
   );
 
   if (scoreDisplay) {
     return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
-        <header className="header" style={{ borderRadius: 0, marginBottom: 0, padding: '14px 28px' }}>
-          <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: '38px', width: 'auto', objectFit: 'contain' }} />
-        </header>
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px' }}>
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', boxShadow: 'var(--s-xl)', overflow: 'hidden', maxWidth: '480px', width: '100%', border: '1px solid var(--border)' }}>
-            <div style={{ background: 'linear-gradient(135deg, var(--success) 0%, #2E9E5A 100%)', padding: '40px 36px', textAlign: 'center' }}>
-              <div style={{ fontSize: '52px', marginBottom: '12px' }}>✅</div>
-              <h2 style={{ margin: 0, color: 'white', fontSize: '22px', fontWeight: 800 }}>Exam Complete!</h2>
-              <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.8)', fontSize: '14px' }}>Your answers have been saved successfully.</p>
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+
+        {/* Hero band */}
+        <div className="patts-header" style={{ padding: '36px 24px 80px', textAlign: 'center', position: 'relative' }}>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: 52, objectFit: 'contain' }} />
+            <div className="eyebrow" style={{ color: 'var(--gold-bright)', marginTop: 14, fontSize: 11 }}>
+              Online Examination Portal
             </div>
-            <div style={{ padding: '32px 36px', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 24px', color: 'var(--text-3)', fontSize: '14px' }}>You may now close this window or log out.</p>
-              <button onClick={() => window.location.reload()} style={{ background: 'var(--navy)', padding: '13px', fontSize: '15px' }}>
-                Log Out
+            <h1 className="display" style={{ color: 'white', marginTop: 8, fontSize: 24 }}>Exam Complete</h1>
+          </div>
+        </div>
+
+        {/* Result card */}
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 20px 40px', marginTop: -56, position: 'relative', zIndex: 1 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 440, padding: 0, overflow: 'hidden', boxShadow: 'var(--s-lg)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #27AE60 0%, #1E8449 100%)', padding: '36px 32px', textAlign: 'center' }}>
+              <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
+              <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your answers have been saved.</h2>
+              <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
+                {student?.full_name} · Set {examSet}
+              </p>
+            </div>
+            <div style={{ padding: '28px 32px', textAlign: 'center' }}>
+              <p style={{ margin: '0 0 22px', color: 'var(--ink-3)', fontSize: 13.5, lineHeight: 1.65 }}>
+                Your submission is recorded. You may now close this window or return to the login screen.
+              </p>
+              <button onClick={() => window.location.reload()} className="btn lg" style={{ width: '100%' }}>
+                <Icon name="login" size={16} />
+                Return to Login
               </button>
             </div>
           </div>
         </div>
+
+        <p style={{ textAlign: 'center', margin: '20px 0 14px', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.18em', fontWeight: 700 }}>
+          KMR · PATTS COLLEGE OF AERONAUTICS
+        </p>
       </div>
     );
   }
 
   if (examStatus === 'locked') {
     return (
-      <div className="prevent-select" style={{ background: '#000', color: '#fff', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
-        <div style={{ maxWidth: '680px', width: '100%' }}>
-          <div style={{ border: '4px solid #E74C3C', borderRadius: '16px', padding: '32px 24px', marginBottom: '24px', background: 'rgba(231,76,60,.08)' }}>
-            <div style={{ fontSize: '56px', marginBottom: '12px' }}>🚨</div>
-            <h1 style={{ fontSize: '32px', color: '#E74C3C', margin: '0 0 8px', fontWeight: 800, letterSpacing: '-.01em' }}>EXAM SUSPENDED</h1>
-            <p style={{ fontSize: '16px', color: 'rgba(255,255,255,.85)', margin: 0 }}>Your exam has been paused by the system.</p>
+      <div className="prevent-select" style={{ background: 'var(--navy-900)', minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', padding: '24px' }}>
+        <div style={{ maxWidth: 620, width: '100%' }}>
+          <div style={{ border: '2px solid rgba(231,76,60,.45)', borderRadius: 'var(--r-lg)', padding: '36px 28px', marginBottom: 24, background: 'rgba(231,76,60,.07)' }}>
+            <Icon name="alert" size={48} color="#E74C3C" style={{ marginBottom: 16 }} />
+            <h1 style={{ fontSize: 28, color: '#E74C3C', margin: '0 0 10px', fontWeight: 800, letterSpacing: '-.01em' }}>EXAM SUSPENDED</h1>
+            <p style={{ fontSize: 15, color: 'rgba(255,255,255,.72)', margin: 0 }}>Your exam has been paused by the system.</p>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-            <span style={{ background: 'rgba(231,76,60,.15)', border: '1px solid rgba(231,76,60,.4)', color: '#E74C3C', padding: '8px 20px', borderRadius: '9999px', fontSize: '15px', fontWeight: 700 }}>
-              ⚠️ {tabSwitchCount} Violation{tabSwitchCount !== 1 ? 's' : ''} Recorded
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(231,76,60,.14)', border: '1px solid rgba(231,76,60,.38)', color: '#E74C3C', padding: '8px 20px', borderRadius: 9999, fontSize: 14, fontWeight: 700 }}>
+              <Icon name="flag" size={14} color="#E74C3C" />
+              {tabSwitchCount} Violation{tabSwitchCount !== 1 ? 's' : ''} Recorded
             </span>
           </div>
-          <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(231,76,60,.3)', borderRadius: '12px', padding: '24px 28px' }}>
-            <p style={{ fontSize: '15px', color: 'rgba(255,255,255,.75)', margin: 0, lineHeight: '1.7' }}>
+          <div style={{ background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 'var(--r-md)', padding: '24px 28px' }}>
+            <p style={{ fontSize: 14.5, color: 'rgba(255,255,255,.68)', margin: 0, lineHeight: 1.78 }}>
               This system has recorded multiple attempts to bypass security protocols. You are now locked out of the exam.
               <br /><br />
               In accordance with the <strong style={{ color: 'white' }}>Student Handbook</strong>, academic dishonesty will be sanctioned accordingly.
@@ -471,6 +538,9 @@ export default function ExamBoard({ student, exam, examSet }) {
             </p>
           </div>
         </div>
+        <p style={{ margin: '28px 0 0', fontSize: 10, color: 'rgba(255,255,255,.14)', letterSpacing: '.18em', fontWeight: 700 }}>
+          KMR · PATTS COLLEGE OF AERONAUTICS
+        </p>
       </div>
     );
   }
@@ -478,40 +548,48 @@ export default function ExamBoard({ student, exam, examSet }) {
   const currentQ = questions[currentQuestion - 1] || {};
 
   return (
-    <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--bg)' }} onContextMenu={e => e.preventDefault()}>
+    <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--paper)' }} onContextMenu={e => e.preventDefault()}>
 
+      {/* ── Submit confirmation modal ── */}
       {showSubmitModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: '440px', width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
-            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '24px 28px', borderBottom: '3px solid var(--gold)' }}>
-              <h2 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: 700 }}>Final Submission</h2>
-              <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.7)', fontSize: '13px' }}>
-                {Object.keys(answers).length} of {questions.length} questions answered
+          <div className="card" style={{ maxWidth: 440, width: '100%', padding: 0, overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
+            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 28px', borderBottom: '3px solid var(--gold)' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
+              <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
+                {Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length} of {questions.length} questions answered
               </p>
             </div>
-            <div style={{ padding: '28px' }}>
-              {Object.keys(answers).length < questions.length && (
-                <div style={{ background: 'var(--warning-bg)', border: '1px solid var(--warning-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: '16px', fontSize: '13px', color: 'var(--warning)', fontWeight: 500 }}>
-                  ⚠️ {questions.length - Object.keys(answers).length} question{questions.length - Object.keys(answers).length !== 1 ? 's' : ''} left unanswered.
-                </div>
-              )}
-              <p style={{ margin: '0 0 14px', color: 'var(--text-3)', fontSize: '14px', textAlign: 'center' }}>
+            <div style={{ padding: '24px 28px' }}>
+              {(() => {
+                const totalAnswered = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+                const unanswered = questions.length - totalAnswered;
+                return unanswered > 0 ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--warn)', fontWeight: 500 }}>
+                    <Icon name="alert" size={15} />
+                    {unanswered} question{unanswered !== 1 ? 's' : ''} left unanswered.
+                  </div>
+                ) : null;
+              })()}
+              <p style={{ margin: '0 0 14px', color: 'var(--ink-3)', fontSize: 13.5, textAlign: 'center' }}>
                 Type <strong style={{ color: 'var(--navy)' }}>submit now</strong> to confirm:
               </p>
               <input
+                className="input"
                 type="text"
                 value={confirmText}
                 onChange={e => setConfirmText(e.target.value)}
                 placeholder="type here…"
-                style={{ textAlign: 'center', fontSize: '16px', borderColor: confirmText.toLowerCase() === 'submit now' ? 'var(--success)' : 'var(--border)' }}
+                style={{ textAlign: 'center', fontSize: 16, borderColor: confirmText.toLowerCase() === 'submit now' ? 'var(--ok)' : undefined }}
               />
-              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
-                <button style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)', flex: 1 }}
+              <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+                <button className="btn ghost" style={{ flex: 1 }}
                   onClick={() => { setShowSubmitModal(false); setConfirmText(''); }}>
                   Cancel
                 </button>
                 <button
-                  style={{ background: confirmText.toLowerCase() === 'submit now' ? 'var(--success)' : 'var(--text-4)', flex: 1 }}
+                  className="btn"
+                  style={{ flex: 1, background: confirmText.toLowerCase() === 'submit now' ? 'var(--ok)' : 'var(--ink-4)', border: 'none' }}
                   disabled={confirmText.toLowerCase() !== 'submit now' || isSubmitting}
                   onClick={executeSubmission}
                 >
@@ -523,108 +601,236 @@ export default function ExamBoard({ student, exam, examSet }) {
         </div>
       )}
 
-      <header className="header" style={{ borderRadius: 0, marginBottom: 0, padding: '12px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-          <img src="/patts-logo.png" alt="PATTS" style={{ height: '36px', width: 'auto', objectFit: 'contain' }} />
-          <p className="exam-student-name" style={{ margin: 0, fontSize: '13px', color: 'rgba(255,255,255,.75)' }}>{student?.full_name} &nbsp;·&nbsp; Set {examSet}</p>
+      {/* ── Sticky exam header ── */}
+      <header className="patts-header" style={{ padding: '11px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1 }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: 34, objectFit: 'contain', flexShrink: 0 }} />
+          <p className="exam-student-name" style={{ margin: 0, fontSize: 12.5, color: 'rgba(255,255,255,.68)', fontWeight: 500 }}>
+            {student?.full_name} &nbsp;·&nbsp; Set {examSet}
+          </p>
         </div>
-        <div className="exam-header-right" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div className="exam-header-meta" style={{ fontSize: '11px', textAlign: 'right', color: 'rgba(255,255,255,.65)', lineHeight: '1.5' }}>
-            Local Time<br /><strong style={{ color: 'white', fontSize: '13px' }}>{localTime}</strong>
+        <div className="exam-header-right" style={{ display: 'flex', alignItems: 'center', gap: 12, position: 'relative', zIndex: 1 }}>
+          <div className="exam-header-meta" style={{ fontSize: 11, textAlign: 'right', color: 'rgba(255,255,255,.52)', lineHeight: 1.5 }}>
+            Local Time<br /><strong style={{ color: 'white', fontSize: 13 }}>{localTime}</strong>
           </div>
           <div style={{
-            background: tabSwitchCount > 0 ? 'rgba(231,76,60,.25)' : 'rgba(255,255,255,.12)',
-            border: `1px solid ${tabSwitchCount > 0 ? 'rgba(231,76,60,.5)' : 'rgba(255,255,255,.2)'}`,
-            color: tabSwitchCount > 0 ? '#FF8F85' : 'rgba(255,255,255,.8)',
-            padding: '5px 14px', borderRadius: 'var(--r-full)', fontWeight: 700, fontSize: '13px',
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: tabSwitchCount > 0 ? 'rgba(231,76,60,.25)' : 'rgba(255,255,255,.1)',
+            border: `1px solid ${tabSwitchCount > 0 ? 'rgba(231,76,60,.5)' : 'rgba(255,255,255,.15)'}`,
+            color: tabSwitchCount > 0 ? '#FF8F85' : 'rgba(255,255,255,.75)',
+            padding: '5px 12px', borderRadius: 'var(--r-full)', fontWeight: 700, fontSize: 13,
           }}>
-            ⚠️ {tabSwitchCount}
+            <Icon name="flag" size={13} />
+            {tabSwitchCount}
           </div>
           <div className="exam-timer" style={{
-            fontSize: '22px', fontWeight: 800, letterSpacing: '-.01em',
+            fontSize: 22, fontWeight: 800, letterSpacing: '-.02em',
             color: timeLeft <= 300 ? '#FF8F85' : 'white',
-            background: timeLeft <= 300 ? 'rgba(231,76,60,.2)' : 'rgba(255,255,255,.1)',
+            background: timeLeft <= 300 ? 'rgba(231,76,60,.22)' : 'rgba(255,255,255,.1)',
             padding: '6px 16px', borderRadius: 'var(--r-sm)',
-            border: timeLeft <= 300 ? '1px solid rgba(231,76,60,.4)' : '1px solid rgba(255,255,255,.15)',
+            border: timeLeft <= 300 ? '1px solid rgba(231,76,60,.4)' : '1px solid rgba(255,255,255,.14)',
+            fontVariantNumeric: 'tabular-nums',
           }}>
             {formatTime(timeLeft)}
           </div>
         </div>
       </header>
 
-      <div className="exam-layout" style={{ padding: '20px 24px' }}>
+      {/* ── Exam body ── */}
+      <div className="exam-layout" style={{ padding: '20px 24px 8px' }}>
+
+        {/* Main question panel */}
         <main className="main-panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '18px' }}>
-            <span style={{ background: 'var(--navy)', color: 'white', borderRadius: 'var(--r-sm)', padding: '4px 12px', fontSize: '13px', fontWeight: 700 }}>
-              Question {currentQuestion}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+            <span style={{ background: 'var(--navy)', color: 'white', borderRadius: 'var(--r-sm)', padding: '4px 12px', fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em', flexShrink: 0 }}>
+              Q {currentQuestion}
             </span>
-            <span style={{ color: 'var(--text-4)', fontSize: '13px' }}>of {questions.length}</span>
-          </div>
-          <p style={{ fontSize: '17px', lineHeight: '1.65', color: 'var(--text-1)', minHeight: '72px', margin: '0 0 20px' }}>{currentQ?.question_text}</p>
-          <div className="choices">
-            {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
-              const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
-              return (
-                <button
-                  key={letter}
-                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
-                  onClick={() => setAnswers({...answers, [currentQ.id]: originalIndex})}
-                >
-                  {currentQ[`choice_${letter}`]}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '28px', gap: '12px' }}>
-            <button style={{ width: 'auto', flex: 1, background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}
-              onClick={() => setCurrentQuestion(q => Math.max(1, q-1))} disabled={currentQuestion === 1}>
-              ← Previous
+            <span style={{ color: 'var(--ink-4)', fontSize: 13, flexShrink: 0 }}>of {questions.length}</span>
+            {currentQ?.question_type === 'essay' && (
+              <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+                Essay
+              </span>
+            )}
+            {flaggedQuestions[currentQ?.id] && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#FFF6E5', border: '1px solid #F0CA80', color: '#A56B0A', padding: '3px 9px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>
+                <Icon name="flag" size={11} color="#E67E22" />
+                Flagged
+              </span>
+            )}
+            <button
+              onClick={() => toggleFlag(currentQ?.id)}
+              title={flaggedQuestions[currentQ?.id] ? 'Remove flag' : 'Flag for review'}
+              style={{
+                marginLeft: 'auto', flexShrink: 0,
+                width: 30, height: 30,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: flaggedQuestions[currentQ?.id] ? '#FFF6E5' : 'transparent',
+                border: `1.5px solid ${flaggedQuestions[currentQ?.id] ? '#F0CA80' : 'var(--line)'}`,
+                color: flaggedQuestions[currentQ?.id] ? '#E67E22' : 'var(--ink-4)',
+                borderRadius: 'var(--r-sm)', cursor: 'pointer', transition: 'all var(--t-1)',
+              }}
+            >
+              <Icon name="flag" size={14} />
             </button>
-            <button style={{ width: 'auto', flex: 1 }}
-              onClick={() => setCurrentQuestion(q => Math.min(questions.length, q+1))} disabled={currentQuestion === questions.length}>
-              Next →
+          </div>
+
+          <p style={{ fontSize: 17, lineHeight: 1.68, color: 'var(--ink-1)', minHeight: 72, margin: '0 0 22px' }}>
+            {currentQ?.question_text}
+          </p>
+
+          {currentQ?.question_type === 'essay' ? (
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)' }}>Type your answer in the box below.</p>
+              <textarea
+                value={essayAnswers[currentQ.id] || ''}
+                onChange={e => setEssayAnswers(prev => ({ ...prev, [currentQ.id]: e.target.value }))}
+                placeholder="Write your answer here…"
+                rows={8}
+                maxLength={8000}
+                style={{
+                  width: '100%', padding: '14px 16px', border: '2px solid', boxSizing: 'border-box',
+                  borderColor: essayAnswers[currentQ.id]?.trim() ? 'var(--navy)' : 'var(--line)',
+                  borderRadius: 'var(--r-md)', fontSize: 15, lineHeight: 1.6,
+                  resize: 'vertical', fontFamily: 'inherit', color: 'var(--ink-1)',
+                  background: 'var(--white)', transition: 'border-color var(--t-fast)',
+                  outline: 'none',
+                }}
+              />
+              <div style={{ textAlign: 'right', fontSize: 11, color: 'var(--ink-4)', marginTop: 4 }}>
+                {(essayAnswers[currentQ.id] || '').length} / 8,000
+              </div>
+            </div>
+          ) : (
+            <div className="choices">
+              {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
+                const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
+                return (
+                  <button
+                    key={letter}
+                    className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
+                    onClick={() => setAnswers({...answers, [currentQ.id]: originalIndex})}
+                  >
+                    {currentQ[`choice_${letter}`]}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 28, gap: 12 }}>
+            <button
+              className="btn ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+              onClick={() => setCurrentQuestion(q => Math.max(1, q - 1))}
+              disabled={currentQuestion === 1}
+            >
+              <Icon name="arrow-left" size={15} /> Previous
+            </button>
+            <button
+              className="btn" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+              onClick={() => setCurrentQuestion(q => Math.min(questions.length, q + 1))}
+              disabled={currentQuestion === questions.length}
+            >
+              Next <Icon name="arrow-right" size={15} />
             </button>
           </div>
         </main>
 
+        {/* Side panel — navigator + submit */}
         <aside className="side-panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-            <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: 'var(--navy)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Navigator</h3>
-            <span style={{ fontSize: '12px', color: 'var(--text-4)' }}>
-              {Object.keys(answers).length}/{questions.length}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <div className="eyebrow" style={{ fontSize: 10 }}>Navigator</div>
+            <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
+              {Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length}/{questions.length}
             </span>
           </div>
+
           <div className="grid-container">
-            {questions.map((q, i) => (
-              <div key={q.id} onClick={() => setCurrentQuestion(i+1)} className={`grid-item ${currentQuestion === i+1 ? 'active' : ''} ${answers[q.id] !== undefined ? 'answered' : ''}`}>
-                {i+1}
-              </div>
-            ))}
+            {questions.map((q, i) => {
+              const isAnswered = q.question_type === 'essay'
+                ? (essayAnswers[q.id]?.trim().length > 0)
+                : (answers[q.id] !== undefined);
+              const isFlagged = !!flaggedQuestions[q.id];
+              return (
+                <div
+                  key={q.id}
+                  onClick={() => setCurrentQuestion(i + 1)}
+                  className={`grid-item ${currentQuestion === i + 1 ? 'active' : ''} ${isAnswered ? 'answered' : ''}`}
+                  style={{ position: 'relative' }}
+                >
+                  {i + 1}
+                  {isFlagged && (
+                    <span style={{
+                      position: 'absolute', top: 2, right: 2,
+                      width: 5, height: 5, borderRadius: '50%',
+                      background: currentQuestion === i + 1 ? 'var(--navy)' : '#E67E22',
+                      display: 'block', flexShrink: 0,
+                    }} />
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div style={{ marginTop: '16px', padding: '12px', background: 'var(--navy-tint)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-3)', marginBottom: '6px' }}>
-              <span>Answered</span>
-              <span style={{ fontWeight: 700, color: Object.keys(answers).length === questions.length ? 'var(--success)' : 'var(--navy)' }}>
-                {Object.keys(answers).length} / {questions.length}
-              </span>
-            </div>
-            <div style={{ background: 'var(--border)', borderRadius: 'var(--r-full)', height: '5px', overflow: 'hidden' }}>
-              <div style={{
-                height: '100%', borderRadius: 'var(--r-full)',
-                background: Object.keys(answers).length === questions.length ? 'var(--success)' : 'var(--gold)',
-                width: `${questions.length > 0 ? (Object.keys(answers).length / questions.length) * 100 : 0}%`,
-                transition: 'width var(--t)',
-              }} />
-            </div>
+
+          <div style={{ marginTop: 16, padding: 12, background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
+            {(() => {
+              const totalAnswered = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+              const flaggedCount = Object.keys(flaggedQuestions).length;
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>
+                    <span>Answered</span>
+                    <span style={{ fontWeight: 700, color: totalAnswered === questions.length ? 'var(--ok)' : 'var(--navy)' }}>
+                      {totalAnswered} / {questions.length}
+                    </span>
+                  </div>
+                  <div style={{ background: 'var(--line)', borderRadius: 'var(--r-full)', height: 5, overflow: 'hidden', marginBottom: flaggedCount > 0 ? 10 : 0 }}>
+                    <div style={{
+                      height: '100%', borderRadius: 'var(--r-full)',
+                      background: totalAnswered === questions.length ? 'var(--ok)' : 'var(--gold)',
+                      width: `${questions.length > 0 ? (totalAnswered / questions.length) * 100 : 0}%`,
+                      transition: 'width var(--t)',
+                    }} />
+                  </div>
+                  {flaggedCount > 0 && (() => {
+                    const flaggedIndices = questions
+                      .map((q, i) => ({ i, id: q.id }))
+                      .filter(({ id }) => flaggedQuestions[id]);
+                    const nextFlagged = flaggedIndices.find(({ i }) => i >= currentQuestion) || flaggedIndices[0];
+                    return (
+                      <button
+                        onClick={() => setCurrentQuestion(nextFlagged.i + 1)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                          background: '#FFF6E5', border: '1px solid #F0CA80',
+                          borderRadius: 'var(--r-xs)', padding: '6px 10px',
+                          color: '#A56B0A', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        }}
+                      >
+                        <Icon name="flag" size={12} color="#E67E22" />
+                        {flaggedCount} flagged — jump to next
+                        <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
+                      </button>
+                    );
+                  })()}
+                </>
+              );
+            })()}
           </div>
+
           <button
-            style={{ marginTop: '14px', background: 'linear-gradient(135deg, var(--success), #25A55A)', boxShadow: 'var(--s-sm)' }}
-            onClick={() => setShowSubmitModal(true)}
+            className="btn"
+            style={{ marginTop: 14, width: '100%', background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none', boxShadow: 'var(--s-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            onClick={() => { answersSnapshotRef.current = { ...answers }; essaySnapshotRef.current = { ...essayAnswers }; setShowSubmitModal(true); }}
           >
+            <Icon name="check-circle" size={16} />
             Submit Final Exam
           </button>
         </aside>
       </div>
+
+      <p style={{ textAlign: 'center', margin: '6px 0 10px', fontSize: 10, color: 'rgba(0,0,0,.15)', letterSpacing: '.18em', fontWeight: 700 }}>
+        KMR · PATTS COLLEGE OF AERONAUTICS
+      </p>
     </div>
   );
 }

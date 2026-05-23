@@ -235,7 +235,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   // --- AUTO-SAVER ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting) return;
-    const progressData = { answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current };
+    const progressData = { answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current, examSet };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
   }, [answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting]);
 

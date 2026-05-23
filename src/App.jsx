@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import Login from './Login';
 import ExamList from './ExamList';
@@ -13,9 +13,33 @@ export default function App() {
   const [examSet, setExamSet] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
 
+  // Restore student session on page load — skips login + section selection after a refresh
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('patts_student_session');
+      if (saved) {
+        const { student: s, section } = JSON.parse(saved);
+        if (s?.id && s?.full_name && !s.role) {
+          setStudent(s);
+          if (section) setSelectedSection(section);
+        }
+      }
+    } catch {
+      localStorage.removeItem('patts_student_session');
+    }
+  }, []);
+
+  // Persist student + section so refresh lands back at ExamList
+  useEffect(() => {
+    if (student && !student.role && selectedSection) {
+      localStorage.setItem('patts_student_session', JSON.stringify({ student, section: selectedSection }));
+    }
+  }, [student, selectedSection]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut(); // No-op for students (not signed into Supabase Auth)
     localStorage.removeItem('local_session_token');
+    localStorage.removeItem('patts_student_session');
     setStudent(null);
     setSelectedSection(null);
     setSelectedExam(null);

@@ -247,13 +247,35 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
           <div style={{ display: 'grid', gap: '16px' }}>
             {exams.map(exam => {
               const isAlreadyDone = completedExams.includes(exam.id);
+
+              // Check localStorage for saved progress on this exam
+              let savedProgress = null;
+              try {
+                const raw = localStorage.getItem(`exam_progress_${student.id}_${exam.id}`);
+                if (raw) {
+                  const parsed = JSON.parse(raw);
+                  // Only treat as resumable if the exam hasn't expired and isn't finished
+                  if (parsed?.endTime > Date.now() && parsed?.examStatus !== 'finished') {
+                    savedProgress = parsed;
+                  }
+                }
+              } catch { /* ignore */ }
+
+              const isResumable = !isAlreadyDone && !!savedProgress;
+              const resumeSet = savedProgress?.examSet || 'A';
+              const answeredCount = savedProgress
+                ? Object.keys(savedProgress.answers || {}).length + Object.values(savedProgress.essayAnswers || {}).filter(t => t?.trim().length > 0).length
+                : 0;
+              const secondsLeft = savedProgress ? Math.max(0, Math.floor((savedProgress.endTime - Date.now()) / 1000)) : 0;
+              const minutesLeft = Math.floor(secondsLeft / 60);
+
               return (
                 <div key={exam.id} className="exam-card" style={{
                   background: 'var(--white)',
                   borderRadius: 'var(--r-lg)',
-                  boxShadow: 'var(--s-sm)',
-                  border: '1px solid var(--border)',
-                  borderLeft: `5px solid ${isAlreadyDone ? 'var(--success)' : 'var(--navy)'}`,
+                  boxShadow: isResumable ? 'var(--s-md)' : 'var(--s-sm)',
+                  border: `1px solid ${isResumable ? 'var(--gold)' : 'var(--border)'}`,
+                  borderLeft: `5px solid ${isAlreadyDone ? 'var(--success)' : isResumable ? 'var(--gold)' : 'var(--navy)'}`,
                   padding: '22px 28px',
                   transition: 'box-shadow var(--t-fast)',
                 }}>
@@ -263,9 +285,14 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
                       <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                         ⏱ <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
                       </span>
-                      {exam.has_password && !isAlreadyDone && (
+                      {exam.has_password && !isAlreadyDone && !isResumable && (
                         <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
                           🔒 Password required
+                        </span>
+                      )}
+                      {isResumable && (
+                        <span style={{ background: '#FFF8E1', color: '#A56B0A', border: '1px solid #F0CA80', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
+                          Set {resumeSet} · {answeredCount} answered · {minutesLeft}m left
                         </span>
                       )}
                     </div>
@@ -279,6 +306,11 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
                         </span>
                         <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: '6px', marginBottom: 0 }}>Responses recorded.</p>
                       </div>
+                    ) : isResumable ? (
+                      <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
+                        style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
+                        {isCheckingSession ? 'Checking…' : '↩ Resume Exam'}
+                      </button>
                     ) : (
                       <div className="exam-card-btns">
                         <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'A')}

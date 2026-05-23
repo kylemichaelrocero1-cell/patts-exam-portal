@@ -236,6 +236,8 @@ const [targetSection, setTargetSection] = useState('');
 
   const toggleStudentLock = async (sessionId, currentStatus) => {
     const newStatus = currentStatus === 'locked' ? 'active' : 'locked';
+    // Optimistic update — realtime doesn't echo back the instructor's own writes
+    setLiveSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status: newStatus } : s));
     await supabase.from('live_sessions').update({ status: newStatus, updated_at: new Date() }).eq('id', sessionId);
   };
 

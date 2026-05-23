@@ -914,7 +914,7 @@ const deleteResult = async (studentId, examId) => {
       return (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
     });
 
-  const uniqueSections = ['All', ...new Set(Object.values(students).map(s => s.section).filter(Boolean))];
+  const uniqueSections = ['All', ...[...instructorSections].sort()];
 
   // --- RESULTS STATISTICS ---
   const resultStats = (() => {

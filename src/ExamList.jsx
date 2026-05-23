@@ -4,6 +4,7 @@ import { supabase } from './supabase';
 export default function ExamList({ student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
+  const [activeSessions, setActiveSessions] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
@@ -35,8 +36,8 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
     if (!silent) setIsLoading(true);
     setFetchError(false);
     try {
-      // Fetch exams + completed results in parallel (independent queries)
-      const [examsRes, resultsRes] = await Promise.all([
+      // Fetch exams + completed results + active live sessions in parallel
+      const [examsRes, resultsRes, liveRes] = await Promise.all([
         supabase
           .from('exams')
           .select('id, title, is_open, duration_minutes, target_section, has_password, created_at')
@@ -46,6 +47,11 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
           .from('results')
           .select('exam_id')
           .eq('student_id', student.id),
+        supabase
+          .from('live_sessions')
+          .select('exam_id, exam_set, answers_count, status, created_at')
+          .eq('student_id', student.id)
+          .in('status', ['active', 'locked']),
       ]);
 
       if (examsRes.error) throw examsRes.error;
@@ -61,6 +67,12 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
 
       if (resultsRes.data) {
         setCompletedExams(resultsRes.data.map(r => r.exam_id));
+      }
+
+      if (liveRes.data) {
+        const sessionMap = {};
+        liveRes.data.forEach(s => { sessionMap[s.exam_id] = s; });
+        setActiveSessions(sessionMap);
       }
     } catch (err) {
       console.error('Failed to load exams:', err);
@@ -248,26 +260,14 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
             {exams.map(exam => {
               const isAlreadyDone = completedExams.includes(exam.id);
 
-              // Check localStorage for saved progress on this exam
-              let savedProgress = null;
-              try {
-                const raw = localStorage.getItem(`exam_progress_${student.id}_${exam.id}`);
-                if (raw) {
-                  const parsed = JSON.parse(raw);
-                  // Only treat as resumable if the exam hasn't expired and isn't finished
-                  if (parsed?.endTime > Date.now() && parsed?.examStatus !== 'finished') {
-                    savedProgress = parsed;
-                  }
-                }
-              } catch { /* ignore */ }
-
-              const isResumable = !isAlreadyDone && !!savedProgress;
-              const resumeSet = savedProgress?.examSet || 'A';
-              const answeredCount = savedProgress
-                ? Object.keys(savedProgress.answers || {}).length + Object.values(savedProgress.essayAnswers || {}).filter(t => t?.trim().length > 0).length
-                : 0;
-              const secondsLeft = savedProgress ? Math.max(0, Math.floor((savedProgress.endTime - Date.now()) / 1000)) : 0;
-              const minutesLeft = Math.floor(secondsLeft / 60);
+              // Use server-side live session — works across devices, not just same browser
+              const serverSession = activeSessions[exam.id];
+              const isResumable = !isAlreadyDone && !!serverSession;
+              const resumeSet = serverSession?.exam_set || 'A';
+              const answeredCount = serverSession?.answers_count || 0;
+              const minutesLeft = serverSession?.created_at
+                ? Math.max(0, Math.floor((new Date(serverSession.created_at).getTime() + exam.duration_minutes * 60000 - Date.now()) / 60000))
+                : null;
 
               return (
                 <div key={exam.id} className="exam-card" style={{
@@ -292,7 +292,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
                       )}
                       {isResumable && (
                         <span style={{ background: '#FFF8E1', color: '#A56B0A', border: '1px solid #F0CA80', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
-                          Set {resumeSet} · {answeredCount} answered · {minutesLeft}m left
+                          Set {resumeSet} · {answeredCount} answered{minutesLeft !== null ? ` · ${minutesLeft}m left` : ''}
                         </span>
                       )}
                     </div>

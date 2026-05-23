@@ -84,10 +84,10 @@ export default function ExamBoard({ student, exam, examSet }) {
     let channel;
 
     const initLiveSession = async () => {
-      // .limit(1) without .order() — safe even if live_sessions has no created_at column.
-      // .order('created_at') was silently failing on some DB setups, returning null rows,
-      // causing the INSERT branch to run and fail (duplicate), leaving liveSessionId null
-      // and making the data + lock pushers no-ops for the entire exam session.
+      const hasLocalAnswers =
+        Object.keys(initialState.answers || {}).length > 0 ||
+        Object.keys(initialState.essayAnswers || {}).length > 0;
+
       const { data: rows } = await supabase.from('live_sessions')
         .select('*')
         .eq('student_id', student.id)
@@ -170,6 +170,16 @@ export default function ExamBoard({ student, exam, examSet }) {
         }
       }
 
+      // New device: no local answers — restore from server so progress isn't lost
+      if (existing && !hasLocalAnswers) {
+        if (existing.answers_json && Object.keys(existing.answers_json).length > 0) {
+          setAnswers(existing.answers_json);
+        }
+        if (existing.essay_answers_json && Object.keys(existing.essay_answers_json).length > 0) {
+          setEssayAnswers(existing.essay_answers_json);
+        }
+      }
+
       setLiveSessionId(currentSessionId);
 
       // Listen for instructor lock/unlock commands via postgres_changes.
@@ -203,6 +213,9 @@ export default function ExamBoard({ student, exam, examSet }) {
         answers_count: Object.keys(answers).length,
         violation_count: tabSwitchCount,
         violation_log: violationLogs,
+        answers_json: answers,
+        essay_answers_json: essayAnswers,
+        exam_set: examSet,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
         if (error) console.error('Live data push failed:', error.message);

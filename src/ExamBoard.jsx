@@ -47,6 +47,12 @@ export default function ExamBoard({ student, exam, examSet }) {
   const alertActiveRef = useRef(false);
   // Tracks the count at mount so the lock only fires on NEW violations, not restored ones
   const prevViolationCountRef = useRef(initialState.tabSwitchCount);
+  // Synchronous mirrors of violation state — React state is async and unavailable in beforeunload
+  const tabSwitchCountRef = useRef(initialState.tabSwitchCount);
+  const violationLogsRef = useRef(initialState.violationLogs || []);
+  // True from the moment visibilitychange fires until the tab becomes visible again.
+  // Lets beforeunload know whether this unload is a tab close (already counted) or a refresh (not yet).
+  const visibilityViolationRef = useRef(false);
   // Prevents double-submission when two rapid clicks hit before React re-renders
   const isSubmittingRef = useRef(false);
   // Snapshot of answers captured when submit modal opens — prevents last-second tampering
@@ -347,12 +353,17 @@ export default function ExamBoard({ student, exam, examSet }) {
 
     const logViolation = (reason) => {
       const timeStr = new Date().toLocaleTimeString();
-      setViolationLogs(prev => [...prev, `[${timeStr}] ${reason}`]);
-      setTabSwitchCount(prev => prev + 1); // Lock logic is in its own useEffect below
+      const log = `[${timeStr}] ${reason}`;
+      // Update refs synchronously first — beforeunload reads these, not React state
+      tabSwitchCountRef.current += 1;
+      violationLogsRef.current = [...violationLogsRef.current, log];
+      setViolationLogs(violationLogsRef.current);
+      setTabSwitchCount(tabSwitchCountRef.current);
     };
 
     const handleVisibilityChange = () => {
-      if (!document.hidden) return;
+      if (!document.hidden) { visibilityViolationRef.current = false; return; }
+      visibilityViolationRef.current = true; // mark so beforeunload doesn't double-count
       // Cancel any pending blur log — visibilitychange is the authoritative tab-switch event
       if (pendingBlurRef.current) {
         clearTimeout(pendingBlurRef.current);
@@ -362,6 +373,36 @@ export default function ExamBoard({ student, exam, examSet }) {
       alertActiveRef.current = true;
       alert("⚠️ SYSTEM WARNING: Tab switch detected.");
       alertActiveRef.current = false;
+    };
+
+    // Fires on both tab close AND page refresh.
+    // - Tab close: visibilitychange already fired and counted the violation.
+    //   We only need to flush lock status to localStorage before the page dies.
+    // - Refresh: visibilitychange does NOT fire in Chrome (tab stays "visible").
+    //   We count the violation here and save everything synchronously.
+    const handleBeforeUnload = () => {
+      let finalCount = tabSwitchCountRef.current;
+      let finalLogs = violationLogsRef.current;
+
+      if (!visibilityViolationRef.current) {
+        // Refresh — not yet counted by visibilitychange
+        const timeStr = new Date().toLocaleTimeString();
+        finalCount += 1;
+        finalLogs = [...finalLogs, `[${timeStr}] Page refreshed`];
+      }
+
+      try {
+        const saved = localStorage.getItem(storageKey);
+        const progress = saved ? JSON.parse(saved) : {};
+        const shouldLock = finalCount > 0 && finalCount % 4 === 0;
+        localStorage.setItem(storageKey, JSON.stringify({
+          ...progress,
+          tabSwitchCount: finalCount,
+          violationLogs: finalLogs,
+          endTime: endTimeRef.current,
+          examStatus: shouldLock ? 'locked' : (progress.examStatus || 'active'),
+        }));
+      } catch { /* ignore */ }
     };
 
     const handleBlur = () => {
@@ -392,11 +433,13 @@ export default function ExamBoard({ student, exam, examSet }) {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
       if (pendingBlurRef.current) {
         clearTimeout(pendingBlurRef.current);
         pendingBlurRef.current = null;
@@ -408,6 +451,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   // Locks at every 4th NEW violation: 4, 8, 12, ...
   // Instructor unlocks give students another 4-violation window before the next lock.
   useEffect(() => {
+    tabSwitchCountRef.current = tabSwitchCount; // keep sync ref current (e.g. after server restore)
     if (
       tabSwitchCount > prevViolationCountRef.current &&
       tabSwitchCount % 4 === 0 &&

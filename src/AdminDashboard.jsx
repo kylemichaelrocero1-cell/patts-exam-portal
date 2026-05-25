@@ -93,17 +93,28 @@ const [targetSection, setTargetSection] = useState('');
   const [transferExamIds, setTransferExamIds] = useState(new Set());
   const [isTransferring, setIsTransferring] = useState(false);
 
+  // --- SHARING STATES ---
+  const [shareModal, setShareModal] = useState(null); // exam object | null
+  const [shareTarget, setShareTarget] = useState('');
+  const [isSharing, setIsSharing] = useState(false);
+  const [sharesMap, setSharesMap] = useState({}); // { [examId]: [{ id, shared_with }] }
+  const [sharedExamsList, setSharedExamsList] = useState([]); // exams shared WITH me
+
   // Helper to load questions — uses a separate loading state so the dashboard never disappears
   const loadExamQuestions = async (examId) => {
     if (examQuestionsCache[examId]) return examQuestionsCache[examId];
     setIsLoadingQuestions(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('questions')
       .select('id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer, question_type, image_url')
       .eq('exam_id', examId)
       .order('id', { ascending: true });
-    setExamQuestionsCache(prev => ({ ...prev, [examId]: data || [] }));
     setIsLoadingQuestions(false);
+    if (error) {
+      alert('Failed to load questions: ' + error.message);
+      return [];
+    }
+    setExamQuestionsCache(prev => ({ ...prev, [examId]: data || [] }));
     return data || [];
   };
 
@@ -243,7 +254,12 @@ const [targetSection, setTargetSection] = useState('');
     const newStatus = currentStatus === 'locked' ? 'active' : 'locked';
     // Optimistic update — realtime doesn't echo back the instructor's own writes
     setLiveSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status: newStatus } : s));
-    await supabase.from('live_sessions').update({ status: newStatus, updated_at: new Date() }).eq('id', sessionId);
+    const { error } = await supabase.from('live_sessions').update({ status: newStatus, updated_at: new Date() }).eq('id', sessionId);
+    if (error) {
+      // Roll back optimistic update on failure
+      setLiveSessions(prev => prev.map(s => s.id === sessionId ? { ...s, status: currentStatus } : s));
+      alert('Failed to update lock status: ' + error.message);
+    }
   };
 
   const applyLiveSort = (sortBy) => {
@@ -260,7 +276,8 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   const dismissSession = async (sessionId) => {
-    await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
+    const { error } = await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
+    if (error) { alert('Failed to dismiss session: ' + error.message); return; }
     setLiveSessions(prev => prev.filter(s => s.id !== sessionId));
   };
 
@@ -623,6 +640,92 @@ const [targetSection, setTargetSection] = useState('');
     setInstructorsList(data || []);
   };
 
+  // --- SHARING FUNCTIONS ---
+  const openShareModal = (exam) => {
+    setShareModal(exam);
+    setShareTarget('');
+  };
+
+  // Targeted share-only refresh — does NOT set isLoading so the dashboard never disappears.
+  const refreshShares = async () => {
+    const [outSharesRes, inSharesRes] = await Promise.all([
+      supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
+      supabase.from('exam_shares').select('id, exam_id, shared_by').eq('shared_with', instructorId),
+    ]);
+
+    const newSharesMap = {};
+    (outSharesRes.data || []).forEach(s => {
+      if (!newSharesMap[s.exam_id]) newSharesMap[s.exam_id] = [];
+      newSharesMap[s.exam_id].push({ id: s.id, shared_with: s.shared_with });
+    });
+    setSharesMap(newSharesMap);
+
+    const inShares = inSharesRes.data || [];
+    if (inShares.length > 0) {
+      const sharedIds = [...new Set(inShares.map(s => s.exam_id))];
+      const { data: sharedExamsData } = await supabase
+        .from('exams')
+        .select('id, title, is_open, duration_minutes, target_section, exam_password')
+        .in('id', sharedIds);
+      const sharedList = inShares.map(s => {
+        const exam = (sharedExamsData || []).find(e => e.id === s.exam_id);
+        if (!exam) return null;
+        return { ...exam, share_id: s.id, shared_by: s.shared_by };
+      }).filter(Boolean);
+      setSharedExamsList(sharedList);
+      (sharedExamsData || []).forEach(e => instructorExamIdsRef.current.add(e.id));
+      setExamsDict(prev => {
+        const next = { ...prev };
+        (sharedExamsData || []).forEach(e => { next[e.id] = e.title; });
+        return next;
+      });
+    } else {
+      setSharedExamsList([]);
+    }
+  };
+
+  const shareExam = async () => {
+    if (!shareModal || !shareTarget) return;
+    setIsSharing(true);
+    const { error } = await supabase.from('exam_shares').insert([{
+      exam_id: shareModal.id,
+      shared_by: instructorId,
+      shared_with: shareTarget,
+    }]);
+    if (error) {
+      alert('Share failed: ' + (error.code === '23505' ? 'This instructor already has access.' : error.message));
+      setIsSharing(false);
+      return;
+    }
+    setShareTarget('');
+    await refreshShares();
+    setIsSharing(false);
+  };
+
+  const revokeShare = async (shareId, examId) => {
+    const { error } = await supabase.from('exam_shares').delete().eq('id', shareId);
+    if (error) { alert('Error revoking access: ' + error.message); return; }
+    setSharesMap(prev => {
+      const updated = (prev[examId] || []).filter(s => s.id !== shareId);
+      const next = { ...prev };
+      if (updated.length === 0) delete next[examId];
+      else next[examId] = updated;
+      return next;
+    });
+  };
+
+  const removeSharedAccess = async (shareId) => {
+    const { error } = await supabase.from('exam_shares').delete().eq('id', shareId);
+    if (error) { alert('Error removing shared exam: ' + error.message); return; }
+    setSharedExamsList(prev => prev.filter(e => e.share_id !== shareId));
+    instructorExamIdsRef.current = new Set(
+      [...instructorExamIdsRef.current].filter(id =>
+        sharedExamsList.some(e => e.share_id !== shareId && e.id === id) ||
+        examsList.some(e => e.id === id)
+      )
+    );
+  };
+
   const transferExams = async () => {
     if (!transferTarget || transferExamIds.size === 0) return;
     const dest = instructorsList.find(i => i.id === transferTarget);
@@ -647,88 +750,104 @@ const [targetSection, setTargetSection] = useState('');
 async function fetchDashboardData() {
     setIsLoading(true);
     try {
-      const { data: examsData } = await supabase
-        .from('exams')
-        .select('id, title, is_open, duration_minutes, target_section, exam_password')
-        .eq('instructor_id', instructorId)
-        .order('created_at', { ascending: true });
+      // Fetch own exams and incoming shares in parallel
+      const [examsRes, inSharesRes] = await Promise.all([
+        supabase.from('exams')
+          .select('id, title, is_open, duration_minutes, target_section, exam_password')
+          .eq('instructor_id', instructorId)
+          .order('created_at', { ascending: true }),
+        supabase.from('exam_shares')
+          .select('id, exam_id, shared_by')
+          .eq('shared_with', instructorId),
+      ]);
 
-      const examIds = examsData?.map(e => e.id) || [];
-      instructorExamIdsRef.current = new Set(examIds);
+      const examsData = examsRes.data || [];
+      const inShares = inSharesRes.data || [];
 
-      // Fetch results + users in parallel (independent of each other)
-      const [resultsRes, studentsRes] = await Promise.all([
-        examIds.length > 0
-          ? supabase.from('results')
-              .select('student_id, exam_id, score, total_items, tab_switches, time_taken_seconds, violation_logs, submitted_at')
-              .in('exam_id', examIds)
+      // Fetch shared exam data + outgoing shares + students in parallel
+      const sharedExamIdsFromShares = [...new Set(inShares.map(s => s.exam_id))];
+      const [sharedExamsRes, outSharesRes, studentsRes] = await Promise.all([
+        sharedExamIdsFromShares.length > 0
+          ? supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').in('id', sharedExamIdsFromShares)
           : Promise.resolve({ data: [] }),
+        supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
         supabase.from('users').select('id, full_name, section'),
       ]);
-      const resultsData = resultsRes.data;
-      const studentsData = studentsRes.data;
-      if (studentsRes.error) console.error('Supabase students error:', studentsRes.error);
 
-      const dict = {};
-      const times = {};
-      const secs = {};
-      const passwords = {};
-      if (examsData) {
-        const titles = {};
-        examsData.forEach(e => {
-          dict[e.id] = e.title;
-          times[e.id] = e.duration_minutes;
-          secs[e.id] = e.target_section || '';
-          passwords[e.id] = e.exam_password || '';
-          titles[e.id] = e.title;
-        });
-        setExamsList(examsData);
-        setExamsDict(dict);
-        setEditingTimes(times);
-        setEditingSections(secs);
-        setEditingPasswords(passwords);
-        setEditingTitles(titles);
+      const sharedExamsData = sharedExamsRes.data || [];
+      const outShares = outSharesRes.data || [];
+      const studentsData = studentsRes.data || [];
 
-        // Derive the set of sections this instructor manages
-        const sections = new Set(
-          examsData.flatMap(e =>
-            (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean)
-          )
-        );
-        setInstructorSections(sections);
-      }
+      // Combine all exam IDs for live monitor and results
+      const ownExamIds = examsData.map(e => e.id);
+      const sharedExamIds = sharedExamsData.map(e => e.id);
+      const allExamIds = [...ownExamIds, ...sharedExamIds];
+      instructorExamIdsRef.current = new Set(allExamIds);
 
-      const studentDict = {};
-      const studentSecs = {};
+      // Fetch results for all exams
+      const { data: resultsData } = allExamIds.length > 0
+        ? await supabase.from('results')
+            .select('student_id, exam_id, score, total_items, tab_switches, time_taken_seconds, violation_logs, submitted_at')
+            .in('exam_id', allExamIds)
+        : { data: [] };
 
-      if (studentsData) {
-        const safeStudentsCopy = [...studentsData];
-        safeStudentsCopy.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+      // Process own exam metadata
+      const dict = {}, times = {}, secs = {}, passwords = {}, titles = {};
+      examsData.forEach(e => {
+        dict[e.id] = e.title;
+        times[e.id] = e.duration_minutes;
+        secs[e.id] = e.target_section || '';
+        passwords[e.id] = e.exam_password || '';
+        titles[e.id] = e.title;
+      });
+      // Add shared exam titles to dict for result modals
+      sharedExamsData.forEach(e => { dict[e.id] = e.title; });
 
-        // Build full dict for name lookups across all results
-        safeStudentsCopy.forEach(s => {
-          studentDict[s.id] = {
-            name: s.full_name || 'Unknown',
-            section: s.section || 'Unknown'
-          };
-          studentSecs[s.id] = s.section || '';
-        });
+      setExamsList(examsData);
+      setExamsDict(dict);
+      setEditingTimes(times);
+      setEditingSections(secs);
+      setEditingPasswords(passwords);
+      setEditingTitles(titles);
 
-        // Students tab only shows students in this instructor's sections.
-        // If the instructor has no exams (no sections), show nothing — never fall back to all students.
-        const mySections = new Set(
-          (examsData || []).flatMap(e =>
-            (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean)
-          )
-        );
-        const myStudents = safeStudentsCopy.filter(s =>
-          s.section && s.section.split(',').map(x => x.trim()).some(sec => mySections.has(sec))
-        );
+      const sections = new Set(
+        examsData.flatMap(e => (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean))
+      );
+      setInstructorSections(sections);
 
-        setStudentsList(myStudents);
-        setEditingStudentSections(studentSecs);
-      }
-      
+      // Build sharesMap (outgoing) keyed by exam ID
+      const newSharesMap = {};
+      outShares.forEach(s => {
+        if (!newSharesMap[s.exam_id]) newSharesMap[s.exam_id] = [];
+        newSharesMap[s.exam_id].push({ id: s.id, shared_with: s.shared_with });
+      });
+      setSharesMap(newSharesMap);
+
+      // Build sharedExamsList (incoming)
+      const sharedList = inShares.map(s => {
+        const exam = sharedExamsData.find(e => e.id === s.exam_id);
+        if (!exam) return null;
+        return { ...exam, share_id: s.id, shared_by: s.shared_by };
+      }).filter(Boolean);
+      setSharedExamsList(sharedList);
+
+      // Process students
+      const safeStudentsCopy = [...studentsData].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
+      const studentDict = {}, studentSecs = {};
+      safeStudentsCopy.forEach(s => {
+        studentDict[s.id] = { name: s.full_name || 'Unknown', section: s.section || 'Unknown' };
+        studentSecs[s.id] = s.section || '';
+      });
+
+      const mySections = new Set(
+        examsData.flatMap(e => (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean))
+      );
+      const myStudents = safeStudentsCopy.filter(s =>
+        s.section && s.section.split(',').map(x => x.trim()).some(sec => mySections.has(sec))
+      );
+
+      setStudentsList(myStudents);
+      setEditingStudentSections(studentSecs);
       setStudents(studentDict);
       setResults(resultsData || []);
     } catch (error) {
@@ -785,9 +904,8 @@ const deleteResult = async (studentId, examId) => {
     setNewTitle('');
     setTargetSection('');
     setCsvExamParsed(null);
-    fetchDashboardData();
+    await fetchDashboardData();
     alert(`Exam created!${csvQs.length > 0 ? ` ${csvQs.length} questions imported.` : ' Add questions in the Questions tab.'}`);
-    setIsLoading(false);
   };
 
   // --- NEW: Delete Exam ---
@@ -1077,7 +1195,10 @@ const deleteResult = async (studentId, examId) => {
       return (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
     });
 
-  const uniqueSections = ['All', ...[...new Set(studentsList.map(s => s.section).filter(Boolean))].sort()];
+  // Derive from actual result rows so shared-exam sections are always included.
+  const uniqueSections = ['All', ...[...new Set(
+    results.map(r => students[r.student_id]?.section).filter(Boolean)
+  )].sort()];
 
   // --- RESULTS STATISTICS ---
   const resultStats = (() => {
@@ -1607,6 +1728,14 @@ const deleteResult = async (studentId, examId) => {
                 <td>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => openDupModal(exam)} className="btn ghost sm"><Icon name="copy" size={13} /> Duplicate</button>
+                    <button onClick={() => openShareModal(exam)} className="btn ghost sm" style={{ position: 'relative' }}>
+                      <Icon name="users" size={13} /> Share
+                      {(sharesMap[exam.id] || []).length > 0 && (
+                        <span style={{ position: 'absolute', top: -4, right: -4, width: 14, height: 14, borderRadius: '50%', background: 'var(--navy)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {(sharesMap[exam.id] || []).length}
+                        </span>
+                      )}
+                    </button>
                     <button onClick={() => openExamStats(exam.id)} className="btn ghost sm"><Icon name="bar-chart" size={13} /></button>
                     <button onClick={() => deleteExam(exam.id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
                   </div>
@@ -1617,6 +1746,62 @@ const deleteResult = async (studentId, examId) => {
           </table>
           </div>{/* end table-scroll */}
           </div>{/* end card */}
+
+          {/* Shared With Me */}
+          {sharedExamsList.length > 0 && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <Icon name="users" size={16} color="var(--navy)" />
+                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: 'var(--ink-1)' }}>Shared With Me</h4>
+                <span className="px-pill brand">{sharedExamsList.length}</span>
+              </div>
+              <div className="card" style={{ overflow: 'hidden' }}>
+                <div className="table-scroll">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Exam Title</th>
+                        <th>Section</th>
+                        <th>Status</th>
+                        <th>Shared By</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sharedExamsList.map(exam => {
+                        const owner = instructorsList.find(i => i.id === exam.shared_by);
+                        return (
+                          <tr key={exam.share_id}>
+                            <td><span style={{ fontWeight: 500 }}>{exam.title}</span></td>
+                            <td>{exam.target_section || '—'}</td>
+                            <td>
+                              <span className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}>
+                                {exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
+                                {owner?.full_name || owner?.email || 'Unknown Instructor'}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                onClick={() => { if (window.confirm('Remove this shared exam from your dashboard?')) removeSharedAccess(exam.share_id); }}
+                                className="btn ghost sm"
+                                style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}
+                              >
+                                <Icon name="x" size={13} /> Remove
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Create New Exam */}
           <div style={{ background: 'var(--navy-50)', border: '2px dashed var(--navy-200)', borderRadius: 'var(--r-lg)', padding: '20px 24px' }}>
@@ -2147,7 +2332,18 @@ const deleteResult = async (studentId, examId) => {
                 <label className="label">Select Exam</label>
                 <select className="input" style={{ width: 'auto', minWidth: '200px' }} value={attendanceExam} onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}>
                   <option value="">— Choose an exam —</option>
-                  {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                  {sharedExamsList.length > 0 ? (
+                    <>
+                      <optgroup label="My Exams">
+                        {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                      </optgroup>
+                      <optgroup label="Shared With Me">
+                        {sharedExamsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                      </optgroup>
+                    </>
+                  ) : (
+                    examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)
+                  )}
                 </select>
               </div>
               {attendanceExam && (
@@ -2229,7 +2425,18 @@ const deleteResult = async (studentId, examId) => {
             <label className="label">Select Exam to Manage</label>
             <select className="input" style={{ maxWidth: '360px' }} value={qExamId} onChange={e => handleQExamChange(e.target.value)}>
               <option value="">— Choose an exam —</option>
-              {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+              {sharedExamsList.length > 0 ? (
+                <>
+                  <optgroup label="My Exams">
+                    {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                  </optgroup>
+                  <optgroup label="Shared With Me">
+                    {sharedExamsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                  </optgroup>
+                </>
+              ) : (
+                examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)
+              )}
             </select>
           </div>
 
@@ -2618,6 +2825,102 @@ const deleteResult = async (studentId, examId) => {
                   <Icon name="copy" size={15} color="white" />
                   {isDuplicating ? 'Duplicating…' : 'Create Duplicate'}
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+{/* ========================================= */}
+      {/* MODAL: SHARE EXAM                          */}
+      {/* ========================================= */}
+      {shareModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
+          <div style={{ background: 'var(--surface)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: '520px', overflow: 'hidden', boxShadow: 'var(--sh-modal)' }}>
+
+            <div className="patts-header" style={{ padding: '24px 28px' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: '18px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Icon name="users" size={18} color="white" /> Share Exam
+              </h2>
+              <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.65)', fontSize: '13px' }}>
+                <strong style={{ color: 'var(--gold-bright)' }}>{shareModal.title}</strong>
+              </p>
+            </div>
+
+            <div style={{ padding: '28px', display: 'grid', gap: '20px' }}>
+
+              {/* Current access list */}
+              <div>
+                <label className="label" style={{ marginBottom: 10 }}>Current Access</label>
+                {(sharesMap[shareModal.id] || []).length === 0 ? (
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-4)', fontStyle: 'italic' }}>No other instructors have access yet.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {(sharesMap[shareModal.id] || []).map(s => {
+                      const inst = instructorsList.find(i => i.id === s.shared_with);
+                      return (
+                        <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
+                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--navy)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                            {(inst?.full_name || '?')[0].toUpperCase()}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink-1)' }}>{inst?.full_name || 'Unknown Instructor'}</div>
+                            <div style={{ fontSize: 11, color: 'var(--ink-4)' }}>{inst?.email || ''}</div>
+                          </div>
+                          <button
+                            onClick={() => revokeShare(s.id, shareModal.id)}
+                            className="btn ghost sm"
+                            style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)', width: 'auto' }}
+                          >
+                            <Icon name="x" size={13} /> Revoke
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Add access */}
+              <div>
+                <label className="label" style={{ marginBottom: 10 }}>Add Access</label>
+                {instructorsList.filter(i => !(sharesMap[shareModal.id] || []).some(s => s.shared_with === i.id)).length === 0 ? (
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-4)', fontStyle: 'italic' }}>
+                    {instructorsList.length === 0 ? 'No other instructors are registered yet.' : 'All instructors already have access.'}
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select
+                      value={shareTarget}
+                      onChange={e => setShareTarget(e.target.value)}
+                      className="input"
+                      style={{ flex: 1 }}
+                    >
+                      <option value="">Select an instructor…</option>
+                      {instructorsList
+                        .filter(i => !(sharesMap[shareModal.id] || []).some(s => s.shared_with === i.id))
+                        .map(i => (
+                          <option key={i.id} value={i.id}>{i.full_name} — {i.email}</option>
+                        ))}
+                    </select>
+                    <button
+                      className="btn"
+                      onClick={shareExam}
+                      disabled={!shareTarget || isSharing}
+                      style={{ width: 'auto', opacity: !shareTarget || isSharing ? 0.5 : 1, flexShrink: 0 }}
+                    >
+                      <Icon name="user-plus" size={14} color="white" />
+                      {isSharing ? 'Sharing…' : 'Share'}
+                    </button>
+                  </div>
+                )}
+                <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--ink-4)' }}>
+                  Shared instructors can view results, monitor live sessions, and manage questions for this exam.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--line)', paddingTop: 16 }}>
+                <button className="btn ghost" onClick={() => setShareModal(null)} style={{ width: 'auto' }}>Done</button>
               </div>
             </div>
           </div>

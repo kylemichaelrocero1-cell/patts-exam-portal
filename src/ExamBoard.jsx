@@ -132,7 +132,13 @@ export default function ExamBoard({ student, exam, examSet }) {
           // Server violation count is authoritative — prevents localStorage manipulation
           const serverViolations = existing.violation_count || 0;
           const effectiveViolations = Math.max(tabSwitchCount, serverViolations);
-          if (serverViolations > tabSwitchCount) setTabSwitchCount(serverViolations);
+          if (serverViolations > tabSwitchCount) {
+            // Advance the "acknowledged" ref BEFORE the state update so the lock
+            // effect doesn't mistake a server-restored count as a new violation.
+            prevViolationCountRef.current = serverViolations;
+            tabSwitchCountRef.current = serverViolations;
+            setTabSwitchCount(serverViolations);
+          }
           // Clamp endTime to server-authoritative max — prevents localStorage inflation
           if (existing.created_at) {
             const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;

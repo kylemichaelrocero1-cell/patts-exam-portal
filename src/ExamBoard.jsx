@@ -122,7 +122,7 @@ export default function ExamBoard({ student, exam, examSet }) {
           // No result — was dismissed by instructor, restore as active
           await supabase.from('live_sessions').update({
             status: 'active',
-            answers_count: Object.keys(answers).length,
+            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
             violation_count: tabSwitchCount,
             updated_at: new Date()
           }).eq('id', existing.id);
@@ -139,7 +139,7 @@ export default function ExamBoard({ student, exam, examSet }) {
             if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
           }
           await supabase.from('live_sessions').update({
-            answers_count: Object.keys(answers).length,
+            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
             violation_count: effectiveViolations,
             updated_at: new Date()
           }).eq('id', existing.id);
@@ -154,7 +154,7 @@ export default function ExamBoard({ student, exam, examSet }) {
             student_name: student.full_name,
             status: 'active',
             violation_count: tabSwitchCount,
-            answers_count: Object.keys(answers).length
+            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length
           }])
           .select()
           .single();
@@ -216,7 +216,7 @@ export default function ExamBoard({ student, exam, examSet }) {
     livePushDebounceRef.current = setTimeout(() => {
       livePushDebounceRef.current = null;
       supabase.from('live_sessions').update({
-        answers_count: Object.keys(answers).length,
+        answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
         violation_count: tabSwitchCount,
         violation_log: violationLogs,
         answers_json: answers,
@@ -230,7 +230,7 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => {
       if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     };
-  }, [answers, tabSwitchCount, violationLogs, liveSessionId]);
+  }, [answers, essayAnswers, tabSwitchCount, violationLogs, liveSessionId]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {
@@ -731,9 +731,20 @@ export default function ExamBoard({ student, exam, examSet }) {
             </button>
           </div>
 
-          <p style={{ fontSize: 17, lineHeight: 1.68, color: 'var(--ink-1)', minHeight: 72, margin: '0 0 22px' }}>
+          <p style={{ fontSize: 17, lineHeight: 1.68, color: 'var(--ink-1)', minHeight: 72, margin: '0 0 16px' }}>
             {currentQ?.question_text}
           </p>
+
+          {currentQ?.image_url && (
+            <div style={{ margin: '0 0 20px', borderRadius: 'var(--r-md)', overflow: 'hidden', border: '1.5px solid var(--line)', background: 'var(--surface-2)', textAlign: 'center' }}>
+              <img
+                src={currentQ.image_url}
+                alt="Question figure"
+                draggable={false}
+                style={{ maxWidth: '100%', maxHeight: 380, objectFit: 'contain', display: 'inline-block', verticalAlign: 'middle' }}
+              />
+            </div>
+          )}
 
           {currentQ?.question_type === 'essay' ? (
             <div>

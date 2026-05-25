@@ -56,15 +56,20 @@ const [targetSection, setTargetSection] = useState('');
   const [qLoading, setQLoading] = useState(false);
   const [qSaving, setQSaving] = useState(false);
   const [editingQ, setEditingQ] = useState(null); // null = add mode, object = edit mode
-  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', correct_answer: 0, question_type: 'multiple_choice' };
+  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', correct_answer: 0, question_type: 'multiple_choice', image_url: null };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
+  const [qImageFile, setQImageFile] = useState(null);
+  const [qImageUploading, setQImageUploading] = useState(false);
+  const [qImagePreview, setQImagePreview] = useState(null);
 
   // --- CSV IMPORT STATES ---
   const [csvParsed, setCsvParsed] = useState(null);       // { questions, errors } for Questions tab
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvReplaceMode, setCsvReplaceMode] = useState(false);
   const [csvExamParsed, setCsvExamParsed] = useState(null); // { questions, errors } attached to Create Exam form
+  const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors } for Students tab
+  const [studentCsvImporting, setStudentCsvImporting] = useState(false);
   // Instructor-managed sections (derived from exam list)
   const [instructorSections, setInstructorSections] = useState(new Set());
 
@@ -94,7 +99,7 @@ const [targetSection, setTargetSection] = useState('');
     setIsLoadingQuestions(true);
     const { data } = await supabase
       .from('questions')
-      .select('id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer, question_type')
+      .select('id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer, question_type, image_url')
       .eq('exam_id', examId)
       .order('id', { ascending: true });
     setExamQuestionsCache(prev => ({ ...prev, [examId]: data || [] }));
@@ -281,8 +286,30 @@ const [targetSection, setTargetSection] = useState('');
     setQExamId(examId);
     setEditingQ(null);
     setQForm(emptyQ);
+    setQImageFile(null);
+    setQImagePreview(null);
     setCsvParsed(null);
     loadQuestionList(examId);
+  };
+
+  const uploadQuestionImage = async (file) => {
+    const ext = file.name.split('.').pop().toLowerCase() || 'jpg';
+    const path = `${qExamId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+    const { error } = await supabase.storage.from('question-images').upload(path, file, { upsert: false });
+    if (error) throw error;
+    const { data } = supabase.storage.from('question-images').getPublicUrl(path);
+    return data.publicUrl;
+  };
+
+  const removeQuestionImageFromStorage = async (imageUrl) => {
+    if (!imageUrl) return;
+    try {
+      const marker = '/question-images/';
+      const idx = imageUrl.indexOf(marker);
+      if (idx === -1) return;
+      const path = decodeURIComponent(imageUrl.slice(idx + marker.length).split('?')[0]);
+      await supabase.storage.from('question-images').remove([path]);
+    } catch { /* best-effort — orphaned file is non-critical */ }
   };
 
   const saveQuestion = async () => {
@@ -295,6 +322,27 @@ const [targetSection, setTargetSection] = useState('');
 
     setQSaving(true);
     const isEssay = qForm.question_type === 'essay';
+
+    let imageUrl = qForm.image_url;
+
+    if (qImageFile) {
+      setQImageUploading(true);
+      try {
+        if (editingQ?.image_url && editingQ.image_url !== imageUrl) {
+          await removeQuestionImageFromStorage(editingQ.image_url);
+        }
+        imageUrl = await uploadQuestionImage(qImageFile);
+      } catch (err) {
+        alert('Image upload failed: ' + err.message + '\n\nMake sure the "question-images" Storage bucket exists and is public in Supabase.');
+        setQSaving(false);
+        setQImageUploading(false);
+        return;
+      }
+      setQImageUploading(false);
+    } else if (editingQ?.image_url && qForm.image_url === null) {
+      await removeQuestionImageFromStorage(editingQ.image_url);
+    }
+
     const payload = {
       exam_id: qExamId,
       question_text: qForm.question_text.trim(),
@@ -304,6 +352,7 @@ const [targetSection, setTargetSection] = useState('');
       choice_c: isEssay ? null : qForm.choice_c.trim(),
       choice_d: isEssay ? null : qForm.choice_d.trim(),
       correct_answer: isEssay ? null : Number(qForm.correct_answer),
+      image_url: imageUrl || null,
     };
 
     let error;
@@ -318,6 +367,8 @@ const [targetSection, setTargetSection] = useState('');
     } else {
       setEditingQ(null);
       setQForm(emptyQ);
+      setQImageFile(null);
+      setQImagePreview(null);
       setExamQuestionsCache(prev => { const n = { ...prev }; delete n[qExamId]; return n; });
       loadQuestionList(qExamId);
     }
@@ -326,8 +377,11 @@ const [targetSection, setTargetSection] = useState('');
 
   const deleteQuestion = async (questionId) => {
     if (!window.confirm('Delete this question permanently?')) return;
+    const q = qList.find(q => q.id === questionId);
     const { error } = await supabase.from('questions').delete().eq('id', questionId);
     if (error) { alert('Error deleting question: ' + error.message); return; }
+    if (q?.image_url) await removeQuestionImageFromStorage(q.image_url);
+    if (editingQ?.id === questionId) { setEditingQ(null); setQForm(emptyQ); setQImageFile(null); setQImagePreview(null); }
     setExamQuestionsCache(prev => { const n = { ...prev }; delete n[qExamId]; return n; });
     loadQuestionList(qExamId);
   };
@@ -342,7 +396,10 @@ const [targetSection, setTargetSection] = useState('');
       choice_d: q.choice_d || '',
       correct_answer: Number(q.correct_answer || 0),
       question_type: q.question_type || 'multiple_choice',
+      image_url: q.image_url || null,
     });
+    setQImageFile(null);
+    setQImagePreview(q.image_url || null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -375,7 +432,7 @@ const [targetSection, setTargetSection] = useState('');
         if (!b || !c || !d) { errors.push(`Row ${idx + 2}: Missing choices — need A, B, C, and D`); return; }
         const raw = cols[5]?.trim().toUpperCase() || '';
         const map = { A: 0, B: 1, C: 2, D: 3, '0': 0, '1': 1, '2': 2, '3': 3 };
-        if (map[raw] === undefined) { errors.push(`Row ${idx + 2}: Invalid answer "${raw}" — use A, B, C, or D`); return; }
+        if (map[raw] === undefined) { errors.push(`Row ${idx + 2}: Invalid answer "${raw}" — use 0, 1, 2, or 3 (0=A 1=B 2=C 3=D)`); return; }
         questions.push({ question_text: qText, question_type: 'multiple_choice', choice_a: a, choice_b: b, choice_c: c, choice_d: d, correct_answer: map[raw] });
       }
     });
@@ -384,9 +441,9 @@ const [targetSection, setTargetSection] = useState('');
 
   const downloadCSVTemplate = () => {
     const csv = [
-      'question_text,choice_a,choice_b,choice_c,choice_d,correct_answer',
-      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",A',
-      '"What is the primary function of an aileron?","Roll control","Pitch control","Yaw control","Speed control",A',
+      'question_text,choice_a,choice_b,choice_c,choice_d,correct_answer (0=A 1=B 2=C 3=D)',
+      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",0',
+      '"What is the primary function of an aileron?","Roll control","Pitch control","Yaw control","Speed control",0',
       '"Explain Bernoulli\'s principle in your own words.",,,,, ',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -422,6 +479,112 @@ const [targetSection, setTargetSection] = useState('');
       alert('Import failed: ' + err.message);
     }
     setCsvImporting(false);
+  };
+
+  // --- STUDENT CSV HELPERS ---
+  const parseStudentCSV = (text) => {
+    const rawRows = text.trim().split(/\r?\n/);
+    const rows = rawRows.map(row => {
+      const cells = [];
+      let cell = '', inQ = false;
+      for (const ch of row) {
+        if (ch === '"') { inQ = !inQ; }
+        else if (ch === ',' && !inQ) { cells.push(cell.trim()); cell = ''; }
+        else { cell += ch; }
+      }
+      cells.push(cell.trim());
+      return cells;
+    });
+    const firstCell = rows[0]?.[0]?.toLowerCase().replace(/\s/g, '_');
+    const dataRows = (firstCell === 'full_name' || firstCell === 'name') ? rows.slice(1) : rows;
+    const students = [], errors = [];
+    dataRows.forEach((cols, idx) => {
+      const name = cols[0]?.trim();
+      const email = cols[1]?.trim().toLowerCase();
+      const code = cols[2]?.trim();
+      const section = cols[3]?.trim();
+      if (!name && !email && !code && !section) return;
+      const rowNum = idx + 2;
+      if (!name) { errors.push(`Row ${rowNum}: Full name is required.`); return; }
+      if (!email) { errors.push(`Row ${rowNum}: Email is required.`); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push(`Row ${rowNum}: "${email}" is not a valid email address.`); return; }
+      if (!code) { errors.push(`Row ${rowNum}: Student ID is required.`); return; }
+      if (!section) { errors.push(`Row ${rowNum}: Section is required.`); return; }
+      students.push({ full_name: name, student_email: email, student_code: code, section });
+    });
+    // Flag in-file duplicates (same email or student_id appearing more than once in the CSV)
+    const seenEmails = new Map(), seenCodes = new Map();
+    students.forEach((s, i) => {
+      if (seenEmails.has(s.student_email)) errors.push(`Duplicate email in CSV: "${s.student_email}" (rows ${seenEmails.get(s.student_email) + 2} & ${i + 2})`);
+      else seenEmails.set(s.student_email, i);
+      if (seenCodes.has(s.student_code)) errors.push(`Duplicate Student ID in CSV: "${s.student_code}" (rows ${seenCodes.get(s.student_code) + 2} & ${i + 2})`);
+      else seenCodes.set(s.student_code, i);
+    });
+    return { students, errors };
+  };
+
+  const downloadStudentCSVTemplate = () => {
+    const csv = [
+      'full_name,student_email,student_id,section',
+      '"Juan dela Cruz","juan.delacruz@patts.edu.ph","2021-1-1234","Aero 101"',
+      '"Maria Santos","maria.santos@patts.edu.ph","2021-1-5678","Aero 101"',
+      '"Pedro Reyes","pedro.reyes@patts.edu.ph","2022-2-9012","Aero 102"',
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'student_template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importStudentsFromCSV = async () => {
+    if (!studentCsvParsed || studentCsvParsed.students.length === 0) return;
+    setStudentCsvImporting(true);
+    try {
+      const { data: existing } = await supabase.from('users').select('student_email, student_code');
+      const existingEmails = new Set((existing || []).map(u => u.student_email));
+      const existingCodes = new Set((existing || []).map(u => u.student_code));
+
+      const toInsert = [], skipped = [];
+      studentCsvParsed.students.forEach(s => {
+        if (existingEmails.has(s.student_email)) { skipped.push(`${s.full_name} — email already exists`); return; }
+        if (existingCodes.has(s.student_code)) { skipped.push(`${s.full_name} — Student ID already exists`); return; }
+        toInsert.push(s);
+      });
+
+      let inserted = [];
+      for (let i = 0; i < toInsert.length; i += 50) {
+        const { data, error } = await supabase.from('users').insert(toInsert.slice(i, i + 50)).select();
+        if (error) throw error;
+        if (data) inserted = [...inserted, ...data];
+      }
+
+      if (inserted.length > 0) {
+        setStudentsList(prev => [...prev, ...inserted]);
+        setStudents(prev => {
+          const next = { ...prev };
+          inserted.forEach(s => { next[s.id] = { name: s.full_name, section: s.section }; });
+          return next;
+        });
+        setEditingStudentSections(prev => {
+          const next = { ...prev };
+          inserted.forEach(s => { next[s.id] = s.section; });
+          return next;
+        });
+      }
+
+      setStudentCsvParsed(null);
+      let msg = `✅ ${inserted.length} student${inserted.length !== 1 ? 's' : ''} imported.`;
+      if (skipped.length > 0) {
+        const preview = skipped.slice(0, 8).join('\n');
+        const more = skipped.length > 8 ? `\n…and ${skipped.length - 8} more` : '';
+        msg += `\n\nSkipped ${skipped.length} duplicate${skipped.length !== 1 ? 's' : ''}:\n${preview}${more}`;
+      }
+      alert(msg);
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    }
+    setStudentCsvImporting(false);
   };
 
   const openDupModal = (exam) => {
@@ -1562,6 +1725,9 @@ const deleteResult = async (studentId, examId) => {
                     {instructorSections.size > 0 ? `Sections: ${[...instructorSections].join(', ')} · ` : ''}{studentsList.length} student{studentsList.length !== 1 ? 's' : ''}
                   </p>
                 </div>
+                <button className="btn ghost sm" onClick={downloadStudentCSVTemplate}>
+                  <Icon name="download" size={13} /> Download Template
+                </button>
               </div>
 
               {/* Section filter bar */}
@@ -1709,8 +1875,70 @@ const deleteResult = async (studentId, examId) => {
               </div>{/* end table-scroll */}
               </div>{/* end card */}
 
+              {/* CSV IMPORT CARD */}
+              <div className="card" style={{ marginTop: 16, padding: '20px 24px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                  <h4 style={{ margin: 0, color: 'var(--ink-1)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Icon name="upload" size={15} color="var(--navy)" /> Import Students from CSV
+                  </h4>
+                  <button className="btn ghost sm" onClick={downloadStudentCSVTemplate} style={{ width: 'auto' }}>
+                    <Icon name="download" size={13} /> Download Template
+                  </button>
+                </div>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--ink-3)' }}>
+                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>full_name, student_email, student_id, section</code> — duplicates (by email or Student ID) are skipped automatically.
+                </p>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <label
+                    className="btn ghost sm"
+                    style={{ width: 'auto', cursor: 'pointer', ...(studentCsvParsed ? { borderColor: 'var(--ok-bd)', color: 'var(--ok)', background: 'var(--ok-bg)' } : {}) }}
+                  >
+                    <Icon name={studentCsvParsed ? 'check' : 'file-text'} size={14} />
+                    {studentCsvParsed ? `${studentCsvParsed.students.length} students ready` : 'Choose CSV file'}
+                    <input type="file" accept=".csv" style={{ display: 'none' }} onChange={e => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = ev => setStudentCsvParsed(parseStudentCSV(ev.target.result));
+                      reader.readAsText(file);
+                      e.target.value = '';
+                    }} />
+                  </label>
+
+                  {studentCsvParsed && studentCsvParsed.errors.length === 0 && (
+                    <button
+                      className="btn sm"
+                      onClick={importStudentsFromCSV}
+                      disabled={studentCsvImporting || studentCsvParsed.students.length === 0}
+                      style={{ width: 'auto', opacity: studentCsvImporting ? 0.7 : 1 }}
+                    >
+                      {studentCsvImporting ? 'Importing…' : `Import ${studentCsvParsed.students.length} Student${studentCsvParsed.students.length !== 1 ? 's' : ''}`}
+                    </button>
+                  )}
+
+                  {studentCsvParsed && (
+                    <button
+                      onClick={() => setStudentCsvParsed(null)}
+                      style={{ background: 'none', border: 'none', color: 'var(--bad)', fontWeight: 700, cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
+                    >×</button>
+                  )}
+                </div>
+
+                {studentCsvParsed?.errors?.length > 0 && (
+                  <div style={{ marginTop: 12, background: 'var(--bad-bg)', border: '1px solid var(--bad-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
+                    <p style={{ margin: '0 0 6px', fontWeight: 700, color: 'var(--bad)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Icon name="alert" size={14} color="var(--bad)" /> Fix these errors before importing:
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--bad)', fontSize: 12 }}>
+                      {studentCsvParsed.errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
               {/* ADD STUDENT FORM */}
-              <div style={{ marginTop: 20, background: 'var(--navy-50)', border: '2px dashed var(--navy-200)', borderRadius: 'var(--r-lg)', padding: '20px 24px' }}>
+              <div style={{ marginTop: 16, background: 'var(--navy-50)', border: '2px dashed var(--navy-200)', borderRadius: 'var(--r-lg)', padding: '20px 24px' }}>
                 <h4 style={{ margin: '0 0 16px 0', color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="user-plus" size={16} color="var(--navy)" /> Add New Student</h4>
                 <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={{ flex: 2, minWidth: '160px' }}>
@@ -2032,6 +2260,37 @@ const deleteResult = async (studentId, examId) => {
                   <textarea className="input" value={qForm.question_text} onChange={e => setQForm(f => ({ ...f, question_text: e.target.value }))} placeholder="Enter the question..." rows={3} style={{ resize: 'vertical' }} />
                 </div>
 
+                {/* Image / Figure */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="label">Figure / Image <span style={{ fontWeight: 400, color: 'var(--ink-4)', letterSpacing: 0 }}>(optional)</span></label>
+                  {qImagePreview ? (
+                    <div>
+                      <div style={{ position: 'relative', display: 'inline-block', maxWidth: '100%', marginBottom: 8 }}>
+                        <img
+                          src={qImagePreview}
+                          alt="Question figure preview"
+                          style={{ maxWidth: '100%', maxHeight: 260, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1.5px solid var(--line)', background: 'var(--surface-2)' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { setQImageFile(null); setQImagePreview(null); setQForm(f => ({ ...f, image_url: null })); }}
+                          title="Remove image"
+                          style={{ position: 'absolute', top: 6, right: 6, width: 26, height: 26, borderRadius: '50%', background: 'rgba(0,0,0,.6)', border: 'none', color: 'white', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, lineHeight: 1 }}
+                        >×</button>
+                      </div>
+                      <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', display: 'inline-flex' }}>
+                        <Icon name="image" size={13} /> Replace image
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (!f) return; setQImageFile(f); setQImagePreview(URL.createObjectURL(f)); e.target.value = ''; }} />
+                      </label>
+                    </div>
+                  ) : (
+                    <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', display: 'inline-flex' }}>
+                      <Icon name="image" size={13} /> Upload image
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (!f) return; setQImageFile(f); setQImagePreview(URL.createObjectURL(f)); e.target.value = ''; }} />
+                    </label>
+                  )}
+                </div>
+
                 {qForm.question_type !== 'essay' && (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
@@ -2067,12 +2326,12 @@ const deleteResult = async (studentId, examId) => {
                 )}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <button className="btn sm" onClick={saveQuestion} disabled={qSaving} style={{ width: 'auto', opacity: qSaving ? 0.7 : 1 }}>
+                  <button className="btn sm" onClick={saveQuestion} disabled={qSaving || qImageUploading} style={{ width: 'auto', opacity: qSaving || qImageUploading ? 0.7 : 1 }}>
                     <Icon name="check" size={14} color="white" />
-                    {qSaving ? 'Saving...' : editingQ ? 'Update Question' : 'Add Question'}
+                    {qImageUploading ? 'Uploading image…' : qSaving ? 'Saving…' : editingQ ? 'Update Question' : 'Add Question'}
                   </button>
                   {editingQ && (
-                    <button className="btn ghost sm" onClick={() => { setEditingQ(null); setQForm(emptyQ); }} style={{ width: 'auto' }}>
+                    <button className="btn ghost sm" onClick={() => { setEditingQ(null); setQForm(emptyQ); setQImageFile(null); setQImagePreview(null); }} style={{ width: 'auto' }}>
                       <Icon name="x" size={14} /> Cancel
                     </button>
                   )}
@@ -2139,11 +2398,20 @@ const deleteResult = async (studentId, examId) => {
                     {qList.map((q, idx) => (
                       <div key={q.id} className="card" style={{ padding: '16px 20px', ...(editingQ?.id === q.id ? { borderColor: 'var(--navy)', background: 'var(--navy-50)' } : {}) }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
-                          <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', flex: 1, fontSize: '14px' }}>
-                            <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
-                            {q.question_text}
-                            {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
-                          </p>
+                          <div style={{ flex: 1 }}>
+                            <p style={{ margin: '0 0 8px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14px' }}>
+                              <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
+                              {q.question_text}
+                              {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
+                            </p>
+                            {q.image_url && (
+                              <img
+                                src={q.image_url}
+                                alt="Figure"
+                                style={{ maxHeight: 72, maxWidth: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-xs)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 6 }}
+                              />
+                            )}
+                          </div>
                           <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                             <button className="btn ghost sm" onClick={() => startEditQuestion(q)} style={{ width: 'auto' }}>
                               <Icon name="pencil" size={13} /> Edit
@@ -2417,6 +2685,9 @@ const deleteResult = async (studentId, examId) => {
                           <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
                           <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                         </div>
+                        {q.image_url && (
+                          <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
+                        )}
                         <div style={{ background: 'var(--info-bg)', border: '1px solid var(--info-bd)', borderRadius: 'var(--r-sm)', padding: '14px 16px', fontSize: '14px', color: essayText ? 'var(--ink-1)' : 'var(--ink-4)', fontStyle: essayText ? 'normal' : 'italic', lineHeight: '1.6', minHeight: '60px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                           {essayText || 'No answer provided.'}
                         </div>
@@ -2429,7 +2700,10 @@ const deleteResult = async (studentId, examId) => {
 
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px', borderLeft: studentChoice === correctChoice ? '4px solid var(--ok)' : '4px solid var(--bad)' }}>
-                      <p style={{ margin: '0 0 14px 0', fontWeight: 600, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                      <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                      {q.image_url && (
+                        <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
+                      )}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         {['a', 'b', 'c', 'd'].map((letter, i) => {
                           const isCorrect = i === correctChoice;
@@ -2486,6 +2760,9 @@ const deleteResult = async (studentId, examId) => {
                         <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
                         <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                       </div>
+                      {q.image_url && (
+                        <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginTop: 10 }} />
+                      )}
                       <p style={{ margin: '8px 0 0', color: 'var(--ink-3)', fontSize: '13px' }}>Open-ended question — view individual answers in the Results tab.</p>
                     </div>
                   );
@@ -2502,7 +2779,10 @@ const deleteResult = async (studentId, examId) => {
 
                 return (
                   <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
-                    <p style={{ margin: '0 0 16px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>{idx + 1}. {q.question_text}</p>
+                    <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>{idx + 1}. {q.question_text}</p>
+                    {q.image_url && (
+                      <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 14 }} />
+                    )}
                     <div style={{ display: 'grid', gap: '8px' }}>
                       {['a', 'b', 'c', 'd'].map((letter, i) => {
                         const count = counts[i];

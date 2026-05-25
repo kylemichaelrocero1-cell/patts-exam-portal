@@ -85,6 +85,9 @@ const PATHS = {
   'bell':         <><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8z"/><path d="M10 21a2 2 0 0 0 4 0"/></>,
   'message':      <><path d="M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9l-5 4v-4H5a2 2 0 0 1-2-2V6z"/></>,
 
+  // Media
+  'image':        <><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="m21 15-5-5L5 19"/></>,
+
   // Aviation
   'plane':        <path d="M3 12 21 5l-3 8 3 6-6-3-8 3 3-7L3 12z"/>,
   'plane-takeoff':<><path d="M2 22h20"/><path d="m21 8-7 7-9-3 3-2 4 1L8 7l2-1 6 3 5-1z"/></>,

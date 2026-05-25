@@ -106,7 +106,7 @@ const [targetSection, setTargetSection] = useState('');
     setIsLoadingQuestions(true);
     const { data, error } = await supabase
       .from('questions')
-      .select('id, question_text, choice_a, choice_b, choice_c, choice_d, correct_answer, question_type, image_url')
+      .select('*')
       .eq('exam_id', examId)
       .order('id', { ascending: true });
     setIsLoadingQuestions(false);

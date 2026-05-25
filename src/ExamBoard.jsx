@@ -58,9 +58,10 @@ export default function ExamBoard({ student, exam, examSet }) {
   // Snapshot of answers captured when submit modal opens — prevents last-second tampering
   const answersSnapshotRef = useRef(null);
   const essaySnapshotRef = useRef(null);
-  // Debounce handles — kept separate so violation and progress pushers never cancel each other
+  // Debounce handles — each pusher has its own ref so they never cancel each other
   const livePushDebounceRef = useRef(null);
   const violationPushDebounceRef = useRef(null);
+  const countPushDebounceRef = useRef(null);
 
   // --- CLONE GUARD: Check for multiple logins (30s interval reduces DB load for 121 students) ---
   useEffect(() => {
@@ -145,8 +146,10 @@ export default function ExamBoard({ student, exam, examSet }) {
             const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;
             if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
           }
+          const localCount = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+          const serverCount = Object.keys(existing.answers_json || {}).length + Object.values(existing.essay_answers_json || {}).filter(t => t?.trim().length > 0).length;
           await supabase.from('live_sessions').update({
-            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+            answers_count: Math.max(localCount, serverCount),
             violation_count: effectiveViolations,
             updated_at: new Date()
           }).eq('id', existing.id);
@@ -238,21 +241,40 @@ export default function ExamBoard({ student, exam, examSet }) {
     };
   }, [tabSwitchCount, violationLogs, liveSessionId]);
 
-  // --- PROGRESS PUSHER (5s debounce — prevents ~6000 DB writes for 121 students) ---
-  // Writes heavy JSON data for cross-device resume and answers_count for the live monitor.
+  // --- COUNT PUSHER (2s debounce) — writes ONLY answers_count so admin monitor is always current.
+  // Isolated from the JSON pusher: if answers_json/essay_answers_json columns are missing the
+  // JSON pusher will fail silently but this pusher still keeps the count accurate.
+  useEffect(() => {
+    if (!liveSessionId) return;
+    if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
+    countPushDebounceRef.current = setTimeout(() => {
+      countPushDebounceRef.current = null;
+      supabase.from('live_sessions').update({
+        answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+        updated_at: new Date()
+      }).eq('id', liveSessionId).then(({ error }) => {
+        if (error) console.error('Count push failed:', error.message);
+      });
+    }, 2000);
+    return () => {
+      if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
+    };
+  }, [answers, essayAnswers, liveSessionId]);
+
+  // --- JSON PROGRESS PUSHER (5s debounce) — writes full answers for cross-device resume.
+  // Requires answers_json, essay_answers_json, exam_set columns in live_sessions.
   useEffect(() => {
     if (!liveSessionId) return;
     if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     livePushDebounceRef.current = setTimeout(() => {
       livePushDebounceRef.current = null;
       supabase.from('live_sessions').update({
-        answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
         answers_json: answers,
         essay_answers_json: essayAnswers,
         exam_set: examSet,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
-        if (error) console.error('Progress push failed:', error.message);
+        if (error) console.warn('JSON progress save skipped (run DB migration if cross-device resume is needed):', error.message);
       });
     }, 5000);
     return () => {
@@ -738,13 +760,13 @@ export default function ExamBoard({ student, exam, examSet }) {
             )}
             {flaggedQuestions[currentQ?.id] && (
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#FFF6E5', border: '1px solid #F0CA80', color: '#A56B0A', padding: '3px 9px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>
-                <Icon name="flag" size={11} color="#E67E22" />
-                Flagged
+                <Icon name="bookmark" size={11} color="#E67E22" />
+                Bookmarked
               </span>
             )}
             <button
               onClick={() => toggleFlag(currentQ?.id)}
-              title={flaggedQuestions[currentQ?.id] ? 'Remove flag' : 'Flag for review'}
+              title={flaggedQuestions[currentQ?.id] ? 'Remove bookmark' : 'Bookmark for review'}
               style={{
                 marginLeft: 'auto', flexShrink: 0,
                 width: 30, height: 30,
@@ -755,7 +777,7 @@ export default function ExamBoard({ student, exam, examSet }) {
                 borderRadius: 'var(--r-sm)', cursor: 'pointer', transition: 'all var(--t-1)',
               }}
             >
-              <Icon name="flag" size={14} />
+              <Icon name="bookmark" size={14} />
             </button>
           </div>
 
@@ -902,8 +924,8 @@ export default function ExamBoard({ student, exam, examSet }) {
                           color: '#A56B0A', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                         }}
                       >
-                        <Icon name="flag" size={12} color="#E67E22" />
-                        {flaggedCount} flagged — jump to next
+                        <Icon name="bookmark" size={12} color="#E67E22" />
+                        {flaggedCount} bookmarked — jump to next
                         <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
                       </button>
                     );

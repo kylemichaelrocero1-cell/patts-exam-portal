@@ -58,8 +58,9 @@ export default function ExamBoard({ student, exam, examSet }) {
   // Snapshot of answers captured when submit modal opens — prevents last-second tampering
   const answersSnapshotRef = useRef(null);
   const essaySnapshotRef = useRef(null);
-  // Debounce handle for live data pusher
+  // Debounce handles — kept separate so violation and progress pushers never cancel each other
   const livePushDebounceRef = useRef(null);
+  const violationPushDebounceRef = useRef(null);
 
   // --- CLONE GUARD: Check for multiple logins (30s interval reduces DB load for 121 students) ---
   useEffect(() => {
@@ -215,7 +216,30 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [student?.id, exam?.id]);
 
-  // --- LIVE DATA PUSHER (debounced 5s — prevents ~6000 DB writes for 121 students) ---
+  // --- VIOLATION PUSHER (1s debounce) ---
+  // Separate from the progress pusher so rapid answer changes never reset the violation timer.
+  // With 100+ students, a student triggering violations every 2-3s would have previously reset
+  // the single 5s debounce continuously, meaning the count never reached the DB.
+  useEffect(() => {
+    if (!liveSessionId) return;
+    if (violationPushDebounceRef.current) clearTimeout(violationPushDebounceRef.current);
+    violationPushDebounceRef.current = setTimeout(() => {
+      violationPushDebounceRef.current = null;
+      supabase.from('live_sessions').update({
+        violation_count: tabSwitchCount,
+        violation_log: violationLogs,
+        updated_at: new Date()
+      }).eq('id', liveSessionId).then(({ error }) => {
+        if (error) console.error('Violation push failed:', error.message);
+      });
+    }, 1000);
+    return () => {
+      if (violationPushDebounceRef.current) clearTimeout(violationPushDebounceRef.current);
+    };
+  }, [tabSwitchCount, violationLogs, liveSessionId]);
+
+  // --- PROGRESS PUSHER (5s debounce — prevents ~6000 DB writes for 121 students) ---
+  // Writes heavy JSON data for cross-device resume and answers_count for the live monitor.
   useEffect(() => {
     if (!liveSessionId) return;
     if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
@@ -223,20 +247,18 @@ export default function ExamBoard({ student, exam, examSet }) {
       livePushDebounceRef.current = null;
       supabase.from('live_sessions').update({
         answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
-        violation_count: tabSwitchCount,
-        violation_log: violationLogs,
         answers_json: answers,
         essay_answers_json: essayAnswers,
         exam_set: examSet,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
-        if (error) console.error('Live data push failed:', error.message);
+        if (error) console.error('Progress push failed:', error.message);
       });
     }, 5000);
     return () => {
       if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     };
-  }, [answers, essayAnswers, tabSwitchCount, violationLogs, liveSessionId]);
+  }, [answers, essayAnswers, liveSessionId]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {

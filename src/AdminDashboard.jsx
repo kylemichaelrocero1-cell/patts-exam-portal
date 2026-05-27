@@ -100,6 +100,13 @@ const [targetSection, setTargetSection] = useState('');
   const [sharesMap, setSharesMap] = useState({}); // { [examId]: [{ id, shared_with }] }
   const [sharedExamsList, setSharedExamsList] = useState([]); // exams shared WITH me
 
+  // --- SECTION CO-INSTRUCTOR STATES ---
+  const [sectionCoModal, setSectionCoModal] = useState(null); // section name string | null
+  const [sectionCoTarget, setSectionCoTarget] = useState('');
+  const [isSectionCoSaving, setIsSectionCoSaving] = useState(false);
+  // { [sectionName]: [{ id, instructor_id, added_by }] } for sections I own
+  const [sectionCoMap, setSectionCoMap] = useState({});
+
   // Helper to load questions — uses a separate loading state so the dashboard never disappears
   const loadExamQuestions = async (examId) => {
     if (examQuestionsCache[examId]) return examQuestionsCache[examId];
@@ -296,6 +303,43 @@ const [targetSection, setTargetSection] = useState('');
     const { error } = await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
     if (error) { alert('Failed to dismiss session: ' + error.message); return; }
     setLiveSessions(prev => prev.filter(s => s.id !== sessionId));
+  };
+
+  // --- SECTION CO-INSTRUCTOR FUNCTIONS ---
+  const addSectionCoInstructor = async () => {
+    if (!sectionCoModal || !sectionCoTarget) return;
+    if (sectionCoTarget === instructorId) return alert('You cannot add yourself as a co-instructor.');
+    setIsSectionCoSaving(true);
+    const { error } = await supabase.from('section_instructors').insert([{
+      section_name: sectionCoModal,
+      instructor_id: sectionCoTarget,
+      added_by: instructorId,
+    }]);
+    setIsSectionCoSaving(false);
+    if (error) {
+      if (error.code === '23505') return alert('That instructor already has access to this section.');
+      return alert('Error adding co-instructor: ' + error.message);
+    }
+    setSectionCoMap(prev => {
+      const updated = { ...prev };
+      if (!updated[sectionCoModal]) updated[sectionCoModal] = [];
+      updated[sectionCoModal] = [...updated[sectionCoModal], { instructor_id: sectionCoTarget, added_by: instructorId, section_name: sectionCoModal }];
+      return updated;
+    });
+    setSectionCoTarget('');
+  };
+
+  const removeSectionCoInstructor = async (row) => {
+    const { error } = await supabase.from('section_instructors').delete()
+      .eq('section_name', row.section_name)
+      .eq('instructor_id', row.instructor_id)
+      .eq('added_by', instructorId);
+    if (error) return alert('Error removing co-instructor: ' + error.message);
+    setSectionCoMap(prev => {
+      const updated = { ...prev };
+      updated[row.section_name] = (updated[row.section_name] || []).filter(r => r.instructor_id !== row.instructor_id);
+      return updated;
+    });
   };
 
   const clearStuckSessions = async () => {
@@ -767,8 +811,8 @@ const [targetSection, setTargetSection] = useState('');
 async function fetchDashboardData() {
     setIsLoading(true);
     try {
-      // Fetch own exams and incoming shares in parallel
-      const [examsRes, inSharesRes] = await Promise.all([
+      // Fetch own exams, incoming exam-shares, and section co-instructor memberships in parallel
+      const [examsRes, inSharesRes, coSectionsRes] = await Promise.all([
         supabase.from('exams')
           .select('id, title, is_open, duration_minutes, target_section, exam_password')
           .eq('instructor_id', instructorId)
@@ -776,28 +820,68 @@ async function fetchDashboardData() {
         supabase.from('exam_shares')
           .select('id, exam_id, shared_by')
           .eq('shared_with', instructorId),
+        supabase.from('section_instructors')
+          .select('id, section_name, instructor_id, added_by')
+          .or(`added_by.eq.${instructorId},instructor_id.eq.${instructorId}`),
       ]);
 
       const examsData = examsRes.data || [];
       const inShares = inSharesRes.data || [];
+      const allSectionRows = coSectionsRes.data || [];
 
-      // Fetch shared exam data + outgoing shares + students in parallel
+      // Build section co-instructor map for sections I own (added_by = me)
+      const newSectionCoMap = {};
+      allSectionRows.filter(r => r.added_by === instructorId).forEach(r => {
+        if (!newSectionCoMap[r.section_name]) newSectionCoMap[r.section_name] = [];
+        newSectionCoMap[r.section_name].push(r);
+      });
+      setSectionCoMap(newSectionCoMap);
+
+      // Sections I co-manage (added by another instructor, I am the co-instructor)
+      const coManagedSectionNames = [
+        ...new Set(allSectionRows.filter(r => r.instructor_id === instructorId && r.added_by !== instructorId).map(r => r.section_name))
+      ];
+
+      // Fetch shared exam data + outgoing shares + students + co-section exams in parallel
       const sharedExamIdsFromShares = [...new Set(inShares.map(s => s.exam_id))];
-      const [sharedExamsRes, outSharesRes, studentsRes] = await Promise.all([
+      const [sharedExamsRes, outSharesRes, studentsRes, ...coSectionExamResults] = await Promise.all([
         sharedExamIdsFromShares.length > 0
           ? supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').in('id', sharedExamIdsFromShares)
           : Promise.resolve({ data: [] }),
         supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
         supabase.from('users').select('id, full_name, section'),
+        // For each co-managed section, fetch other instructors' exams targeting it
+        ...coManagedSectionNames.map(sec =>
+          supabase.from('exams')
+            .select('id, title, is_open, duration_minutes, target_section, exam_password, instructor_id')
+            .ilike('target_section', `%${sec}%`)
+            .neq('instructor_id', instructorId)
+        ),
       ]);
 
       const sharedExamsData = sharedExamsRes.data || [];
       const outShares = outSharesRes.data || [];
       const studentsData = studentsRes.data || [];
 
+      // Merge exams from co-managed sections (verify exact section match client-side)
+      const ownExamIdSet = new Set(examsData.map(e => e.id));
+      const coSectionExams = [];
+      const seenCoIds = new Set(sharedExamsData.map(e => e.id));
+      coSectionExamResults.forEach((res, i) => {
+        const secName = coManagedSectionNames[i];
+        (res.data || []).forEach(exam => {
+          // Exact section match — ensures "BSME 3A" doesn't match "BSME 30"
+          const sections = (exam.target_section || '').split(',').map(s => s.trim());
+          if (!sections.includes(secName)) return;
+          if (ownExamIdSet.has(exam.id) || seenCoIds.has(exam.id)) return;
+          seenCoIds.add(exam.id);
+          coSectionExams.push({ ...exam, _coSection: secName });
+        });
+      });
+
       // Combine all exam IDs for live monitor and results
       const ownExamIds = examsData.map(e => e.id);
-      const sharedExamIds = sharedExamsData.map(e => e.id);
+      const sharedExamIds = [...sharedExamsData.map(e => e.id), ...coSectionExams.map(e => e.id)];
       const allExamIds = [...ownExamIds, ...sharedExamIds];
       instructorExamIdsRef.current = new Set(allExamIds);
 
@@ -840,12 +924,15 @@ async function fetchDashboardData() {
       });
       setSharesMap(newSharesMap);
 
-      // Build sharedExamsList (incoming)
-      const sharedList = inShares.map(s => {
-        const exam = sharedExamsData.find(e => e.id === s.exam_id);
-        if (!exam) return null;
-        return { ...exam, share_id: s.id, shared_by: s.shared_by };
-      }).filter(Boolean);
+      // Build sharedExamsList (incoming exam-shares + co-section exams)
+      const sharedList = [
+        ...inShares.map(s => {
+          const exam = sharedExamsData.find(e => e.id === s.exam_id);
+          if (!exam) return null;
+          return { ...exam, share_id: s.id, shared_by: s.shared_by };
+        }).filter(Boolean),
+        ...coSectionExams.map(e => ({ ...e, shared_by: e.instructor_id, _isCoSection: true })),
+      ];
       setSharedExamsList(sharedList);
 
       // Process students
@@ -1683,7 +1770,7 @@ const deleteResult = async (studentId, examId) => {
 
                {/* Section Field */}
                 <td>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                     <input
                       type="text"
                       value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
@@ -1693,6 +1780,22 @@ const deleteResult = async (studentId, examId) => {
                       style={{ width: 140, padding: '7px 10px', fontSize: 13 }}
                     />
                     <button onClick={() => saveSection(exam.id)} className="btn sm" style={{ opacity: editingSections[exam.id] !== (examsList.find(e => e.id === exam.id)?.target_section ?? '') ? 1 : 0.4 }}>Save</button>
+                    {/* Co-instructor buttons per unique section name on this exam */}
+                    {(exam.target_section || '').split(',').map(s => s.trim()).filter(Boolean).map(sec => (
+                      <button
+                        key={sec}
+                        className="btn ghost sm"
+                        onClick={() => { setSectionCoModal(sec); setSectionCoTarget(''); }}
+                        style={{ fontSize: 11, padding: '3px 8px', width: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}
+                        title={`Manage co-instructors for ${sec}`}
+                      >
+                        <Icon name="users" size={12} color="var(--navy)" />
+                        {sec}
+                        {(sectionCoMap[sec] || []).length > 0 && (
+                          <span className="px-pill info" style={{ fontSize: 10, padding: '1px 5px' }}>{(sectionCoMap[sec] || []).length}</span>
+                        )}
+                      </button>
+                    ))}
                   </div>
                 </td>
 
@@ -3127,6 +3230,89 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Section Co-Instructor Modal */}
+      {sectionCoModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 480, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
+            <div className="patts-header" style={{ padding: '20px 24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ margin: 0, color: 'white', fontSize: 17 }}>Section Co-Instructors</h2>
+                  <p style={{ margin: '3px 0 0', color: 'rgba(255,255,255,.6)', fontSize: 13 }}>
+                    <strong style={{ color: 'var(--gold-bright)' }}>{sectionCoModal}</strong> — both instructors see all exams for this section
+                  </p>
+                </div>
+                <button className="btn ghost sm" onClick={() => setSectionCoModal(null)} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
+                  <Icon name="x" size={14} color="white" />
+                </button>
+              </div>
+            </div>
+
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Current co-instructors */}
+              <div>
+                <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)' }}>Current co-instructors</p>
+                {(sectionCoMap[sectionCoModal] || []).length === 0 ? (
+                  <p style={{ margin: 0, color: 'var(--ink-3)', fontSize: 13, fontStyle: 'italic' }}>No co-instructors added yet.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {(sectionCoMap[sectionCoModal] || []).map(row => {
+                      const inst = instructorsList.find(i => i.id === row.instructor_id);
+                      return (
+                        <div key={row.instructor_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 'var(--r-sm)', background: 'var(--surface-2)', border: '1px solid var(--line)' }}>
+                          <div>
+                            <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: 'var(--ink-1)' }}>{inst?.full_name || 'Unknown'}</p>
+                            <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-3)' }}>{inst?.email || ''}</p>
+                          </div>
+                          <button className="btn ghost sm" onClick={() => removeSectionCoInstructor(row)} style={{ color: 'var(--bad)', borderColor: 'var(--bad)', width: 'auto', fontSize: 12 }}>
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Add co-instructor */}
+              {instructorsList.filter(i => !(sectionCoMap[sectionCoModal] || []).some(r => r.instructor_id === i.id)).length > 0 ? (
+                <div>
+                  <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: 13, color: 'var(--ink-2)' }}>Add a co-instructor</p>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <select
+                      className="input"
+                      value={sectionCoTarget}
+                      onChange={e => setSectionCoTarget(e.target.value)}
+                      style={{ flex: 1, padding: '9px 12px', fontSize: 13 }}
+                    >
+                      <option value="">Select instructor…</option>
+                      {instructorsList
+                        .filter(i => !(sectionCoMap[sectionCoModal] || []).some(r => r.instructor_id === i.id))
+                        .map(i => (
+                          <option key={i.id} value={i.id}>{i.full_name} — {i.email}</option>
+                        ))}
+                    </select>
+                    <button
+                      className="btn sm"
+                      onClick={addSectionCoInstructor}
+                      disabled={!sectionCoTarget || isSectionCoSaving}
+                      style={{ width: 'auto', whiteSpace: 'nowrap' }}
+                    >
+                      {isSectionCoSaving ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
+                  <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--ink-3)' }}>
+                    They will see and be able to administer all exams targeting <strong>{sectionCoModal}</strong>.
+                  </p>
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: 'var(--ink-3)', fontSize: 13, fontStyle: 'italic' }}>All other instructors already have access to this section.</p>
+              )}
             </div>
           </div>
         </div>

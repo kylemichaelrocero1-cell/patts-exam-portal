@@ -549,23 +549,19 @@ input:checked + .slider::before { transform: translateX(26px); }
 /* ── Print ───────────────────────────────────── */
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  body * { visibility: hidden; }
-  .print-modal-overlay {
-    position: static !important; display: block !important;
-    background: none !important; padding: 0 !important; margin: 0 !important;
+
+  /* Clone-based print: body gets analysis-printing class, clone is #analysis-print-root */
+  body.analysis-printing > *:not(#analysis-print-root) { display: none !important; }
+
+  #analysis-print-root {
+    display: block !important;
     width: 100% !important;
   }
-  .print-zone, .print-zone * { visibility: visible; }
-  .print-zone {
-    position: static !important;
-    width: 100% !important; max-width: none !important;
-    height: auto !important; max-height: none !important;
-    overflow: visible !important; background: white !important;
-    padding: 0 !important; margin: 0 !important;
-    border-radius: 0 !important; box-shadow: none !important;
+  #analysis-print-root button { display: none !important; }
+  #analysis-print-root > div { display: block !important; width: 100% !important; }
+  #analysis-print-root > div > div {
+    display: block !important; width: 100% !important;
+    break-inside: avoid !important; page-break-inside: avoid !important;
+    margin-bottom: 32px !important;
   }
-  .patts-header { position: static !important; }
-  .print-zone > div { display: block !important; width: 100% !important; }
-  .print-zone > div > div { display: block !important; width: 100% !important; break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 40px !important; }
-  .print-zone button { display: none !important; }
 }

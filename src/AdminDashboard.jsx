@@ -275,6 +275,23 @@ const [targetSection, setTargetSection] = useState('');
     }));
   };
 
+  const printAnalysis = () => {
+    const zone = document.querySelector('.print-zone');
+    if (!zone) { window.print(); return; }
+    const printRoot = document.createElement('div');
+    printRoot.id = 'analysis-print-root';
+    printRoot.innerHTML = zone.innerHTML;
+    document.body.appendChild(printRoot);
+    document.body.classList.add('analysis-printing');
+    const cleanup = () => {
+      document.body.removeChild(printRoot);
+      document.body.classList.remove('analysis-printing');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+  };
+
   const dismissSession = async (sessionId) => {
     const { error } = await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
     if (error) { alert('Failed to dismiss session: ' + error.message); return; }
@@ -3044,7 +3061,7 @@ const deleteResult = async (studentId, examId) => {
                   <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px' }}>How many students chose each option.</p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn ghost sm" onClick={() => window.print()} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
+                  <button className="btn ghost sm" onClick={printAnalysis} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
                     Save as PDF
                   </button>
                   <button className="btn ghost sm" onClick={() => setViewingStatsExam(null)} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>

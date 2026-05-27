@@ -62,6 +62,9 @@ export default function ExamBoard({ student, exam, examSet }) {
   const livePushDebounceRef = useRef(null);
   const violationPushDebounceRef = useRef(null);
   const countPushDebounceRef = useRef(null);
+  // Floor for answers_count: prevents COUNT PUSHER from writing 0 when init restores a session
+  // where answers couldn't be loaded locally (no localStorage, no answers_json column).
+  const minAnswersCountRef = useRef(0);
 
   // --- CLONE GUARD: Check for multiple logins (30s interval reduces DB load for 121 students) ---
   useEffect(() => {
@@ -148,8 +151,12 @@ export default function ExamBoard({ student, exam, examSet }) {
           }
           const localCount = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
           const serverCount = Object.keys(existing.answers_json || {}).length + Object.values(existing.essay_answers_json || {}).filter(t => t?.trim().length > 0).length;
+          // Use existing.answers_count as a floor so a page refresh never resets the count to 0
+          // when answers_json is missing (column not migrated) or localStorage was cleared.
+          const safeCount = Math.max(localCount, serverCount, existing.answers_count || 0);
+          minAnswersCountRef.current = safeCount;
           await supabase.from('live_sessions').update({
-            answers_count: Math.max(localCount, serverCount),
+            answers_count: safeCount,
             violation_count: effectiveViolations,
             updated_at: new Date()
           }).eq('id', existing.id);
@@ -249,8 +256,14 @@ export default function ExamBoard({ student, exam, examSet }) {
     if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     countPushDebounceRef.current = setTimeout(() => {
       countPushDebounceRef.current = null;
+      const liveCount = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+      // Never write below the server-known count from session init — prevents a page refresh
+      // on a new device from briefly resetting the count to 0 in the admin monitor.
+      const safeCount = Math.max(liveCount, minAnswersCountRef.current);
+      // Once the live count catches up, the floor is no longer needed.
+      if (liveCount >= minAnswersCountRef.current) minAnswersCountRef.current = 0;
       supabase.from('live_sessions').update({
-        answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+        answers_count: safeCount,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
         if (error) console.error('Count push failed:', error.message);

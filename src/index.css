@@ -550,15 +550,22 @@ input:checked + .slider::before { transform: translateX(26px); }
 @media print {
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body * { visibility: hidden; }
-  .print-modal-overlay { position: static !important; display: block !important; background: none !important; }
+  .print-modal-overlay {
+    position: static !important; display: block !important;
+    background: none !important; padding: 0 !important; margin: 0 !important;
+    width: 100% !important;
+  }
   .print-zone, .print-zone * { visibility: visible; }
   .print-zone {
-    position: static !important; width: 100% !important;
+    position: static !important;
+    width: 100% !important; max-width: none !important;
     height: auto !important; max-height: none !important;
     overflow: visible !important; background: white !important;
     padding: 0 !important; margin: 0 !important;
+    border-radius: 0 !important; box-shadow: none !important;
   }
-  .print-zone > div { display: block !important; }
-  .print-zone > div > div { display: block !important; break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 40px !important; }
+  .patts-header { position: static !important; }
+  .print-zone > div { display: block !important; width: 100% !important; }
+  .print-zone > div > div { display: block !important; width: 100% !important; break-inside: avoid !important; page-break-inside: avoid !important; margin-bottom: 40px !important; }
   .print-zone button { display: none !important; }
 }

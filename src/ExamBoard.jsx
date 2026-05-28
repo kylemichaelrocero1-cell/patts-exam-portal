@@ -410,6 +410,26 @@ export default function ExamBoard({ student, exam, examSet }) {
     }
   }, [timeLeft, scoreDisplay, isSubmitting, isLoading, executeSubmission]);
 
+  // --- EXAM-CLOSE WATCHER (30s poll) ---
+  // Catches the case where the instructor closes the exam while a student's tab
+  // is open. The student's client-side timer keeps running but never hits 0 if
+  // they still have time left — this poll detects the close and auto-submits.
+  // Only polls when the student is actively in the exam (not submitted, not locked).
+  useEffect(() => {
+    if (!exam?.id || scoreDisplay || isSubmitting) return;
+    const executeRef = { current: executeSubmission };
+    executeRef.current = executeSubmission;
+    const poll = setInterval(async () => {
+      if (isSubmittingRef.current || scoreDisplay) return;
+      const { data } = await supabase.from('exams').select('is_open').eq('id', exam.id).single();
+      if (data && data.is_open === false) {
+        clearInterval(poll);
+        executeRef.current();
+      }
+    }, 30000);
+    return () => clearInterval(poll);
+  }, [exam?.id, scoreDisplay, isSubmitting, executeSubmission]);
+
   // --- ANTI-CHEAT ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting || examStatus === 'locked') return;

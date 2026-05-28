@@ -351,6 +351,108 @@ const [targetSection, setTargetSection] = useState('');
     setLiveSessions(prev => prev.filter(s => !stuckIds.includes(s.id)));
   };
 
+  // --- FORCE SUBMIT ---
+  // Returns true if a live session has run past the exam's time limit.
+  const isSessionTimedOut = (session) => {
+    const duration = editingTimes[session.exam_id]
+      || sharedExamsList.find(e => e.id === session.exam_id)?.duration_minutes
+      || 0;
+    if (!duration || !session.created_at) return false;
+    const deadline = new Date(session.created_at).getTime() + duration * 60 * 1000 + 30000;
+    return Date.now() > deadline;
+  };
+
+  // Returns true if a session should be force-submittable:
+  // either timed out OR the exam was closed by the instructor.
+  const isSessionForceSubmittable = (session) => {
+    if (results.some(r => r.student_id === session.student_id && r.exam_id === session.exam_id)) return false;
+    const examClosed = [...examsList, ...sharedExamsList].find(e => e.id === session.exam_id)?.is_open === false;
+    return isSessionTimedOut(session) || examClosed;
+  };
+
+  const [isForceSubmitting, setIsForceSubmitting] = useState(false);
+  const [forceSubmitConfirmList, setForceSubmitConfirmList] = useState(null); // sessions[] | null
+
+  const doForceSubmit = async (sessions) => {
+    setIsForceSubmitting(true);
+    const examIds = [...new Set(sessions.map(s => s.exam_id))];
+
+    // Load questions for all affected exams in parallel
+    await Promise.all(examIds.map(id => loadExamQuestions(id)));
+
+    const errors = [];
+    for (const session of sessions) {
+      try {
+        const questions = examQuestionsCache[session.exam_id] || [];
+        const rawAnswers = session.answers_json || {};
+        const rawEssays = session.essay_answers_json || {};
+
+        let correctCount = 0, mcTotal = 0;
+        const formattedAnswers = {};
+
+        questions.forEach(q => {
+          const qId = String(q.id);
+          if ((q.question_type || 'multiple_choice') === 'essay') {
+            const text = rawEssays[qId];
+            if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
+          } else {
+            mcTotal++;
+            if (rawAnswers[qId] !== undefined) {
+              const chosen = Number(rawAnswers[qId]);
+              const isCorrect = chosen === Number(q.correct_answer);
+              if (isCorrect) correctCount++;
+              formattedAnswers[qId] = { chosen, is_correct: isCorrect };
+            }
+          }
+        });
+
+        const duration = editingTimes[session.exam_id]
+          || sharedExamsList.find(e => e.id === session.exam_id)?.duration_minutes
+          || 0;
+        const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
+        const timeTaken = Math.min(elapsed, duration * 60);
+
+        const { error: insertErr } = await supabase.from('results').insert([{
+          student_id: session.student_id,
+          exam_id: session.exam_id,
+          answers_json: formattedAnswers,
+          score: correctCount,
+          total_items: mcTotal,
+          time_taken_seconds: timeTaken,
+          tab_switches: session.violation_count || 0,
+          violation_logs: session.violation_log || [],
+        }]);
+
+        // 23505 = duplicate (already submitted) — treat as success
+        if (insertErr && insertErr.code !== '23505') {
+          errors.push(`${session.student_name}: ${insertErr.message}`);
+          continue;
+        }
+
+        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', session.id);
+        setLiveSessions(prev => prev.filter(s => s.id !== session.id));
+        if (insertErr?.code !== '23505') {
+          // Add to local results so dashboard updates immediately
+          setResults(prev => [...prev, {
+            student_id: session.student_id,
+            exam_id: session.exam_id,
+            score: correctCount,
+            total_items: mcTotal,
+            time_taken_seconds: timeTaken,
+            tab_switches: session.violation_count || 0,
+            submitted_at: new Date().toISOString(),
+          }]);
+        }
+      } catch (err) {
+        errors.push(`${session.student_name}: ${err.message}`);
+      }
+    }
+
+    setIsForceSubmitting(false);
+    setForceSubmitConfirmList(null);
+    if (errors.length > 0) alert(`Force submit completed with errors:\n${errors.join('\n')}`);
+  };
+
   // --- QUESTION MANAGEMENT FUNCTIONS ---
   const loadQuestionList = async (examId) => {
     if (!examId) { setQList([]); return; }
@@ -2288,9 +2390,30 @@ const deleteResult = async (studentId, examId) => {
             return !hasResult;
           });
           const stuckCount = liveSessions.length - activeSessions.length;
+          const forceSubmittable = activeSessions.filter(isSessionForceSubmittable);
 
           return (
             <div>
+              {/* Force-submit warning banner */}
+              {forceSubmittable.length > 0 && (
+                <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Icon name="alert" size={16} color="#B8860B" />
+                    <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>
+                      {forceSubmittable.length} student{forceSubmittable.length !== 1 ? 's' : ''} need{forceSubmittable.length === 1 ? 's' : ''} force submission
+                    </span>
+                    <span style={{ color: '#A07000', fontSize: 13 }}>— time expired or exam closed</span>
+                  </div>
+                  <button
+                    className="btn sm"
+                    onClick={() => setForceSubmitConfirmList(forceSubmittable)}
+                    style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                  >
+                    <Icon name="send" size={13} color="#1a1000" /> Force Submit All ({forceSubmittable.length})
+                  </button>
+                </div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
                 <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <span className="px-pill live" style={{ fontSize: '12px' }}>{activeSessions.length} active</span>
@@ -2327,13 +2450,21 @@ const deleteResult = async (studentId, examId) => {
                     <tr><td colSpan="6" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students currently taking an exam.</td></tr>
                   ) : (
                     activeSessions.map(session => (
-                      <tr key={session.id} style={session.status === 'locked' ? { background: 'var(--bad-bg)' } : {}}>
+                      <tr key={session.id} style={
+                        session.status === 'locked' ? { background: 'var(--bad-bg)' }
+                        : isSessionForceSubmittable(session) ? { background: 'var(--warn-bg, #FFFDE7)' }
+                        : {}
+                      }>
                         <td style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{session.student_name}</td>
                         <td style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
                         <td>
                           {session.status === 'locked'
                             ? <span className="px-pill bad"><Icon name="lock" size={11} /> LOCKED</span>
-                            : <span className="px-pill ok"><Icon name="dot" size={11} /> Active</span>}
+                            : isSessionForceSubmittable(session)
+                              ? <span className="px-pill" style={{ background: '#FFF3CD', color: '#856404', border: '1px solid #FFDA6A', fontSize: 11 }}>
+                                  <Icon name="alert" size={11} color="#856404" /> TIMED OUT
+                                </span>
+                              : <span className="px-pill ok"><Icon name="dot" size={11} /> Active</span>}
                         </td>
                         <td style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{session.answers_count}</td>
                         <td>
@@ -2356,10 +2487,20 @@ const deleteResult = async (studentId, examId) => {
                           </div>
                         </td>
                         <td>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button className={`btn sm ${session.status === 'locked' ? '' : 'danger'}`} onClick={() => toggleStudentLock(session.id, session.status)} style={{ width: 'auto' }}>
-                              {session.status === 'locked' ? <><Icon name="unlock" size={13} /> Unlock</> : <><Icon name="lock" size={13} /> Lock</>}
-                            </button>
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {isSessionForceSubmittable(session) ? (
+                              <button
+                                className="btn sm"
+                                onClick={() => setForceSubmitConfirmList([session])}
+                                style={{ width: 'auto', background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', fontWeight: 700 }}
+                              >
+                                <Icon name="send" size={13} color="#1a1000" /> Force Submit
+                              </button>
+                            ) : (
+                              <button className={`btn sm ${session.status === 'locked' ? '' : 'danger'}`} onClick={() => toggleStudentLock(session.id, session.status)} style={{ width: 'auto' }}>
+                                {session.status === 'locked' ? <><Icon name="unlock" size={13} /> Unlock</> : <><Icon name="lock" size={13} /> Lock</>}
+                              </button>
+                            )}
                             <button className="btn ghost sm" onClick={() => dismissSession(session.id)} style={{ width: 'auto' }}>
                               <Icon name="x" size={13} /> Dismiss
                             </button>
@@ -3313,6 +3454,51 @@ const deleteResult = async (studentId, examId) => {
               ) : (
                 <p style={{ margin: 0, color: 'var(--ink-3)', fontSize: 13, fontStyle: 'italic' }}>All other instructors already have access to this section.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Force Submit Confirmation Modal */}
+      {forceSubmitConfirmList && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 500, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
+            <div style={{ background: '#B8860B', padding: '18px 24px' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="send" size={16} color="white" /> Force Submit {forceSubmitConfirmList.length === 1 ? 'Exam' : `${forceSubmitConfirmList.length} Exams`}
+              </h2>
+              <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.75)', fontSize: 13 }}>
+                Scores will be calculated from answers already saved on the server.
+              </p>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)' }}>
+                The following student{forceSubmitConfirmList.length !== 1 ? 's' : ''} will have their exam submitted immediately using their last saved answers. <strong>This cannot be undone.</strong>
+              </p>
+              <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {forceSubmitConfirmList.map(s => (
+                  <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
+                    <div>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--ink-1)' }}>{s.student_name}</p>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-3)' }}>{examsDict[s.exam_id] || s.exam_id}</p>
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{s.answers_count || 0} answered</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn ghost sm" onClick={() => setForceSubmitConfirmList(null)} disabled={isForceSubmitting} style={{ width: 'auto' }}>
+                  Cancel
+                </button>
+                <button
+                  className="btn sm"
+                  onClick={() => doForceSubmit(forceSubmitConfirmList)}
+                  disabled={isForceSubmitting}
+                  style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                >
+                  {isForceSubmitting ? 'Submitting…' : `Submit ${forceSubmitConfirmList.length === 1 ? 'Exam' : 'All'}`}
+                </button>
+              </div>
             </div>
           </div>
         </div>

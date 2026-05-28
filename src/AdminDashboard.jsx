@@ -457,54 +457,83 @@ const [targetSection, setTargetSection] = useState('');
     if (errors.length > 0) alert(`Force submit completed with errors:\n${errors.join('\n')}`);
   };
 
-  // --- RESCORE ZERO RESULTS ---
+  // --- RESCORE / REPAIR ZERO RESULTS ---
   const [isRescoring, setIsRescoring] = useState(false);
+  const [manualScoreModal, setManualScoreModal] = useState(null); // { student_id, exam_id, student_name, exam_title, total_items }
+  const [manualScoreValue, setManualScoreValue] = useState('');
+
+  const saveManualScore = async () => {
+    if (!manualScoreModal) return;
+    const score = parseInt(manualScoreValue, 10);
+    if (isNaN(score) || score < 0 || score > manualScoreModal.total_items) {
+      return alert(`Score must be between 0 and ${manualScoreModal.total_items}.`);
+    }
+    const { error } = await supabase.from('results')
+      .update({ score })
+      .eq('student_id', manualScoreModal.student_id)
+      .eq('exam_id', manualScoreModal.exam_id);
+    if (error) return alert('Save failed: ' + error.message);
+    setResults(prev => prev.map(r =>
+      r.student_id === manualScoreModal.student_id && r.exam_id === manualScoreModal.exam_id
+        ? { ...r, score }
+        : r
+    ));
+    setManualScoreModal(null);
+    setManualScoreValue('');
+  };
 
   const rescoreZeroResults = async () => {
     const allExamIds = [...instructorExamIdsRef.current];
-    // Find results with total_items = 0 that belong to exams with MC questions
     const zeroResults = results.filter(r =>
       r.total_items === 0 && allExamIds.includes(r.exam_id)
     );
-    if (zeroResults.length === 0) return alert('No 0/0 results found to fix.');
+    if (zeroResults.length === 0) return alert('No 0/0 results found.');
 
     setIsRescoring(true);
 
-    // Load questions for all affected exams using return value (not stale cache)
     const examIds = [...new Set(zeroResults.map(r => r.exam_id))];
     const questionsByExam = {};
-    await Promise.all(examIds.map(async id => {
-      questionsByExam[id] = await loadExamQuestions(id);
-    }));
+    await Promise.all(examIds.map(async id => { questionsByExam[id] = await loadExamQuestions(id); }));
 
-    // Skip exams that are essay-only — 0/0 is correct for them
     const mcExamIds = new Set(
       examIds.filter(id => (questionsByExam[id] || []).some(q => (q.question_type || 'multiple_choice') !== 'essay'))
     );
     const toFix = zeroResults.filter(r => mcExamIds.has(r.exam_id));
-    if (toFix.length === 0) { setIsRescoring(false); return alert('All 0/0 results are from essay-only exams — nothing to fix.'); }
+    if (toFix.length === 0) { setIsRescoring(false); return alert('All 0/0 results are essay-only — nothing to fix.'); }
 
-    // Fetch finished live_sessions for each affected student+exam to get their answers
+    // Fetch finished live_sessions to get answers + created_at for time calculation
     const sessionFetches = await Promise.all(
       toFix.map(r =>
         supabase.from('live_sessions')
-          .select('student_id, exam_id, answers_json, essay_answers_json, violation_count, violation_log, created_at')
-          .eq('student_id', r.student_id)
-          .eq('exam_id', r.exam_id)
-          .eq('status', 'finished')
-          .order('updated_at', { ascending: false })
-          .limit(1)
+          .select('student_id, exam_id, answers_json, essay_answers_json, created_at')
+          .eq('student_id', r.student_id).eq('exam_id', r.exam_id)
+          .order('updated_at', { ascending: false }).limit(1)
       )
     );
 
-    let fixed = 0, failed = 0;
+    // Diagnose whether answers_json data actually exists on the server
+    const hasAnswerData = sessionFetches.some(f => {
+      const s = f?.data?.[0];
+      return s?.answers_json && Object.keys(s.answers_json).length > 0;
+    });
+
+    let timeFixed = 0, scoreFixed = 0, failed = 0;
+
     for (let i = 0; i < toFix.length; i++) {
       const result = toFix[i];
       const session = sessionFetches[i]?.data?.[0];
       const questions = questionsByExam[result.exam_id] || [];
 
+      // Always fix time_taken_seconds from created_at + exam duration
+      const duration = [...examsList, ...sharedExamsList].find(e => e.id === result.exam_id)?.duration_minutes || 0;
+      const elapsed = session?.created_at
+        ? Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000)
+        : 0;
+      const timeTaken = duration > 0 ? Math.min(elapsed, duration * 60) : elapsed;
+
       const rawAnswers = session?.answers_json || {};
       const rawEssays = session?.essay_answers_json || {};
+      const answersAvailable = Object.keys(rawAnswers).length > 0 || Object.keys(rawEssays).length > 0;
 
       let correctCount = 0, mcTotal = 0;
       const formattedAnswers = {};
@@ -525,22 +554,42 @@ const [targetSection, setTargetSection] = useState('');
         }
       });
 
+      const updatePayload = answersAvailable
+        ? { score: correctCount, total_items: mcTotal, answers_json: formattedAnswers, time_taken_seconds: timeTaken }
+        : { total_items: mcTotal, time_taken_seconds: timeTaken };
+
       const { error } = await supabase.from('results')
-        .update({ score: correctCount, total_items: mcTotal, answers_json: formattedAnswers })
-        .eq('student_id', result.student_id)
-        .eq('exam_id', result.exam_id);
+        .update(updatePayload)
+        .eq('student_id', result.student_id).eq('exam_id', result.exam_id);
 
       if (error) { failed++; continue; }
-      fixed++;
+      if (answersAvailable) scoreFixed++;
+      timeFixed++;
       setResults(prev => prev.map(r =>
         r.student_id === result.student_id && r.exam_id === result.exam_id
-          ? { ...r, score: correctCount, total_items: mcTotal, answers_json: formattedAnswers }
+          ? { ...r, ...updatePayload }
           : r
       ));
     }
 
     setIsRescoring(false);
-    alert(`Re-score complete: ${fixed} fixed${failed > 0 ? `, ${failed} failed` : ''}.`);
+
+    if (!hasAnswerData) {
+      alert(
+        `Time fixed for ${timeFixed} student${timeFixed !== 1 ? 's' : ''}.\n\n` +
+        `⚠️ Scores could NOT be recovered automatically.\n\n` +
+        `The students' answers were never saved to the server — only the answer COUNT was stored. ` +
+        `This is because the live_sessions table is missing the answers_json column.\n\n` +
+        `Run this SQL in Supabase to fix it for future exams:\n\n` +
+        `ALTER TABLE live_sessions\n` +
+        `  ADD COLUMN IF NOT EXISTS answers_json jsonb,\n` +
+        `  ADD COLUMN IF NOT EXISTS essay_answers_json jsonb,\n` +
+        `  ADD COLUMN IF NOT EXISTS exam_set text;\n\n` +
+        `For these ${timeFixed} students, use the pencil (✏️) icon in the Results table to enter scores manually.`
+      );
+    } else {
+      alert(`Done: ${scoreFixed} re-scored, ${timeFixed} time fixed${failed > 0 ? `, ${failed} failed` : ''}.`);
+    }
   };
 
   // --- QUESTION MANAGEMENT FUNCTIONS ---
@@ -1795,8 +1844,11 @@ const deleteResult = async (studentId, examId) => {
               </div>
             </div>
 
-            {/* Rescore banner — shown when 0/0 results exist (likely from buggy force-submit) */}
-            {results.some(r => r.total_items === 0 && [...instructorExamIdsRef.current].includes(r.exam_id)) && (
+            {/* Rescore banner — shown when 0/0 or 0/N (empty answers) results exist */}
+            {results.some(r =>
+              (r.total_items === 0 || (r.score === 0 && r.total_items > 0 && (!r.answers_json || Object.keys(r.answers_json).length === 0)))
+              && [...instructorExamIdsRef.current].includes(r.exam_id)
+            ) && (
               <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Icon name="alert" size={16} color="#B8860B" />
@@ -1909,11 +1961,21 @@ const deleteResult = async (studentId, examId) => {
                             <td><span className="px-pill brand">{student.section}</span></td>
                             <td style={{ color: 'var(--ink-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
                             <td style={{ textAlign: 'right' }}>
-                              <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.score}/{row.total_items}</span>
-                              <span style={{ marginLeft: 8, color: percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{percentage}%</span>
-                              {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2 }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.score}/{row.total_items}</span>
+                                <span style={{ color: percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{percentage}%</span>
+                                {/* Manual edit pencil — shown when answers are missing (data lost from force-submit bug) */}
+                                {row.total_items > 0 && (!row.answers_json || Object.keys(row.answers_json).length === 0) && (
+                                  <button
+                                    title="Enter score manually"
+                                    onClick={() => { setManualScoreModal({ student_id: row.student_id, exam_id: row.exam_id, student_name: students[row.student_id]?.name || 'Student', exam_title: examsDict[row.exam_id] || 'Exam', total_items: row.total_items }); setManualScoreValue(String(row.score)); }}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: 'var(--info)', fontSize: 13, lineHeight: 1 }}
+                                  >✏️</button>
+                                )}
+                              </div>
+                              {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2, textAlign: 'right' }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
                             </td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{formatTime(row.time_taken_seconds)}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : 'N/A'}</td>
                             <td>
                               {row.tab_switches > 0
                                 ? <span className="px-pill bad"><Icon name="flag" size={11} /> {row.tab_switches}</span>
@@ -3563,6 +3625,43 @@ const deleteResult = async (studentId, examId) => {
               ) : (
                 <p style={{ margin: 0, color: 'var(--ink-3)', fontSize: 13, fontStyle: 'italic' }}>All other instructors already have access to this section.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Score Entry Modal */}
+      {manualScoreModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 400, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
+            <div className="patts-header" style={{ padding: '18px 24px' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: 16 }}>Enter Score Manually</h2>
+              <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.65)', fontSize: 13 }}>
+                {manualScoreModal.student_name} — {manualScoreModal.exam_title}
+              </p>
+            </div>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)' }}>
+                Answers weren't saved server-side for this student. Enter their score manually (out of <strong>{manualScoreModal.total_items}</strong>).
+              </p>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={manualScoreModal.total_items}
+                  value={manualScoreValue}
+                  onChange={e => setManualScoreValue(e.target.value)}
+                  className="input"
+                  style={{ width: 100, fontSize: 20, fontWeight: 700, textAlign: 'center' }}
+                  autoFocus
+                  onKeyDown={e => e.key === 'Enter' && saveManualScore()}
+                />
+                <span style={{ fontSize: 18, color: 'var(--ink-3)' }}>/ {manualScoreModal.total_items}</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="btn ghost sm" onClick={() => setManualScoreModal(null)} style={{ width: 'auto' }}>Cancel</button>
+                <button className="btn sm" onClick={saveManualScore} style={{ width: 'auto' }}>Save Score</button>
+              </div>
             </div>
           </div>
         </div>

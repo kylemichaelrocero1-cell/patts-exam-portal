@@ -15,6 +15,100 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   const [passwordError, setPasswordError] = useState('');
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
+  const [recoveryMsg, setRecoveryMsg] = useState('');
+
+  // On login, scan localStorage for saved exam progress and recover any unscored results
+  useEffect(() => {
+    if (!student?.id) return;
+
+    const recover = async () => {
+      const prefix = `exam_progress_${student.id}_`;
+      const keys = Object.keys(localStorage).filter(k => k.startsWith(prefix));
+      if (!keys.length) return;
+
+      let recovered = 0;
+
+      for (const key of keys) {
+        const examId = key.slice(prefix.length);
+        let saved;
+        try { saved = JSON.parse(localStorage.getItem(key)); } catch { continue; }
+        if (!saved?.answers) continue;
+
+        // Only recover if a result row exists but has no scored answers
+        const { data: rows } = await supabase
+          .from('results')
+          .select('id, answers_json, total_items, time_taken_seconds, created_at')
+          .eq('student_id', student.id)
+          .eq('exam_id', examId)
+          .limit(1);
+
+        const result = rows?.[0];
+        if (!result) continue;
+
+        const alreadyScored = result.answers_json && Object.keys(result.answers_json).length > 0;
+        if (alreadyScored) { localStorage.removeItem(key); continue; }
+
+        // Fetch questions to score
+        const { data: questions } = await supabase
+          .from('questions')
+          .select('id, correct_answer, question_type')
+          .eq('exam_id', examId);
+        if (!questions?.length) continue;
+
+        let correctCount = 0;
+        let mcTotal = 0;
+        const formattedAnswers = {};
+
+        questions.forEach(q => {
+          const qId = String(q.id);
+          if ((q.question_type || 'multiple_choice') === 'essay') {
+            const text = saved.essayAnswers?.[qId];
+            if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
+          } else {
+            mcTotal++;
+            const studentValue = saved.answers[qId];
+            if (studentValue !== undefined) {
+              const isCorrect = Number(studentValue) === Number(q.correct_answer);
+              if (isCorrect) correctCount++;
+              formattedAnswers[qId] = { chosen: Number(studentValue), is_correct: isCorrect };
+            }
+          }
+        });
+
+        // Compute time_taken_seconds from localStorage endTime if result has none
+        let timeTaken = result.time_taken_seconds;
+        if ((!timeTaken || timeTaken === 0) && saved.endTime && result.created_at) {
+          const elapsed = Math.round((saved.endTime - new Date(result.created_at).getTime()) / 1000);
+          if (elapsed > 0) timeTaken = elapsed;
+        }
+
+        const updatePayload = {
+          score: correctCount,
+          total_items: mcTotal,
+          answers_json: formattedAnswers,
+        };
+        if (timeTaken && timeTaken > 0) updatePayload.time_taken_seconds = timeTaken;
+
+        const { error } = await supabase
+          .from('results')
+          .update(updatePayload)
+          .eq('id', result.id);
+
+        if (!error) {
+          localStorage.removeItem(key);
+          recovered++;
+        }
+      }
+
+      if (recovered > 0) {
+        setRecoveryMsg(`${recovered} exam result${recovered > 1 ? 's' : ''} recovered from your device.`);
+        setTimeout(() => setRecoveryMsg(''), 9000);
+      }
+    };
+
+    recover();
+  }, [student?.id]);
+
   useEffect(() => {
     fetchExams(false);
 
@@ -234,6 +328,13 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
           Log Out
         </button>
       </header>
+
+      {/* Recovery toast */}
+      {recoveryMsg && (
+        <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-bd)', color: 'var(--success)', padding: '12px 20px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>
+          ✅ {recoveryMsg}
+        </div>
+      )}
 
       {/* Content */}
       <div style={{ maxWidth: '860px', margin: '0 auto', padding: '36px 24px' }}>

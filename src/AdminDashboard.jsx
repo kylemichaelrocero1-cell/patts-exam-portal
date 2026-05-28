@@ -377,13 +377,17 @@ const [targetSection, setTargetSection] = useState('');
     setIsForceSubmitting(true);
     const examIds = [...new Set(sessions.map(s => s.exam_id))];
 
-    // Load questions for all affected exams in parallel
-    await Promise.all(examIds.map(id => loadExamQuestions(id)));
+    // Load questions for all affected exams in parallel and keep the returned data
+    // directly — do NOT read from examQuestionsCache state, which is a stale closure.
+    const questionsByExam = {};
+    await Promise.all(examIds.map(async id => {
+      questionsByExam[id] = await loadExamQuestions(id);
+    }));
 
     const errors = [];
     for (const session of sessions) {
       try {
-        const questions = examQuestionsCache[session.exam_id] || [];
+        const questions = questionsByExam[session.exam_id] || [];
         const rawAnswers = session.answers_json || {};
         const rawEssays = session.essay_answers_json || {};
 

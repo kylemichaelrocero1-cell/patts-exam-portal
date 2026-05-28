@@ -457,6 +457,92 @@ const [targetSection, setTargetSection] = useState('');
     if (errors.length > 0) alert(`Force submit completed with errors:\n${errors.join('\n')}`);
   };
 
+  // --- RESCORE ZERO RESULTS ---
+  const [isRescoring, setIsRescoring] = useState(false);
+
+  const rescoreZeroResults = async () => {
+    const allExamIds = [...instructorExamIdsRef.current];
+    // Find results with total_items = 0 that belong to exams with MC questions
+    const zeroResults = results.filter(r =>
+      r.total_items === 0 && allExamIds.includes(r.exam_id)
+    );
+    if (zeroResults.length === 0) return alert('No 0/0 results found to fix.');
+
+    setIsRescoring(true);
+
+    // Load questions for all affected exams using return value (not stale cache)
+    const examIds = [...new Set(zeroResults.map(r => r.exam_id))];
+    const questionsByExam = {};
+    await Promise.all(examIds.map(async id => {
+      questionsByExam[id] = await loadExamQuestions(id);
+    }));
+
+    // Skip exams that are essay-only — 0/0 is correct for them
+    const mcExamIds = new Set(
+      examIds.filter(id => (questionsByExam[id] || []).some(q => (q.question_type || 'multiple_choice') !== 'essay'))
+    );
+    const toFix = zeroResults.filter(r => mcExamIds.has(r.exam_id));
+    if (toFix.length === 0) { setIsRescoring(false); return alert('All 0/0 results are from essay-only exams — nothing to fix.'); }
+
+    // Fetch finished live_sessions for each affected student+exam to get their answers
+    const sessionFetches = await Promise.all(
+      toFix.map(r =>
+        supabase.from('live_sessions')
+          .select('student_id, exam_id, answers_json, essay_answers_json, violation_count, violation_log, created_at')
+          .eq('student_id', r.student_id)
+          .eq('exam_id', r.exam_id)
+          .eq('status', 'finished')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+      )
+    );
+
+    let fixed = 0, failed = 0;
+    for (let i = 0; i < toFix.length; i++) {
+      const result = toFix[i];
+      const session = sessionFetches[i]?.data?.[0];
+      const questions = questionsByExam[result.exam_id] || [];
+
+      const rawAnswers = session?.answers_json || {};
+      const rawEssays = session?.essay_answers_json || {};
+
+      let correctCount = 0, mcTotal = 0;
+      const formattedAnswers = {};
+
+      questions.forEach(q => {
+        const qId = String(q.id);
+        if ((q.question_type || 'multiple_choice') === 'essay') {
+          const text = rawEssays[qId];
+          if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
+        } else {
+          mcTotal++;
+          if (rawAnswers[qId] !== undefined) {
+            const chosen = Number(rawAnswers[qId]);
+            const isCorrect = chosen === Number(q.correct_answer);
+            if (isCorrect) correctCount++;
+            formattedAnswers[qId] = { chosen, is_correct: isCorrect };
+          }
+        }
+      });
+
+      const { error } = await supabase.from('results')
+        .update({ score: correctCount, total_items: mcTotal, answers_json: formattedAnswers })
+        .eq('student_id', result.student_id)
+        .eq('exam_id', result.exam_id);
+
+      if (error) { failed++; continue; }
+      fixed++;
+      setResults(prev => prev.map(r =>
+        r.student_id === result.student_id && r.exam_id === result.exam_id
+          ? { ...r, score: correctCount, total_items: mcTotal, answers_json: formattedAnswers }
+          : r
+      ));
+    }
+
+    setIsRescoring(false);
+    alert(`Re-score complete: ${fixed} fixed${failed > 0 ? `, ${failed} failed` : ''}.`);
+  };
+
   // --- QUESTION MANAGEMENT FUNCTIONS ---
   const loadQuestionList = async (examId) => {
     if (!examId) { setQList([]); return; }
@@ -1708,6 +1794,25 @@ const deleteResult = async (studentId, examId) => {
                 <button className="btn ghost sm" onClick={exportCSV}><Icon name="download" size={14} /> Export CSV</button>
               </div>
             </div>
+
+            {/* Rescore banner — shown when 0/0 results exist (likely from buggy force-submit) */}
+            {results.some(r => r.total_items === 0 && [...instructorExamIdsRef.current].includes(r.exam_id)) && (
+              <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon name="alert" size={16} color="#B8860B" />
+                  <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>Some results show 0/0</span>
+                  <span style={{ color: '#A07000', fontSize: 13 }}>— answers are saved on the server and can be re-scored</span>
+                </div>
+                <button
+                  className="btn sm"
+                  onClick={rescoreZeroResults}
+                  disabled={isRescoring}
+                  style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                >
+                  {isRescoring ? 'Re-scoring…' : 'Fix 0/0 Results'}
+                </button>
+              </div>
+            )}
 
             {/* Filters */}
             <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>

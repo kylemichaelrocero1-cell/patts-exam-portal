@@ -77,6 +77,10 @@ export default function ExamBoard({ student, exam, examSet }) {
       if (data && data.session_token && data.session_token !== localToken) {
         clearInterval(checkSession);
         alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
+        // Clear both tokens so reload lands at login instead of re-entering ExamBoard
+        // and re-triggering this guard in an infinite loop.
+        localStorage.removeItem('local_session_token');
+        localStorage.removeItem('patts_student_session');
         window.location.reload();
       }
     }, 30000);

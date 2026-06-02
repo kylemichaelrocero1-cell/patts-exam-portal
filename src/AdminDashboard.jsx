@@ -482,6 +482,58 @@ const [targetSection, setTargetSection] = useState('');
     setManualScoreValue('');
   };
 
+  // ── Change password (own instructor account) ──
+  const [showPwModal, setShowPwModal] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwError, setPwError] = useState('');
+  const [isChangingPw, setIsChangingPw] = useState(false);
+
+  const closePwModal = () => {
+    setShowPwModal(false);
+    setPwCurrent(''); setPwNew(''); setPwConfirm('');
+    setPwError(''); setIsChangingPw(false);
+  };
+
+  const changePassword = async () => {
+    setPwError('');
+    if (!pwCurrent) return setPwError('Enter your current password.');
+    if (pwNew.length < 8) return setPwError('New password must be at least 8 characters.');
+    if (pwNew !== pwConfirm) return setPwError('New passwords do not match.');
+    if (pwNew === pwCurrent) return setPwError('New password must be different from the current one.');
+
+    setIsChangingPw(true);
+    try {
+      // Get the signed-in instructor's email to re-verify the current password
+      const { data: { user }, error: userErr } = await supabase.auth.getUser();
+      if (userErr || !user?.email) {
+        setIsChangingPw(false);
+        return setPwError('Could not verify your session. Please sign out and back in.');
+      }
+      // Re-authenticate to confirm the current password is correct
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: pwCurrent,
+      });
+      if (signInErr) {
+        setIsChangingPw(false);
+        return setPwError('Current password is incorrect.');
+      }
+      // Update to the new password
+      const { error: updateErr } = await supabase.auth.updateUser({ password: pwNew });
+      if (updateErr) {
+        setIsChangingPw(false);
+        return setPwError(updateErr.message || 'Could not update password.');
+      }
+      closePwModal();
+      alert('Password updated successfully.');
+    } catch (e) {
+      setIsChangingPw(false);
+      setPwError('Something went wrong. Please try again.');
+    }
+  };
+
   const rescoreZeroResults = async () => {
     const allExamIds = [...instructorExamIdsRef.current];
     const zeroResults = results.filter(r =>
@@ -1695,6 +1747,19 @@ const deleteResult = async (studentId, examId) => {
               <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.38)' }}>Instructor</div>
             </div>
           </div>
+          <button
+            onClick={() => setShowPwModal(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7, width: '100%',
+              padding: '7px 10px', borderRadius: 'var(--r-sm)', marginBottom: 6,
+              border: '1px solid rgba(255,255,255,.14)',
+              background: 'rgba(255,255,255,.06)', color: 'rgba(255,255,255,.65)',
+              fontSize: 12.5, cursor: 'pointer', transition: 'all var(--t-1)',
+            }}
+          >
+            <Icon name="lock" size={13} />
+            Change password
+          </button>
           <button
             onClick={onLogout}
             style={{
@@ -3661,6 +3726,51 @@ const deleteResult = async (studentId, examId) => {
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn ghost sm" onClick={() => setManualScoreModal(null)} style={{ width: 'auto' }}>Cancel</button>
                 <button className="btn sm" onClick={saveManualScore} style={{ width: 'auto' }}>Save Score</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Change Password Modal */}
+      {showPwModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 420, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
+            <div className="patts-header" style={{ padding: '20px 24px' }}>
+              <h2 style={{ margin: 0, color: 'white', fontSize: 17, display: 'flex', alignItems: 'center', gap: 9 }}>
+                <Icon name="lock" size={16} color="white" /> Change Password
+              </h2>
+              <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.65)', fontSize: 13 }}>
+                Update the password for your instructor account.
+              </p>
+            </div>
+            <div style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label className="label">Current Password</label>
+                <input className="input" type="password" autoComplete="current-password" value={pwCurrent}
+                  onChange={e => { setPwCurrent(e.target.value); setPwError(''); }} autoFocus />
+              </div>
+              <div>
+                <label className="label">New Password</label>
+                <input className="input" type="password" autoComplete="new-password" value={pwNew}
+                  onChange={e => { setPwNew(e.target.value); setPwError(''); }} placeholder="At least 8 characters" />
+              </div>
+              <div>
+                <label className="label">Confirm New Password</label>
+                <input className="input" type="password" autoComplete="new-password" value={pwConfirm}
+                  onChange={e => { setPwConfirm(e.target.value); setPwError(''); }}
+                  onKeyDown={e => e.key === 'Enter' && !isChangingPw && changePassword()} />
+              </div>
+              {pwError && (
+                <div style={{ padding: '9px 12px', background: 'var(--bad-bg, #FDECEA)', border: '1px solid var(--bad, #E74C3C)', borderRadius: 'var(--r-sm)', fontSize: 13, color: 'var(--bad, #C0392B)' }}>
+                  {pwError}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 2 }}>
+                <button className="btn ghost sm" onClick={closePwModal} disabled={isChangingPw} style={{ width: 'auto' }}>Cancel</button>
+                <button className="btn sm" onClick={changePassword} disabled={isChangingPw} style={{ width: 'auto' }}>
+                  {isChangingPw ? 'Updating…' : 'Update Password'}
+                </button>
               </div>
             </div>
           </div>

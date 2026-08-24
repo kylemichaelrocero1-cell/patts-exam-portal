@@ -12,21 +12,61 @@ export default function App() {
   const [selectedExam, setSelectedExam] = useState(null);
   const [examSet, setExamSet] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
+  const [isRestoring, setIsRestoring] = useState(true);
 
-  // Restore student session on page load — skips login + section selection after a refresh
+  // Restore a session on page load.
+  //
+  // Instructors sign in through Supabase Auth, which persists its own session in
+  // localStorage (persistSession defaults to true). Nothing here used to read it,
+  // so a refresh dropped every instructor back on the login screen even though
+  // their session was still valid — getSession() is what fixes that.
+  //
+  // Students are not in Supabase Auth; their session is our own localStorage blob.
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('patts_student_session');
-      if (saved) {
-        const { student: s, section } = JSON.parse(saved);
-        if (s?.id && s?.full_name && !s.role) {
-          setStudent(s);
-          if (section) setSelectedSection(section);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // getSession() can hit the network to refresh an expired token. On a bad
+        // connection that would strand everyone — students included — on the
+        // loading screen, so cap it and fall through to the normal login form.
+        const { data: { session } } = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise(resolve =>
+            setTimeout(() => resolve({ data: { session: null } }), 3000)),
+        ]);
+        if (cancelled) return;
+        if (session?.user) {
+          // Shape must match what Login.jsx hands to onLogin for the admin path.
+          setStudent({
+            id: session.user.id,
+            role: 'admin',
+            full_name: session.user.user_metadata?.full_name || session.user.email,
+          });
+          return;
         }
+      } catch {
+        // No usable auth session — fall through to the student restore below.
       }
-    } catch {
-      localStorage.removeItem('patts_student_session');
-    }
+
+      if (cancelled) return;
+      try {
+        const saved = localStorage.getItem('patts_student_session');
+        if (saved) {
+          const { student: s, section } = JSON.parse(saved);
+          if (s?.id && s?.full_name && !s.role) {
+            setStudent(s);
+            if (section) setSelectedSection(section);
+          }
+        }
+      } catch {
+        localStorage.removeItem('patts_student_session');
+      }
+    })().finally(() => {
+      if (!cancelled) setIsRestoring(false);
+    });
+
+    return () => { cancelled = true; };
   }, []);
 
   // Persist student + section so refresh lands back at ExamList
@@ -45,6 +85,24 @@ export default function App() {
     setSelectedExam(null);
     setExamSet(null);
   };
+
+  // getSession() is async — render nothing until it resolves, or a restored
+  // instructor sees the login form flash before the dashboard appears.
+  if (isRestoring) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        background: 'var(--paper, #F7F8FA)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <img
+          src="/patts-logo.png"
+          alt="PATTS College of Aeronautics"
+          style={{ height: 56, width: 'auto', objectFit: 'contain', opacity: 0.5 }}
+        />
+      </div>
+    );
+  }
 
   // Admin via Supabase Auth (student.role set in Login.jsx)
   if (student?.role === 'admin') {

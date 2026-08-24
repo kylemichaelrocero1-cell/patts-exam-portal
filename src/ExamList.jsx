@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+import {
+  selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
+} from './lib/assessments';
 
 export default function ExamList({ embedded = false, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
@@ -132,11 +135,10 @@ export default function ExamList({ embedded = false, student, selectedSection, o
     try {
       // Fetch exams + completed results + active live sessions in parallel
       const [examsRes, resultsRes, liveRes] = await Promise.all([
-        supabase
-          .from('exams')
-          .select('id, title, is_open, duration_minutes, target_section, has_password, created_at')
-          .eq('is_open', true)
-          .order('created_at', { ascending: false }),
+        // Reads assessments (exams + seatworks + schedule) and transparently
+        // falls back to exams if the migration has not been run yet.
+        selectAssessments(q => q.eq('is_open', true).order('created_at', { ascending: false }))
+          .then(data => ({ data, error: null }), error => ({ data: null, error })),
         supabase
           .from('results')
           .select('exam_id')
@@ -154,7 +156,10 @@ export default function ExamList({ embedded = false, student, selectedSection, o
         const filtered = examsRes.data.filter(exam => {
           if (!exam.target_section) return false;
           const sections = exam.target_section.split(',').map(s => s.trim());
-          return sections.includes(selectedSection);
+          if (!sections.includes(selectedSection)) return false;
+          // Hide anything outside its scheduled window. Rows coming from the
+          // exams fallback have no window, so this is a no-op for them.
+          return isAvailableNow(exam) || availabilityState(exam) === 'scheduled';
         });
         setExams(filtered);
       }
@@ -373,6 +378,14 @@ export default function ExamList({ embedded = false, student, selectedSection, o
                 ? Math.max(0, Math.floor((new Date(serverSession.created_at).getTime() + exam.duration_minutes * 60000 - Date.now()) / 60000))
                 : null;
 
+              // Scheduling. A seatwork keeps the full exam machinery — password
+              // gate, tab tracking, violation logging — so the only difference
+              // here is the label and the window.
+              const state = availabilityState(exam);
+              const notYetOpen = state === 'scheduled';
+              const windowLabel = formatWindow(exam);
+              const isSeatwork = exam.kind === 'seatwork';
+
               return (
                 <div key={exam.id} className="exam-card" style={{
                   background: 'var(--white)',
@@ -386,9 +399,23 @@ export default function ExamList({ embedded = false, student, selectedSection, o
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h3 style={{ margin: '0 0 6px', color: 'var(--navy)', fontSize: '18px', fontWeight: 700 }}>{exam.title}</h3>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      <span style={{
+                        background: isSeatwork ? 'var(--navy-tint)' : 'var(--gold-pale)',
+                        color: isSeatwork ? 'var(--navy)' : 'var(--gold-700)',
+                        border: `1px solid ${isSeatwork ? 'var(--navy-100)' : 'var(--gold-100)'}`,
+                        padding: '2px 10px', borderRadius: 'var(--r-full)',
+                        fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                      }}>
+                        {KIND_LABEL[exam.kind] || 'Exam'}
+                      </span>
                       <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                         ⏱ <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
                       </span>
+                      {windowLabel && (
+                        <span style={{ color: 'var(--text-3)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          🗓 {windowLabel}
+                        </span>
+                      )}
                       {exam.has_password && !isAlreadyDone && !isResumable && (
                         <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
                           🔒 Password required
@@ -403,7 +430,14 @@ export default function ExamList({ embedded = false, student, selectedSection, o
                   </div>
 
                   <div className="exam-card-actions">
-                    {isAlreadyDone ? (
+                    {notYetOpen ? (
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ background: 'var(--surface-2)', color: 'var(--text-3)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--border)' }}>
+                          Opens {new Date(exam.opens_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                        </span>
+                        <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: 6, marginBottom: 0 }}>Not open yet.</p>
+                      </div>
+                    ) : isAlreadyDone ? (
                       <div style={{ textAlign: 'center' }}>
                         <span style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--success-bd)' }}>
                           ✅ Submitted

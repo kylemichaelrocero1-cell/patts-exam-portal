@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import { supabase } from './supabase';
+import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -67,6 +68,10 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   // --- NEW: Create Exam States ---
 const [newTitle, setNewTitle] = useState('');
 const [targetSection, setTargetSection] = useState('');
+  const [newKind, setNewKind] = useState('exam');          // 'exam' | 'seatwork'
+  const [newOpensAt, setNewOpensAt] = useState('');        // datetime-local
+  const [newClosesAt, setNewClosesAt] = useState('');
+  const [newDuration, setNewDuration] = useState(60);
 
   // --- NEW ANALYTICS STATES ---
   const [viewingStudent, setViewingStudent] = useState(null);
@@ -1143,10 +1148,13 @@ async function fetchDashboardData() {
     try {
       // Fetch own exams, incoming exam-shares, and section co-instructor memberships in parallel
       const [examsRes, inSharesRes, coSectionsRes] = await Promise.all([
-        supabase.from('exams')
-          .select('id, title, is_open, duration_minutes, target_section, exam_password')
-          .eq('instructor_id', instructorId)
-          .order('created_at', { ascending: true }),
+        // Through the transitional reader so seatworks and schedules appear
+        // once the migration has run, and so the "does assessments exist" probe
+        // happens on dashboard load — createExam depends on knowing.
+        selectAssessments(
+          q => q.eq('instructor_id', instructorId).order('created_at', { ascending: true }),
+          INSTRUCTOR_COLUMNS,
+        ).then(data => ({ data, error: null }), error => ({ data: null, error })),
         supabase.from('exam_shares')
           .select('id, exam_id, shared_by')
           .eq('shared_with', instructorId),
@@ -1308,19 +1316,40 @@ const deleteResult = async (studentId, examId) => {
   // --- NEW: Create Exam Function ---
   const createExam = async () => {
     if (!newTitle || !targetSection) return alert("Title and Section are required!");
+    if (newOpensAt && newClosesAt && new Date(newClosesAt) <= new Date(newOpensAt)) {
+      return alert('The closing time must be after the opening time.');
+    }
+    if (newKind === 'seatwork' && !assessmentsTableAvailable()) {
+      return alert('Seatworks need the assessments table.\n\nRun sql/001_assessments_and_lessons.sql in the Supabase SQL editor first.');
+    }
     setIsLoading(true);
 
-    const { data: newExam, error } = await supabase.from('exams').insert([{
+    // datetime-local yields wall-clock with no zone; the Date constructor reads
+    // it as local time, which is what the instructor meant, and toISOString
+    // hands Postgres proper UTC.
+    const toIso = (v) => (v ? new Date(v).toISOString() : null);
+
+    const base = {
       title: newTitle,
       target_section: targetSection,
       instructor_id: instructorId,
       is_open: false,
-      duration_minutes: 60,
-    }]).select().single();
+      duration_minutes: Number(newDuration) || 60,
+    };
+
+    // Write to whichever table this database actually has. Before the
+    // migration only plain exams are creatable, and they behave as today.
+    const useAssessments = assessmentsTableAvailable();
+    const table = useAssessments ? 'assessments' : 'exams';
+    const row = useAssessments
+      ? { ...base, kind: newKind, opens_at: toIso(newOpensAt), closes_at: toIso(newClosesAt) }
+      : base;
+
+    const { data: newExam, error } = await supabase.from(table).insert([row]).select().single();
 
     if (error) {
       console.error(error);
-      alert("Error creating exam.");
+      alert('Error creating ' + (newKind === 'seatwork' ? 'seatwork' : 'exam') + ': ' + error.message);
       setIsLoading(false);
       return;
     }
@@ -1328,6 +1357,8 @@ const deleteResult = async (studentId, examId) => {
     // Bulk-insert questions from CSV if provided
     const csvQs = csvExamParsed?.questions || [];
     if (csvQs.length > 0 && newExam?.id) {
+      // exam_id is still the column questions hang off; the migration keeps
+      // assessment_id in step via trigger until the cutover.
       const payload = csvQs.map(q => ({ ...q, exam_id: newExam.id }));
       for (let i = 0; i < payload.length; i += 50) {
         await supabase.from('questions').insert(payload.slice(i, i + 50));
@@ -1336,9 +1367,13 @@ const deleteResult = async (studentId, examId) => {
 
     setNewTitle('');
     setTargetSection('');
+    setNewOpensAt('');
+    setNewClosesAt('');
+    setNewDuration(60);
     setCsvExamParsed(null);
     await fetchDashboardData();
-    alert(`Exam created!${csvQs.length > 0 ? ` ${csvQs.length} questions imported.` : ' Add questions in the Questions tab.'}`);
+    const label = newKind === 'seatwork' ? 'Seatwork' : 'Exam';
+    alert(`${label} created!${csvQs.length > 0 ? ` ${csvQs.length} questions imported.` : ' Add questions in the Questions tab.'}`);
   };
 
   // --- NEW: Delete Exam ---
@@ -2327,7 +2362,7 @@ const deleteResult = async (studentId, examId) => {
           {/* Create New Exam */}
           <div style={{ background: 'var(--navy-50)', border: '2px dashed var(--navy-200)', borderRadius: 'var(--r-lg)', padding: '20px 24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
-              <h4 style={{ margin: 0, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="plus" size={16} color="var(--navy)" /> Create New Exam</h4>
+              <h4 style={{ margin: 0, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="plus" size={16} color="var(--navy)" /> Create New Exam or Seatwork</h4>
               <button onClick={downloadCSVTemplate} className="btn ghost sm"><Icon name="download" size={13} /> Download Template</button>
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -2351,7 +2386,40 @@ const deleteResult = async (studentId, examId) => {
                   style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}
                 />
               </div>
+              <div style={{ flex: 1, minWidth: '130px' }}>
+                <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Type</label>
+                <select value={newKind} onChange={e => setNewKind(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
+                  <option value="exam">Exam</option>
+                  <option value="seatwork">Seatwork</option>
+                </select>
+              </div>
+              <div style={{ flex: 1, minWidth: '110px' }}>
+                <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Minutes</label>
+                <input type="number" min="1" value={newDuration}
+                  onChange={e => setNewDuration(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }} />
+              </div>
             </div>
+
+            {/* Scheduling — optional. Left blank, availability is governed by
+                the Open/Closed switch alone, exactly as before. */}
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 12 }}>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Opens at (optional)</label>
+                <input type="datetime-local" value={newOpensAt}
+                  onChange={e => setNewOpensAt(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Closes at (optional)</label>
+                <input type="datetime-local" value={newClosesAt}
+                  onChange={e => setNewClosesAt(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }} />
+              </div>
+            </div>
+            {!assessmentsTableAvailable() && (
+              <p style={{ fontSize: 12.5, color: 'var(--text-3)', margin: '8px 0 0', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="info" size={13} />
+                Seatworks and scheduling need the assessments table — run sql/001_assessments_and_lessons.sql, then reload.
+              </p>
+            )}
 
             {/* CSV Upload row */}
             <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -2382,7 +2450,7 @@ const deleteResult = async (studentId, examId) => {
                 className="btn"
               >
                 <Icon name="plus" size={15} />
-                {csvExamParsed?.questions?.length > 0 ? `Create Exam + Import ${csvExamParsed.questions.length} Questions` : 'Create Exam'}
+                {csvExamParsed?.questions?.length > 0 ? `Create ${newKind === 'seatwork' ? 'Seatwork' : 'Exam'} + Import ${csvExamParsed.questions.length} Questions` : `Create ${newKind === 'seatwork' ? 'Seatwork' : 'Exam'}`}
               </button>
             </div>
           </div>

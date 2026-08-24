@@ -7,6 +7,9 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS } from
 // markdown stack stays out of the initial download and arrives only when an
 // instructor actually opens Lessons.
 const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
+// Pure presentation over data the dashboard already holds — no queries of its
+// own — but split out because it is a large view most sessions never open.
+const ClassReview = lazy(() => import('./dashboard/ClassReview'));
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -1767,6 +1770,7 @@ const deleteResult = async (studentId, examId) => {
         <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {[
             { id: 'home',       label: 'Overview',     icon: 'home' },
+            { id: 'class',      label: 'Class Review',  icon: 'graduation' },
             { id: 'results',    label: 'Results',       icon: 'bar-chart' },
             { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
             { id: 'lessons',    label: 'Lessons',       icon: 'book' },
@@ -1865,6 +1869,7 @@ const deleteResult = async (studentId, examId) => {
           <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: 'var(--ink-1)' }}>
             {({
               home: 'Overview',
+              class: 'Class Review',
               results: 'Results',
               manage: 'Manage Exams',
               lessons: 'Lessons',
@@ -1974,6 +1979,16 @@ const deleteResult = async (studentId, examId) => {
           )}
 
           {/* --- RESULTS PANEL --- */}
+        {activeView === 'class' && (
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading class review…</div>}>
+            <ClassReview
+              studentsList={studentsList}
+              results={results}
+              examsList={examsList}
+            />
+          </Suspense>
+        )}
+
         {activeView === 'lessons' && (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading lessons…</div>}>
             <LessonsManager

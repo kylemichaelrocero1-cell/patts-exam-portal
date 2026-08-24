@@ -1994,7 +1994,17 @@ const deleteResult = async (studentId, examId) => {
                   <option value="score_asc">Score (Lowest First)</option>
                 </select>
               </div>
-              <span className="px-pill brand" style={{ marginLeft: 'auto' }}>{filteredAndSortedResults.length} student{filteredAndSortedResults.length !== 1 ? 's' : ''}</span>
+              {/* One row per submission, so a student appears once per exam —
+                  counting rows as "students" overstated it badly (AENG 426 shows
+                  1025 rows, which is 122 students across 15 exams). Show both. */}
+              <span className="px-pill brand" style={{ marginLeft: 'auto' }}>
+                {filteredAndSortedResults.length} result{filteredAndSortedResults.length !== 1 ? 's' : ''}
+                {' · '}
+                {(() => {
+                  const n = new Set(filteredAndSortedResults.map(r => r.student_id)).size;
+                  return `${n} student${n !== 1 ? 's' : ''}`;
+                })()}
+              </span>
             </div>
 
             {/* Stats */}

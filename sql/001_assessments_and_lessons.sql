@@ -31,6 +31,22 @@
 --     your rollback. Cutover happens in a later phase, once the new code
 --     is deployed and you have confirmed the data looks right.
 --   * does not touch existing RLS on existing tables.
+--
+-- ---------------------------------------------------------------------
+-- REHEARSE IT FIRST (recommended)
+-- ---------------------------------------------------------------------
+-- This file was validated by parsing every statement with libpg_query,
+-- PostgreSQL's own grammar, but it has NOT been executed against a real
+-- Postgres — so rehearse it against your actual data before committing:
+--
+--   1. Change the single word  COMMIT;  near the bottom to  ROLLBACK;
+--   2. Run the whole file. It executes end to end against real production
+--      data, prints the VERIFY results, then throws everything away.
+--   3. Read the VERIFY output. Every check should say OK / 0.
+--   4. Change ROLLBACK; back to COMMIT; and run it again for real.
+--
+-- Step 2 is completely safe: nothing is persisted. If any statement is
+-- wrong, it errors inside the transaction and the database is untouched.
 -- =====================================================================
 
 BEGIN;

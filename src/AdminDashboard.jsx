@@ -3,6 +3,30 @@ import Icon from './components/Icon';
 import { supabase } from './supabase';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
+// PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
+// A query that can exceed that silently drops the overflow, and with no ORDER BY
+// the rows that survive are whatever order the heap hands back — so entire exams
+// disappear from the dashboard at random. Page through instead, ordered by the
+// primary key so paging is stable across requests.
+//
+// PAGE_SIZE must stay BELOW the server cap: we treat a short page as "last page",
+// so asking for more than the server will ever return would end the loop after
+// one page and silently truncate again.
+const PAGE_SIZE = 500;
+async function fetchAllRows(buildQuery) {
+  const all = [];
+  for (;;) {
+    const { data, error } = await buildQuery()
+      .order('id', { ascending: true })
+      .range(all.length, all.length + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export default function AdminDashboard({ instructorId, instructorName, onLogout }) {
   // Navigation State
   const [activeView, setActiveView] = useState('results');
@@ -150,24 +174,26 @@ const [targetSection, setTargetSection] = useState('');
   const openExamStats = async (examId) => {
     setIsLoadingQuestions(true);
     const examResults = results.filter(r => r.exam_id === examId);
-    await Promise.all([
-      loadExamQuestions(examId),
-      (async () => {
-        const uncached = examResults.filter(r => answersJsonCache[`${r.student_id}_${examId}`] === undefined);
-        if (uncached.length === 0) return;
-        const { data } = await supabase
-          .from('results')
-          .select('student_id, answers_json')
-          .eq('exam_id', examId);
-        if (data) {
+    try {
+      await Promise.all([
+        loadExamQuestions(examId),
+        (async () => {
+          const uncached = examResults.filter(r => answersJsonCache[`${r.student_id}_${examId}`] === undefined);
+          if (uncached.length === 0) return;
+          const data = await fetchAllRows(() => supabase
+            .from('results')
+            .select('student_id, answers_json')
+            .eq('exam_id', examId));
           setAnswersJsonCache(prev => {
             const next = { ...prev };
             data.forEach(r => { next[`${r.student_id}_${examId}`] = r.answers_json || {}; });
             return next;
           });
-        }
-      })(),
-    ]);
+        })(),
+      ]);
+    } catch (err) {
+      console.error('Failed to load exam stats:', err);
+    }
     setIsLoadingQuestions(false);
     setViewingStatsExam(examId);
   };
@@ -235,7 +261,13 @@ const [targetSection, setTargetSection] = useState('');
   const fetchLiveSessions = async () => {
     const examIds = [...instructorExamIdsRef.current];
     if (examIds.length === 0) { setLiveSessions([]); return; }
-    const { data } = await supabase.from('live_sessions').select('*').neq('status', 'finished').in('exam_id', examIds);
+    let data;
+    try {
+      data = await fetchAllRows(() => supabase.from('live_sessions').select('*').neq('status', 'finished').in('exam_id', examIds));
+    } catch (err) {
+      console.error('Failed to load live sessions:', err);
+      return; // keep the last good snapshot rather than blanking the monitor
+    }
     if (data) {
       // Deduplicate by student+exam: prefer locked status, then most recently updated
       const sessionMap = new Map();
@@ -912,7 +944,7 @@ const [targetSection, setTargetSection] = useState('');
     if (!studentCsvParsed || studentCsvParsed.students.length === 0) return;
     setStudentCsvImporting(true);
     try {
-      const { data: existing } = await supabase.from('users').select('student_email, student_code');
+      const existing = await fetchAllRows(() => supabase.from('users').select('student_email, student_code'));
       const existingEmails = new Set((existing || []).map(u => u.student_email));
       const existingCodes = new Set((existing || []).map(u => u.student_code));
 
@@ -1137,12 +1169,12 @@ async function fetchDashboardData() {
 
       // Fetch shared exam data + outgoing shares + students + co-section exams in parallel
       const sharedExamIdsFromShares = [...new Set(inShares.map(s => s.exam_id))];
-      const [sharedExamsRes, outSharesRes, studentsRes, ...coSectionExamResults] = await Promise.all([
+      const [sharedExamsRes, outSharesRes, studentsData, ...coSectionExamResults] = await Promise.all([
         sharedExamIdsFromShares.length > 0
           ? supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').in('id', sharedExamIdsFromShares)
           : Promise.resolve({ data: [] }),
         supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
-        supabase.from('users').select('id, full_name, section'),
+        fetchAllRows(() => supabase.from('users').select('id, full_name, section')),
         // For each co-managed section, fetch other instructors' exams targeting it
         ...coManagedSectionNames.map(sec =>
           supabase.from('exams')
@@ -1154,7 +1186,6 @@ async function fetchDashboardData() {
 
       const sharedExamsData = sharedExamsRes.data || [];
       const outShares = outSharesRes.data || [];
-      const studentsData = studentsRes.data || [];
 
       // Merge exams from co-managed sections (verify exact section match client-side)
       const ownExamIdSet = new Set(examsData.map(e => e.id));
@@ -1178,12 +1209,12 @@ async function fetchDashboardData() {
       const allExamIds = [...ownExamIds, ...sharedExamIds];
       instructorExamIdsRef.current = new Set(allExamIds);
 
-      // Fetch results for all exams
-      const { data: resultsData } = allExamIds.length > 0
-        ? await supabase.from('results')
+      // Fetch results for all exams (paged — this routinely exceeds 1000 rows)
+      const resultsData = allExamIds.length > 0
+        ? await fetchAllRows(() => supabase.from('results')
             .select('student_id, exam_id, score, total_items, tab_switches, time_taken_seconds, violation_logs, submitted_at')
-            .in('exam_id', allExamIds)
-        : { data: [] };
+            .in('exam_id', allExamIds))
+        : [];
 
       // Process own exam metadata
       const dict = {}, times = {}, secs = {}, passwords = {}, titles = {};

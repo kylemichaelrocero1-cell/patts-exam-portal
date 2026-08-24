@@ -1595,7 +1595,10 @@ const deleteResult = async (studentId, examId) => {
   const filteredAndSortedResults = results
     .filter(row => {
       const studentInfo = students[row.student_id] || {};
-      const matchesSection = selectedSection === 'All' || studentInfo.section === selectedSection;
+      // section is a comma-separated list — match membership, not the whole string,
+      // or a student in "AENG 223L-2, AENG 223L" is invisible under either section.
+      const matchesSection = selectedSection === 'All' ||
+        (studentInfo.section || '').split(',').map(x => x.trim()).includes(selectedSection);
       const matchesExam = selectedExam === 'All' || row.exam_id === selectedExam;
       return matchesSection && matchesExam;
     })
@@ -1624,8 +1627,9 @@ const deleteResult = async (studentId, examId) => {
     });
 
   // Derive from actual result rows so shared-exam sections are always included.
+  // Split the comma list into individual sections — same as the Students tab.
   const uniqueSections = ['All', ...[...new Set(
-    results.map(r => students[r.student_id]?.section).filter(Boolean)
+    results.flatMap(r => (students[r.student_id]?.section || '').split(',').map(x => x.trim()).filter(Boolean))
   )].sort()];
 
   // --- RESULTS STATISTICS ---
@@ -1940,10 +1944,12 @@ const deleteResult = async (studentId, examId) => {
               </div>
             </div>
 
-            {/* Rescore banner — shown when 0/0 or 0/N (empty answers) results exist */}
+            {/* Rescore banner — only for 0/0 rows, which is exactly what
+                rescoreZeroResults() repairs. Do not widen this to 0/N: the
+                dashboard query does not select answers_json, so any test on it
+                is always true and the banner would never clear. */}
             {results.some(r =>
-              (r.total_items === 0 || (r.score === 0 && r.total_items > 0 && (!r.answers_json || Object.keys(r.answers_json).length === 0)))
-              && [...instructorExamIdsRef.current].includes(r.exam_id)
+              r.total_items === 0 && instructorExamIdsRef.current.has(r.exam_id)
             ) && (
               <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

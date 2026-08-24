@@ -565,3 +565,81 @@ input:checked + .slider::before { transform: translateX(26px); }
     margin-bottom: 32px !important;
   }
 }
+
+/* ── Lesson content ──────────────────────────────────────────────────
+   Typography for instructor-authored markdown (LessonContent.jsx).
+   Scoped to .lesson-body so it cannot leak into the dashboard's own
+   tables and cards, which style bare elements globally (see `table`
+   at the top of this file). */
+.lesson-body { color: var(--ink-1); font-size: 15px; line-height: 1.7; }
+.lesson-body > :first-child { margin-top: 0; }
+.lesson-body > :last-child { margin-bottom: 0; }
+
+.lesson-body h1,
+.lesson-body h2,
+.lesson-body h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--ink-1);
+  margin: 1.6em 0 0.5em;
+  line-height: 1.25;
+}
+.lesson-body h1 { font-size: 25px; }
+.lesson-body h2 { font-size: 20px; }
+.lesson-body h3 { font-size: 17px; }
+
+.lesson-body p { margin: 0 0 1em; }
+.lesson-body ul,
+.lesson-body ol { margin: 0 0 1em; padding-left: 1.5em; }
+.lesson-body li { margin: 0.3em 0; }
+
+.lesson-body a { color: var(--navy); text-decoration: underline; text-underline-offset: 2px; }
+.lesson-body strong { font-weight: 700; color: var(--ink-1); }
+
+.lesson-body blockquote {
+  margin: 1.2em 0;
+  padding: 2px 0 2px 16px;
+  border-left: 3px solid var(--gold);
+  color: var(--ink-2);
+}
+
+.lesson-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  padding: 2px 5px;
+  border-radius: var(--r-xs);
+}
+.lesson-body pre {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  overflow-x: auto;          /* long lines scroll, page never does */
+  margin: 0 0 1em;
+}
+.lesson-body pre code { background: none; padding: 0; }
+
+/* Wide tables scroll inside their own box rather than stretching the page */
+.lesson-body table { display: block; overflow-x: auto; white-space: nowrap; margin: 0 0 1em; }
+.lesson-body th,
+.lesson-body td { border: 1px solid var(--line); padding: 7px 11px; text-align: left; }
+.lesson-body th { background: var(--surface-2); font-weight: 600; }
+
+.lesson-body img { max-width: 100%; height: auto; border-radius: var(--r-md); margin: 0.5em 0; }
+.lesson-body hr { border: 0; border-top: 1px solid var(--line); margin: 1.8em 0; }
+
+/* Responsive 16:9 video embed */
+.lesson-embed {
+  position: relative;
+  padding-bottom: 56.25%;
+  margin: 1.2em 0;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: #000;
+}
+.lesson-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* KaTeX display equations can overflow on phones — let them scroll */
+.lesson-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }

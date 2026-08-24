@@ -1,6 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import { supabase } from './supabase';
+// Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
+// Students load this same bundle to sit exams, often on poor connections, so the
+// markdown stack stays out of the initial download and arrives only when an
+// instructor actually opens Lessons.
+const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -1729,6 +1734,7 @@ const deleteResult = async (studentId, examId) => {
             { id: 'home',       label: 'Overview',     icon: 'home' },
             { id: 'results',    label: 'Results',       icon: 'bar-chart' },
             { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
+            { id: 'lessons',    label: 'Lessons',       icon: 'book' },
             { id: 'students',   label: 'Students',      icon: 'users' },
             { id: 'live',       label: 'Live Monitor',  icon: 'activity', badge: liveSessions.length > 0 ? String(liveSessions.length) : null, live: true },
             { id: 'attendance', label: 'Attendance',    icon: 'calendar' },
@@ -1826,6 +1832,7 @@ const deleteResult = async (studentId, examId) => {
               home: 'Overview',
               results: 'Results',
               manage: 'Manage Exams',
+              lessons: 'Lessons',
               students: 'Students',
               live: 'Live Monitor',
               attendance: 'Attendance',
@@ -1932,6 +1939,15 @@ const deleteResult = async (studentId, examId) => {
           )}
 
           {/* --- RESULTS PANEL --- */}
+        {activeView === 'lessons' && (
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading lessons…</div>}>
+            <LessonsManager
+              instructorId={instructorId}
+              instructorSections={[...instructorSections]}
+            />
+          </Suspense>
+        )}
+
         {activeView === 'results' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>

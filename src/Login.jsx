@@ -163,7 +163,7 @@ export default function Login({ onLogin }) {
             Welcome back.
           </h1>
           <p style={{ margin: '6px auto 0', color: 'rgba(255,255,255,.7)', fontSize: 13.5, maxWidth: 380 }}>
-            Sign in to access your scheduled examinations.
+            Sign in to access your lessons, seatwork and examinations.
           </p>
         </div>
       </div>
@@ -266,7 +266,7 @@ export default function Login({ onLogin }) {
             )}
 
             <button type="submit" disabled={isLoading || isLocked} className="btn lg" style={{ width: '100%' }}>
-              {isLoading ? 'Connecting…' : isInstructor ? 'Sign in to dashboard' : 'Begin examination session'}
+              {isLoading ? 'Connecting…' : isInstructor ? 'Sign in to dashboard' : 'Log in'}
               {!isLoading && <Icon name="arrow-right" size={16} />}
             </button>
 

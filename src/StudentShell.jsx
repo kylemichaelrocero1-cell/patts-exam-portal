@@ -6,14 +6,25 @@ import ExamList from './ExamList';
 // react-markdown + KaTeX (~600kB). A student who only ever sits exams should
 // never download it, and on exam day the assessments tab must load fast.
 const StudentLessons = lazy(() => import('./StudentLessons'));
+const StudentSummary = lazy(() => import('./StudentSummary'));
 
 const TABS = [
-  { id: 'assessments', label: 'Exams & Seatwork', icon: 'clipboard' },
-  { id: 'lessons',     label: 'Lessons',          icon: 'book' },
+  { id: 'summary',  label: 'Summary',  icon: 'home' },
+  { id: 'lessons',  label: 'Lessons',  icon: 'book' },
+  { id: 'seatwork', label: 'Seatwork', icon: 'clipboard-check' },
+  { id: 'exams',    label: 'Exams',    icon: 'clipboard' },
 ];
 
+function Loading({ label }) {
+  return (
+    <div style={{ textAlign: 'center', color: 'var(--ink-3)', padding: 40 }}>
+      Loading {label}…
+    </div>
+  );
+}
+
 export default function StudentShell({ student, selectedSection, onStartExam, onLogout }) {
-  const [tab, setTab] = useState('assessments');
+  const [tab, setTab] = useState('summary');
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
@@ -78,17 +89,36 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
         })}
       </div>
 
-      {tab === 'assessments' ? (
+      {/* ExamList is mounted per-kind rather than shared, so switching tabs
+          resets its internal state cleanly and each list only ever shows one
+          kind. `key` forces the remount. */}
+      {(tab === 'seatwork' || tab === 'exams') && (
         <ExamList
+          key={tab}
           embedded
+          kind={tab === 'seatwork' ? 'seatwork' : 'exam'}
           student={student}
           selectedSection={selectedSection}
           onStartExam={onStartExam}
           onLogout={onLogout}
         />
-      ) : (
+      )}
+
+      {tab === 'summary' && (
         <div style={{ padding: '32px 24px' }}>
-          <Suspense fallback={<div style={{ textAlign: 'center', color: 'var(--ink-3)', padding: 40 }}>Loading lessons…</div>}>
+          <Suspense fallback={<Loading label="summary" />}>
+            <StudentSummary
+              student={student}
+              selectedSection={selectedSection}
+              onGoToTab={setTab}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {tab === 'lessons' && (
+        <div style={{ padding: '32px 24px' }}>
+          <Suspense fallback={<Loading label="lessons" />}>
             <StudentLessons student={student} selectedSection={selectedSection} />
           </Suspense>
         </div>

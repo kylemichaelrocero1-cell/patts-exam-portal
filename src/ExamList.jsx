@@ -4,7 +4,7 @@ import {
   selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
 } from './lib/assessments';
 
-export default function ExamList({ embedded = false, student, selectedSection, onStartExam, onLogout }) {
+export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [activeSessions, setActiveSessions] = useState({});
@@ -117,17 +117,20 @@ export default function ExamList({ embedded = false, student, selectedSection, o
 
     // Silent refresh — no spinner so students aren't disrupted when instructor opens/closes an exam.
     // Filter by is_open changes only — avoids re-fetching on unrelated exam edits.
+    // Watch BOTH tables during the transition. The dashboard now writes new
+    // exams and seatworks to `assessments`, and the exams -> assessments sync
+    // trigger only runs the other way — so listening to `exams` alone would
+    // mean a freshly opened seatwork never reaches a student's screen until
+    // they reloaded. Drop the `exams` half at cutover.
     const channel = supabase.channel('examlist-realtime')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exams', filter: 'is_open=eq.true' }, () => {
-        fetchExams(true);
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exams' }, () => {
-        fetchExams(true);
-      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exams', filter: 'is_open=eq.true' }, () => fetchExams(true))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exams' }, () => fetchExams(true))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assessments', filter: 'is_open=eq.true' }, () => fetchExams(true))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assessments' }, () => fetchExams(true))
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [selectedSection]);
+  }, [selectedSection, kind]);
 
   const fetchExams = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -157,6 +160,10 @@ export default function ExamList({ embedded = false, student, selectedSection, o
           if (!exam.target_section) return false;
           const sections = exam.target_section.split(',').map(s => s.trim());
           if (!sections.includes(selectedSection)) return false;
+          // When the shell mounts this per-tab, show only that kind. Rows from
+          // the pre-migration exams fallback are all 'exam', so a Seatwork tab
+          // is simply empty until the migration lands.
+          if (kind && (exam.kind || 'exam') !== kind) return false;
           // Hide anything outside its scheduled window. Rows coming from the
           // exams fallback have no window, so this is a no-op for them.
           return isAvailableNow(exam) || availabilityState(exam) === 'scheduled';

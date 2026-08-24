@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import Login from './Login';
-import ExamList from './ExamList';
+import StudentShell from './StudentShell';
 import ExamBoard from './ExamBoard';
 import SectionSelector from './SectionSelector';
 import AdminDashboard from './AdminDashboard';
@@ -124,8 +124,10 @@ export default function App() {
   }
 
   if (!selectedExam) {
+    // StudentShell owns the header and the Lessons / Exams & Seatwork tabs, and
+    // renders ExamList inside itself.
     return (
-      <ExamList
+      <StudentShell
         student={student}
         selectedSection={selectedSection}
         onStartExam={(exam, set) => { setSelectedExam(exam); setExamSet(set || null); }}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-export default function ExamList({ student, selectedSection, onStartExam, onLogout }) {
+export default function ExamList({ embedded = false, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [activeSessions, setActiveSessions] = useState({});
@@ -271,7 +271,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
   );
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div style={embedded ? undefined : { minHeight: '100vh', background: 'var(--bg)' }}>
 
       {/* PASSWORD GATE MODAL */}
       {pendingExam && (
@@ -316,7 +316,9 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
         </div>
       )}
 
-      {/* Header */}
+      {/* Header — skipped when embedded in StudentShell, which renders its
+          own header plus the Lessons/Assessments tabs. */}
+      {!embedded && (
       <header className="header" style={{ borderRadius: 0, marginBottom: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <img src="/patts-logo.png" alt="PATTS" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
@@ -328,6 +330,7 @@ export default function ExamList({ student, selectedSection, onStartExam, onLogo
           Log Out
         </button>
       </header>
+      )}
 
       {/* Recovery toast */}
       {recoveryMsg && (

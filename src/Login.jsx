@@ -156,8 +156,10 @@ export default function Login({ onLogin }) {
       <div className="patts-header" style={{ padding: '36px 24px 80px', textAlign: 'center', position: 'relative' }}>
         <div style={{ position: 'relative', zIndex: 1 }}>
           <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: 64, objectFit: 'contain' }} />
-          <div className="eyebrow" style={{ color: 'var(--gold-bright)', marginTop: 14, fontSize: 11 }}>
-            Online Examination Portal
+          {/* 40 uppercase characters at .12em tracking overflow a narrow phone,
+              so cap the width and let it wrap onto two lines. */}
+          <div className="eyebrow" style={{ color: 'var(--gold-bright)', fontSize: 11, maxWidth: 380, margin: '14px auto 0', lineHeight: 1.5 }}>
+            Aeronautical Engineering Learning Portal
           </div>
           <h1 className="display" style={{ color: 'white', marginTop: 8, fontSize: 26 }}>
             Welcome back.

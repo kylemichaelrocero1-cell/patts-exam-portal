@@ -118,7 +118,10 @@ export default function Login({ onLogin }) {
         if (msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network') || msg.toLowerCase().includes('connect')) {
           setErrorMsg('Cannot reach the server. Check your internet or try again in a moment.');
         } else {
-          setErrorMsg(`Server error: ${msg}`);
+          // Don't echo the raw Postgres/PostgREST message at students — it leaks
+          // schema details and means nothing to them. It stays in the console.
+          console.error('Login lookup failed:', error);
+          setErrorMsg('Something went wrong on our end. Please try again in a moment.');
         }
         return;
       }
@@ -137,8 +140,7 @@ export default function Login({ onLogin }) {
       onLogin(student);
     } catch (err) {
       console.error('Login error:', err);
-      const msg = err?.message || err?.error_description || '';
-      setErrorMsg(msg ? `Connection error: ${msg}` : 'Cannot reach the server. Check your internet and try again.');
+      setErrorMsg('Cannot reach the server. Check your internet and try again.');
     } finally {
       setIsLoading(false);
     }

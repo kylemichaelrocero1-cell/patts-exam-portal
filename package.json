@@ -11,7 +11,8 @@
     "test:migration": "node sql/test/migration.test.mjs",
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
-    "test": "npm run test:migration && npm run test:lessons && npm run test:assessments"
+    "test": "npm run test:migration && npm run test:lessons && npm run test:assessments",
+    "test:review": "node sql/test/review.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

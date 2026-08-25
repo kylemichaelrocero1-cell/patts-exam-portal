@@ -13,7 +13,8 @@ export const selectAssessments = (apply, opts) => reader.select(apply, opts);
 export const INSTRUCTOR_COLUMNS = {
   assessmentColumns:
     'id, kind, title, description, target_section, instructor_id, is_open, ' +
-    'opens_at, closes_at, duration_minutes, has_password, exam_password, created_at',
+    'opens_at, closes_at, duration_minutes, has_password, exam_password, created_at, ' +
+    'allow_retakes, show_answers, score_policy',
   examColumns:
     'id, title, description, target_section, instructor_id, is_open, ' +
     'duration_minutes, has_password, exam_password, created_at',

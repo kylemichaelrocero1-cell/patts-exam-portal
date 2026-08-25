@@ -18,7 +18,10 @@
 
 export const ASSESSMENT_COLUMNS =
   'id, kind, title, description, target_section, instructor_id, is_open, ' +
-  'opens_at, closes_at, duration_minutes, has_password, created_at';
+  'opens_at, closes_at, duration_minutes, has_password, created_at, ' +
+  // score_policy is deliberately absent: it governs what the instructor sees
+  // and anon is not granted it (see sql/002b).
+  'allow_retakes, show_answers';
 
 // exams has no kind/opens_at/closes_at — anon is granted exactly these.
 export const EXAM_COLUMNS =
@@ -32,9 +35,11 @@ export function isMissingTableError(error) {
 export function normaliseExamRow(row) {
   return {
     ...row,
-    kind: 'exam',    // everything in the old table is an exam by definition
-    opens_at: null,  // no scheduling existed before assessments
+    kind: 'exam',          // everything in the old table is an exam by definition
+    opens_at: null,        // no scheduling existed before assessments
     closes_at: null,
+    allow_retakes: false,  // and no retakes or answer reveal
+    show_answers: false,
   };
 }
 

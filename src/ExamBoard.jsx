@@ -35,6 +35,12 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [questions, setQuestions] = useState([]); 
   const [isLoading, setIsLoading] = useState(true); 
   const [scoreDisplay, setScoreDisplay] = useState(null); 
+  // Set from submit_assessment(): whether this paper reveals answers, and
+  // which attempt this was. Both drive the post-submit screen only.
+  const [canReviewAnswers, setCanReviewAnswers] = useState(false);
+  const [attemptNo, setAttemptNo] = useState(1);
+  const [reviewRows, setReviewRows] = useState(null);   // null = not fetched
+  const [isLoadingReview, setIsLoadingReview] = useState(false);
 
   // --- LIVE PROCTORING STATES ---
   // Restored from localStorage so a locked student sees the lock screen immediately on
@@ -337,6 +343,25 @@ export default function ExamBoard({ student, exam, examSet }) {
     return () => clearInterval(timer);
   }, [scoreDisplay, isSubmitting]);
 
+  // Pulls the marked paper back from the server. This is the only route to a
+  // correct answer: get_answer_review() refuses unless the assessment has
+  // show_answers on AND this student has already submitted it.
+  const loadAnswerReview = async () => {
+    setIsLoadingReview(true);
+    const { data, error } = await supabase.rpc('get_answer_review', {
+      p_student_id: student?.id,
+      p_assessment_id: exam.id,
+      p_attempt_no: null,
+    });
+    setIsLoadingReview(false);
+    if (error) {
+      console.error('Could not load the answer review:', error.message);
+      alert('Could not load the answers. Please try again.');
+      return;
+    }
+    setReviewRows(data || []);
+  };
+
   // --- SUBMIT HANDLER (declared before the auto-submit effect that depends on it) ---
   const executeSubmission = useCallback(async () => {
     if (isSubmittingRef.current || isSubmitting) return;
@@ -349,42 +374,84 @@ export default function ExamBoard({ student, exam, examSet }) {
       // Use snapshot captured at modal-open time; fall back to live state for auto-submit
       const submittedAnswers = answersSnapshotRef.current ?? answers;
       const submittedEssayAnswers = essaySnapshotRef.current ?? essayAnswers;
-      const { data: answerKey } = await supabase.from('questions').select('id, correct_answer, question_type').eq('exam_id', exam.id);
-      let correctCount = 0;
-      let mcTotal = 0;
-      const formattedAnswers = {};
 
-      (answerKey || []).forEach(questionData => {
-        const qId = String(questionData.id);
-        if ((questionData.question_type || 'multiple_choice') === 'essay') {
-          const essayText = submittedEssayAnswers[qId];
-          if (essayText?.trim()) {
-            formattedAnswers[qId] = { type: 'essay', text: essayText.trim() };
-          }
-        } else {
-          mcTotal++;
-          if (submittedAnswers[qId] !== undefined) {
-            const correctValue = Number(questionData.correct_answer);
-            const studentValue = Number(submittedAnswers[qId]);
-            const isCorrect = studentValue === correctValue;
-            if (isCorrect) correctCount++;
-            formattedAnswers[qId] = { chosen: studentValue, is_correct: isCorrect };
-          }
-        }
+      // Marking happens on the server. This used to fetch every
+      // correct_answer to mark in the browser, which is why the key was
+      // readable by anyone holding the anon key — it ships in this bundle.
+      // submit_assessment() marks in Postgres, routes the row to results or
+      // review_attempts depending on whether retakes are on, and returns the
+      // score. sql/003 revokes the key from anon once this is deployed.
+      const mcAnswers = {};
+      Object.entries(submittedAnswers).forEach(([qId, chosen]) => {
+        if (chosen !== undefined && chosen !== null) mcAnswers[String(qId)] = Number(chosen);
       });
 
-      const { error: saveError } = await supabase.from('results').insert([{
-        student_id: student?.id,
-        exam_id: exam.id,
-        answers_json: formattedAnswers,
-        score: correctCount,
-        total_items: mcTotal,
-        time_taken_seconds: startingSeconds - timeLeft,
-        tab_switches: tabSwitchCount,
-        violation_logs: violationLogs
-      }]);
+      const { data: outcome, error: rpcError } = await supabase.rpc('submit_assessment', {
+        p_student_id: student?.id,
+        p_assessment_id: exam.id,
+        p_answers: mcAnswers,
+        p_time_taken_seconds: startingSeconds - timeLeft,
+        p_tab_switches: tabSwitchCount,
+        p_violation_logs: violationLogs,
+      });
 
-      if (saveError && saveError.code !== '23505') throw saveError;
+      let correctCount, mcTotal;
+
+      if (rpcError) {
+        // The RPC only exists once sql/002 has been applied. Rather than lose a
+        // student's paper mid-exam, fall back to the old client-side path.
+        // Delete this fallback — and this comment — once 003 has run, because
+        // after that the browser can no longer read correct_answer and this
+        // branch would silently record everyone as scoring zero.
+        console.error('submit_assessment unavailable, falling back:', rpcError.message);
+
+        const { data: answerKey } = await supabase.from('questions')
+          .select('id, correct_answer, question_type').eq('exam_id', exam.id);
+        correctCount = 0; mcTotal = 0;
+        const formattedAnswers = {};
+        (answerKey || []).forEach(qd => {
+          const qId = String(qd.id);
+          if ((qd.question_type || 'multiple_choice') === 'essay') {
+            const essayText = submittedEssayAnswers[qId];
+            if (essayText?.trim()) formattedAnswers[qId] = { type: 'essay', text: essayText.trim() };
+          } else {
+            mcTotal++;
+            if (submittedAnswers[qId] !== undefined) {
+              const isCorrect = Number(submittedAnswers[qId]) === Number(qd.correct_answer);
+              if (isCorrect) correctCount++;
+              formattedAnswers[qId] = { chosen: Number(submittedAnswers[qId]), is_correct: isCorrect };
+            }
+          }
+        });
+        const { error: saveError } = await supabase.from('results').insert([{
+          student_id: student?.id, exam_id: exam.id, answers_json: formattedAnswers,
+          score: correctCount, total_items: mcTotal,
+          time_taken_seconds: startingSeconds - timeLeft,
+          tab_switches: tabSwitchCount, violation_logs: violationLogs,
+        }]);
+        if (saveError && saveError.code !== '23505') throw saveError;
+      } else {
+        correctCount = outcome?.score ?? 0;
+        mcTotal = outcome?.total_items ?? 0;
+        setCanReviewAnswers(!!outcome?.can_review);
+        setAttemptNo(outcome?.attempt_no ?? 1);
+      }
+
+      // Essays are not marked server-side (there is nothing to mark against),
+      // so they are attached to the stored row separately.
+      const essayPayload = {};
+      Object.entries(submittedEssayAnswers).forEach(([qId, text]) => {
+        if (text?.trim()) essayPayload[String(qId)] = { type: 'essay', text: text.trim() };
+      });
+      if (!rpcError && Object.keys(essayPayload).length > 0) {
+        const { data: existing } = await supabase.from('results')
+          .select('id, answers_json').eq('student_id', student?.id).eq('exam_id', exam.id).limit(1);
+        if (existing?.[0]) {
+          await supabase.from('results')
+            .update({ answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } })
+            .eq('id', existing[0].id);
+        }
+      }
 
       if (liveSessionId) {
         await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
@@ -394,7 +461,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
 
       localStorage.removeItem(storageKey);
-      setScoreDisplay({ score: saveError?.code === '23505' ? 0 : correctCount, total: questions.length });
+      setScoreDisplay({ score: correctCount, total: mcTotal || questions.length });
 
     } catch (err) {
       alert("There was an error saving your exam. Please contact your instructor.");
@@ -651,6 +718,78 @@ export default function ExamBoard({ student, exam, examSet }) {
             </div>
           </div>
         </div>
+
+        {/* Answer review — offered only when the server said this paper
+            reveals answers. The button is what fetches them; nothing about
+            the key is present until then. */}
+        {canReviewAnswers && (
+          <div style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+            {attemptNo > 1 && (
+              <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.55)', fontSize: 13, margin: '0 0 12px' }}>
+                Attempt {attemptNo}
+              </p>
+            )}
+
+            {reviewRows === null ? (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+                <button
+                  onClick={loadAnswerReview}
+                  disabled={isLoadingReview}
+                  style={{ width: 'auto', padding: '11px 26px', background: 'var(--gold)', color: 'var(--navy-dark)', border: 'none', borderRadius: 'var(--r-sm)', fontWeight: 700, fontSize: 14 }}
+                >
+                  {isLoadingReview ? 'Loading…' : 'Review my answers'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 28, textAlign: 'left' }}>
+                <h2 style={{ color: 'white', fontSize: 17, fontWeight: 700, margin: '0 0 14px', textAlign: 'center' }}>
+                  Answer review
+                </h2>
+                {reviewRows.map((r, i) => {
+                  const letters = ['A', 'B', 'C', 'D'];
+                  return (
+                    <div key={r.question_id || i} style={{
+                      background: 'rgba(255,255,255,.04)',
+                      border: `1px solid ${r.is_correct ? 'rgba(46,204,113,.4)' : 'rgba(231,76,60,.4)'}`,
+                      borderLeft: `4px solid ${r.is_correct ? '#2ECC71' : '#E74C3C'}`,
+                      borderRadius: 'var(--r-md)', padding: '14px 16px', marginBottom: 10,
+                    }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
+                        <span style={{ color: r.is_correct ? '#2ECC71' : '#E74C3C', fontWeight: 800, fontSize: 12.5, flexShrink: 0 }}>
+                          {r.is_correct ? '✓' : '✕'} {r.question_number ?? i + 1}.
+                        </span>
+                        <span style={{ color: 'rgba(255,255,255,.9)', fontSize: 14, lineHeight: 1.5 }}>
+                          {r.question_text}
+                        </span>
+                      </div>
+                      {(r.choices || []).map((choice, ci) => {
+                        const isKey = ci === r.correct;
+                        const isMine = ci === r.chosen;
+                        return (
+                          <div key={ci} style={{
+                            fontSize: 13, padding: '4px 8px', borderRadius: 4, marginTop: 2,
+                            color: isKey ? '#2ECC71' : isMine ? '#E74C3C' : 'rgba(255,255,255,.5)',
+                            background: isKey ? 'rgba(46,204,113,.1)' : isMine ? 'rgba(231,76,60,.1)' : 'transparent',
+                            fontWeight: isKey || isMine ? 700 : 400,
+                          }}>
+                            {letters[ci]}. {choice}
+                            {isKey && ' — correct answer'}
+                            {isMine && !isKey && ' — your answer'}
+                          </div>
+                        );
+                      })}
+                      {r.chosen === null && (
+                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)', marginTop: 6, fontStyle: 'italic' }}>
+                          You left this blank.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
 
         <p style={{ textAlign: 'center', margin: '20px 0 14px', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.18em', fontWeight: 700 }}>
           KMR · PATTS COLLEGE OF AERONAUTICS

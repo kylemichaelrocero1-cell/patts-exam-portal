@@ -124,10 +124,10 @@ console.log('\n=== MOCK EXAM via duplicate_assessment ===');
   // transaction, and quoting the name in a bare SET does not take.
   await q(`SELECT set_config('test.uid', $1, false)`, [INS]);
   const r=await q(`SELECT public.duplicate_assessment($1,$2,$3,true,true,'latest') AS id`,
-                  [EX,'Mock Exam (EEMLE) 1','Pre-Boards PATTS']);
+                  [EX,'Practice Copy (EEMLE) 1','Pre-Boards PATTS']);
   MOCK=r[0].id;
   const a=await q(`SELECT title,target_section,is_open,allow_retakes,show_answers,score_policy FROM public.assessments WHERE id=$1`,[MOCK]);
-  ck('copy created with the new name', a[0].title==='Mock Exam (EEMLE) 1');
+  ck('copy created with the new name', a[0].title==='Practice Copy (EEMLE) 1');
   ck('aimed at Pre-Boards PATTS only', a[0].target_section==='Pre-Boards PATTS');
   ck('created CLOSED, to be opened deliberately', a[0].is_open===false);
   ck('retakes + answers on', a[0].allow_retakes===true && a[0].show_answers===true);
@@ -191,6 +191,70 @@ console.log('\n=== ANSWER REVIEW (only after submitting, only when enabled) ==='
   try { await q(`SELECT public.get_answer_review($1,$2,null)`,['22222222-2222-2222-2222-222222222222',MOCK]); }
   catch { threw=true; }
   ck('refused for a student who has not submitted', threw);
+}
+
+console.log('\n=== 004: MOCK EXAM CREATION ===');
+{
+  // two AENG 426 papers per subject so the numbering can be checked
+  await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,duration_minutes,created_at)
+    VALUES ('dddddddd-0000-0000-0000-000000000001','exam','Powerplant - Diagnostic Exam','AENG 426','${INS}',false,180,'2026-01-01'),
+           ('dddddddd-0000-0000-0000-000000000002','exam','Powerplant - Revalida Exam','AENG 426','${INS}',false,180,'2026-02-01'),
+           ('dddddddd-0000-0000-0000-000000000003','exam','EEMLE - Finals Exam','AENG 426','${INS}',true,180,'2026-03-01')`);
+  for (const [eid,n] of [['dddddddd-0000-0000-0000-000000000001',3],['dddddddd-0000-0000-0000-000000000002',2],['dddddddd-0000-0000-0000-000000000003',4]])
+    for (let i=1;i<=n;i++)
+      await x(`INSERT INTO public.questions (exam_id,assessment_id,question_number,question_text,question_type,choice_a,choice_b,choice_c,choice_d,correct_answer)
+               VALUES ('${eid}','${eid}',${i},'Q${i}','multiple_choice','A','B','C','D',${i%4})`);
+
+  await x(fs.readFileSync(P+'/sql/004_create_mock_exams.sql','utf8'));
+
+  // How many AENG 426 papers exist, and how many questions they hold — the
+  // copies must mirror exactly that, whatever earlier fixtures left behind.
+  const src=await q(`SELECT a.id, a.title,
+                            (SELECT count(*)::int FROM public.questions z WHERE z.exam_id=a.id) AS qn
+                     FROM public.assessments a
+                     WHERE a.title NOT LIKE 'Mock Exam %'
+                       AND EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(a.target_section,''),',')) t(x)
+                                   WHERE btrim(t.x)='AENG 426')`);
+  const expectCopies = src.length;
+  const expectQs = src.reduce((t,r)=>t+r.qn,0);
+
+  const m=await q(`SELECT title,is_open,allow_retakes,show_answers,score_policy,target_section,has_password,
+                          (SELECT count(*)::int FROM public.questions z WHERE z.exam_id=a.id) AS qn
+                   FROM public.assessments a WHERE title LIKE 'Mock Exam %' ORDER BY title`);
+  ck(`one copy per AENG 426 paper (${expectCopies})`, m.length===expectCopies, String(m.length));
+  ck('numbered oldest-first within a subject',
+     m.some(r=>r.title==='Mock Exam Powerplant 1') && m.some(r=>r.title==='Mock Exam Powerplant 2'),
+     m.map(r=>r.title).join(' | '));
+  ck('EEMLE numbering restarts at 1', m.some(r=>r.title==='Mock Exam EEMLE 1'));
+  ck('all created CLOSED', m.every(r=>r.is_open===false));
+  ck('all have retakes + answers on', m.every(r=>r.allow_retakes && r.show_answers));
+  ck('all show the latest attempt', m.every(r=>r.score_policy==='latest'));
+  ck('all aimed at Pre-Boards PATTS only', m.every(r=>r.target_section==='Pre-Boards PATTS'));
+  ck('no password on revision material', m.every(r=>r.has_password===false));
+  const pp1=m.find(r=>r.title==='Mock Exam Powerplant 1');
+  ck('questions copied (3 for the oldest Powerplant paper)', pp1.qn===3, String(pp1?.qn));
+  const tot=m.reduce((t,r)=>t+r.qn,0);
+  ck(`every question copied (${expectQs})`, tot===expectQs, String(tot));
+
+  // Check the actual source papers by id. A title pattern would also sweep in
+  // copies made by duplicate_assessment earlier in this file, which are
+  // supposed to have retakes on.
+  const orig=await q(`SELECT count(*) FILTER (WHERE is_open)::int o,
+                             count(*) FILTER (WHERE show_answers)::int sa,
+                             count(*) FILTER (WHERE allow_retakes)::int ar
+                      FROM public.assessments WHERE id = ANY($1::uuid[])`,
+                     [src.map(r=>r.id)]);
+  ck('no original made revealing', orig[0].sa===0);
+  ck('no original made retakeable', orig[0].ar===0);
+  ck('originals keep their own open/closed state', orig[0].o===1, String(orig[0].o));
+
+  // idempotency
+  await x(fs.readFileSync(P+'/sql/004_create_mock_exams.sql','utf8'));
+  const again=await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE 'Mock Exam %'`);
+  ck('re-running creates no duplicates', again[0].c===expectCopies, String(again[0].c));
+  const qs=await q(`SELECT count(*)::int c FROM public.questions z
+                    JOIN public.assessments a ON a.id=z.exam_id WHERE a.title LIKE 'Mock Exam %'`);
+  ck('re-running does not double the questions', qs[0].c===expectQs, String(qs[0].c));
 }
 
 console.log('\n=== 002b: STUDENT-VISIBLE SWITCHES ===');

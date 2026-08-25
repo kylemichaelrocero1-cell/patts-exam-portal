@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
+import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
@@ -1637,6 +1638,18 @@ const deleteResult = async (studentId, examId) => {
     return `${m}m ${s}s`;
   };
 
+  // Every section this instructor could reasonably pick: the ones their own
+  // assessments target, plus the ones their students are actually in. Derived
+  // rather than typed, so the picker can only offer real values.
+  const allKnownSections = (() => {
+    const set = new Set();
+    const add = (str) => (str || '').split(',').map(x => x.trim()).filter(Boolean).forEach(x => set.add(x));
+    examsList.forEach(e => add(e.target_section));
+    sharedExamsList.forEach(e => add(e.target_section));
+    studentsList.forEach(st => add(st.section));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  })();
+
   const filteredAndSortedResults = results
     .filter(row => {
       const studentInfo = students[row.student_id] || {};
@@ -2235,13 +2248,12 @@ const deleteResult = async (studentId, examId) => {
                {/* Section Field */}
                 <td>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input
-                      type="text"
+                    <SectionPicker
                       value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
-                      onChange={(e) => setEditingSections(prev => ({ ...prev, [exam.id]: e.target.value }))}
-                      placeholder="e.g. Aero 101"
-                      className="input"
-                      style={{ width: 140, padding: '7px 10px', fontSize: 13 }}
+                      onChange={next => setEditingSections(prev => ({ ...prev, [exam.id]: next }))}
+                      options={allKnownSections}
+                      placeholder="No sections"
+                      compact
                     />
                     <button onClick={() => saveSection(exam.id)} className="btn sm" style={{ opacity: editingSections[exam.id] !== (examsList.find(e => e.id === exam.id)?.target_section ?? '') ? 1 : 0.4 }}>Save</button>
                     {/* Co-instructor buttons per unique section name on this exam */}
@@ -2417,13 +2429,14 @@ const deleteResult = async (studentId, examId) => {
               </div>
               <div style={{ flex: 1, minWidth: '140px' }}>
                 <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Target Section</label>
-                <input
-                  type="text"
-                  value={targetSection}
-                  onChange={e => setTargetSection(e.target.value)}
-                  placeholder="e.g. Aero 101"
-                  style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}
-                />
+                <div style={{ padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 6, minHeight: 40, display: 'flex', alignItems: 'center' }}>
+                  <SectionPicker
+                    value={targetSection}
+                    onChange={setTargetSection}
+                    options={allKnownSections}
+                    placeholder="Pick a section"
+                  />
+                </div>
               </div>
               <div style={{ flex: 1, minWidth: '130px' }}>
                 <label style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Type</label>
@@ -2663,13 +2676,12 @@ const deleteResult = async (studentId, examId) => {
                           <td><span className="px-pill brand">{student.section || '—'}</span></td>
                           <td onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              <input
-                                type="text"
+                              <SectionPicker
                                 value={editingStudentSections[student.id] !== undefined ? editingStudentSections[student.id] : ''}
-                                onChange={(e) => setEditingStudentSections(prev => ({ ...prev, [student.id]: e.target.value }))}
-                                placeholder="e.g. Aero 101"
-                                className="input"
-                                style={{ width: 160, padding: '6px 10px', fontSize: 13 }}
+                                onChange={next => setEditingStudentSections(prev => ({ ...prev, [student.id]: next }))}
+                                options={allKnownSections}
+                                placeholder="No sections"
+                                compact
                               />
                               <button onClick={() => saveStudentSection(student.id)} className="btn sm" style={{ opacity: editingStudentSections[student.id] !== student.section ? 1 : 0.4 }}>Save</button>
                             </div>

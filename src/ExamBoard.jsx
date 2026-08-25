@@ -712,8 +712,33 @@ export default function ExamBoard({ student, exam, examSet }) {
               </p>
             </div>
             <div style={{ padding: '28px 32px', textAlign: 'center' }}>
+              {/* On a paper that reveals answers there is no reason to withhold
+                  the mark — the student is about to see every question anyway.
+                  On a real exam it stays hidden, as before. */}
+              {canReviewAnswers && scoreDisplay && (() => {
+                const pct = scoreDisplay.total > 0
+                  ? Math.round((scoreDisplay.score / scoreDisplay.total) * 100) : null;
+                const tone = pct === null ? 'var(--ink-2)'
+                  : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
+                return (
+                  <div style={{ marginBottom: 22 }}>
+                    <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700 }}>
+                      Your score{attemptNo > 1 ? ` · attempt ${attemptNo}` : ''}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 40, color: tone, lineHeight: 1.1, marginTop: 6 }}>
+                      {scoreDisplay.score}<span style={{ color: 'var(--ink-4)', fontSize: 26 }}>/{scoreDisplay.total}</span>
+                    </div>
+                    {pct !== null && (
+                      <div style={{ fontSize: 15, fontWeight: 700, color: tone, marginTop: 2 }}>{pct}%</div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <p style={{ margin: '0 0 22px', color: 'var(--ink-3)', fontSize: 13.5, lineHeight: 1.65 }}>
-                Your submission is recorded. You may now close this window or return to the login screen.
+                {canReviewAnswers
+                  ? 'You can retake this as many times as you like. Review your answers below to see what you missed.'
+                  : 'Your submission is recorded. You may now close this window or return to the login screen.'}
               </p>
               <button onClick={() => window.location.reload()} className="btn lg" style={{ width: '100%' }}>
                 <Icon name="login" size={16} />
@@ -723,67 +748,89 @@ export default function ExamBoard({ student, exam, examSet }) {
           </div>
         </div>
 
-        {/* Answer review — offered only when the server said this paper
-            reveals answers. The button is what fetches them; nothing about
-            the key is present until then. */}
+        {/* Answer review.
+            This sits BELOW the navy hero band, on the light page background —
+            the first version reused the hero's white-on-navy text colours and
+            rendered white on white, so every question and choice was invisible.
+            Everything here is explicitly inked for a light surface. */}
         {canReviewAnswers && (
-          <div style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
-            {attemptNo > 1 && (
-              <p style={{ textAlign: 'center', color: 'rgba(255,255,255,.55)', fontSize: 13, margin: '0 0 12px' }}>
-                Attempt {attemptNo}
-              </p>
-            )}
-
+          <div style={{ maxWidth: 820, margin: '0 auto', width: '100%', padding: '0 4px' }}>
             {reviewRows === null ? (
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 28 }}>
                 <button
                   onClick={loadAnswerReview}
                   disabled={isLoadingReview}
-                  style={{ width: 'auto', padding: '11px 26px', background: 'var(--gold)', color: 'var(--navy-dark)', border: 'none', borderRadius: 'var(--r-sm)', fontWeight: 700, fontSize: 14 }}
+                  className="btn"
+                  style={{ width: 'auto', padding: '12px 28px' }}
                 >
+                  <Icon name="eye" size={15} />
                   {isLoadingReview ? 'Loading…' : 'Review my answers'}
                 </button>
               </div>
             ) : (
-              <div style={{ marginBottom: 28, textAlign: 'left' }}>
-                <h2 style={{ color: 'white', fontSize: 17, fontWeight: 700, margin: '0 0 14px', textAlign: 'center' }}>
-                  Answer review
-                </h2>
+              <div style={{ marginBottom: 34, textAlign: 'left' }}>
+                {(() => {
+                  const right = reviewRows.filter(r => r.is_correct).length;
+                  const blank = reviewRows.filter(r => r.chosen === null || r.chosen === undefined).length;
+                  return (
+                    <div className="card" style={{ padding: '14px 18px', marginBottom: 14, display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--ink-1)' }}>Answer review</h2>
+                      <span style={{ fontSize: 13, color: 'var(--ok)', fontWeight: 700 }}>{right} correct</span>
+                      <span style={{ fontSize: 13, color: 'var(--bad)', fontWeight: 700 }}>{reviewRows.length - right - blank} wrong</span>
+                      {blank > 0 && <span style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 700 }}>{blank} blank</span>}
+                    </div>
+                  );
+                })()}
+
                 {reviewRows.map((r, i) => {
                   const letters = ['A', 'B', 'C', 'D'];
+                  const unanswered = r.chosen === null || r.chosen === undefined;
                   return (
-                    <div key={r.question_id || i} style={{
-                      background: 'rgba(255,255,255,.04)',
-                      border: `1px solid ${r.is_correct ? 'rgba(46,204,113,.4)' : 'rgba(231,76,60,.4)'}`,
-                      borderLeft: `4px solid ${r.is_correct ? '#2ECC71' : '#E74C3C'}`,
-                      borderRadius: 'var(--r-md)', padding: '14px 16px', marginBottom: 10,
+                    <div key={r.question_id || i} className="card" style={{
+                      padding: '16px 18px', marginBottom: 12,
+                      borderLeft: `4px solid ${r.is_correct ? 'var(--ok)' : unanswered ? 'var(--ink-4)' : 'var(--bad)'}`,
                     }}>
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }}>
-                        <span style={{ color: r.is_correct ? '#2ECC71' : '#E74C3C', fontWeight: 800, fontSize: 12.5, flexShrink: 0 }}>
-                          {r.is_correct ? '✓' : '✕'} {r.question_number ?? i + 1}.
+                      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 12 }}>
+                        <span style={{
+                          flexShrink: 0, width: 22, height: 22, borderRadius: '50%',
+                          display: 'grid', placeItems: 'center', marginTop: 1,
+                          background: r.is_correct ? 'var(--ok-bg)' : unanswered ? 'var(--surface-2)' : 'var(--bad-bg)',
+                          color: r.is_correct ? 'var(--ok)' : unanswered ? 'var(--ink-4)' : 'var(--bad)',
+                          fontWeight: 800, fontSize: 12,
+                        }}>
+                          {r.is_correct ? '✓' : unanswered ? '–' : '✕'}
                         </span>
-                        <span style={{ color: 'rgba(255,255,255,.9)', fontSize: 14, lineHeight: 1.5 }}>
+                        <span style={{ color: 'var(--ink-1)', fontSize: 14.5, lineHeight: 1.6, fontWeight: 500 }}>
+                          <strong style={{ marginRight: 6 }}>{r.question_number ?? i + 1}.</strong>
                           {r.question_text}
                         </span>
                       </div>
-                      {(r.choices || []).map((choice, ci) => {
-                        const isKey = ci === r.correct;
-                        const isMine = ci === r.chosen;
-                        return (
-                          <div key={ci} style={{
-                            fontSize: 13, padding: '4px 8px', borderRadius: 4, marginTop: 2,
-                            color: isKey ? '#2ECC71' : isMine ? '#E74C3C' : 'rgba(255,255,255,.5)',
-                            background: isKey ? 'rgba(46,204,113,.1)' : isMine ? 'rgba(231,76,60,.1)' : 'transparent',
-                            fontWeight: isKey || isMine ? 700 : 400,
-                          }}>
-                            {letters[ci]}. {choice}
-                            {isKey && ' — correct answer'}
-                            {isMine && !isKey && ' — your answer'}
-                          </div>
-                        );
-                      })}
-                      {r.chosen === null && (
-                        <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)', marginTop: 6, fontStyle: 'italic' }}>
+
+                      <div style={{ display: 'grid', gap: 5 }}>
+                        {(r.choices || []).map((choice, ci) => {
+                          const isKey = ci === r.correct;
+                          const isMine = ci === r.chosen;
+                          return (
+                            <div key={ci} style={{
+                              fontSize: 13.5, padding: '7px 11px', borderRadius: 'var(--r-sm)',
+                              display: 'flex', gap: 8, alignItems: 'flex-start',
+                              // Neutral choices stay readable ink, not washed out.
+                              color: isKey ? 'var(--ok)' : isMine ? 'var(--bad)' : 'var(--ink-2)',
+                              background: isKey ? 'var(--ok-bg)' : isMine ? 'var(--bad-bg)' : 'var(--surface-2)',
+                              border: `1px solid ${isKey ? 'var(--ok-bd)' : isMine ? 'var(--bad-bd)' : 'var(--line)'}`,
+                              fontWeight: isKey || isMine ? 600 : 400,
+                            }}>
+                              <strong style={{ flexShrink: 0 }}>{letters[ci]}.</strong>
+                              <span style={{ flex: 1 }}>{choice}</span>
+                              {isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>CORRECT</span>}
+                              {isMine && !isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>YOUR ANSWER</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {unanswered && (
+                        <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginTop: 9, fontStyle: 'italic' }}>
                           You left this blank.
                         </div>
                       )}

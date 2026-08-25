@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
+import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
 
 export default function ExamBoard({ student, exam, examSet }) {
@@ -492,7 +493,10 @@ export default function ExamBoard({ student, exam, examSet }) {
     executeRef.current = executeSubmission;
     const poll = setInterval(async () => {
       if (isSubmittingRef.current || scoreDisplay) return;
-      const { data } = await supabase.from('exams').select('is_open').eq('id', exam.id).single();
+      // Mock exams live only in `assessments`; the old `exams` query returned
+      // no row for them, so an instructor closing one mid-attempt never
+      // triggered the auto-submit.
+      const data = await fetchAssessmentById(exam.id, 'id, is_open').catch(() => null);
       if (data && data.is_open === false) {
         clearInterval(poll);
         executeRef.current();

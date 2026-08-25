@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import {
   selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
+  fetchAssessmentById,
 } from './lib/assessments';
 
 export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
@@ -192,11 +193,9 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     setIsCheckingSession(true);
     try {
       // Re-fetch exam metadata (no password — confirms exam is still open and gets latest has_password)
-      const { data: freshExam } = await supabase
-        .from('exams')
-        .select('id, title, duration_minutes, target_section, has_password, is_open')
-        .eq('id', exam.id)
-        .single();
+      // Via assessments, with a legacy fallback: a mock exam has no `exams`
+      // row, so the old query returned nothing and the stale copy was used.
+      const freshExam = await fetchAssessmentById(exam.id);
 
       // If student already has an active live session, skip the password gate (resuming after refresh)
       const { data: sessions } = await supabase

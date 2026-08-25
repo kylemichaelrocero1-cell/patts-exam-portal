@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
-import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS } from './lib/assessments';
+import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
+         updateAssessment, deleteAssessment } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -1389,7 +1390,8 @@ const deleteResult = async (studentId, examId) => {
       await supabase.from('live_sessions').delete().eq('exam_id', examId);
       await supabase.from('results').delete().eq('exam_id', examId);
       await supabase.from('questions').delete().eq('exam_id', examId);
-      const { error } = await supabase.from('exams').delete().eq('id', examId);
+      let error = null;
+      try { await deleteAssessment(examId); } catch (e) { error = e; }
       if (error) {
         alert("Error deleting exam: " + error.message);
       } else {
@@ -1403,10 +1405,10 @@ const deleteResult = async (studentId, examId) => {
     const newStatus = !currentStatus;
     
     // Update Supabase
-    const { error } = await supabase.from('exams').update({ is_open: newStatus }).eq('id', examId);
-    
-    if (error) {
-      alert("Error updating exam status. Please try again.");
+    try {
+      await updateAssessment(examId, { is_open: newStatus });
+    } catch (error) {
+      alert('Could not change the open/closed state: ' + error.message);
       console.error(error);
       return;
     }
@@ -1419,7 +1421,8 @@ const deleteResult = async (studentId, examId) => {
   const saveTitle = async (examId) => {
     const newTitle = (editingTitles[examId] || '').trim();
     if (!newTitle) return alert('Exam title cannot be empty.');
-    const { error } = await supabase.from('exams').update({ title: newTitle }).eq('id', examId);
+    let error = null;
+    try { await updateAssessment(examId, { title: newTitle }); } catch (e) { error = e; }
     if (error) { alert('Error saving title: ' + error.message); return; }
     setExamsList(prev => prev.map(e => e.id === examId ? { ...e, title: newTitle } : e));
     setExamsDict(prev => ({ ...prev, [examId]: newTitle }));
@@ -1434,7 +1437,8 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
 
-    const { error } = await supabase.from('exams').update({ duration_minutes: parseInt(newTime) }).eq('id', examId);
+    let error = null;
+    try { await updateAssessment(examId, { duration_minutes: parseInt(newTime) }); } catch (e) { error = e; }
     
     if (error) {
       alert("Error saving time limit. Please try again.");
@@ -1450,7 +1454,8 @@ const deleteResult = async (studentId, examId) => {
   const saveSection = async (examId) => {
     const newSection = editingSections[examId] || '';
     
-    const { error } = await supabase.from('exams').update({ target_section: newSection }).eq('id', examId);
+    let error = null;
+    try { await updateAssessment(examId, { target_section: newSection }); } catch (e) { error = e; }
 
     if (error) {
       alert("Error saving section. Please try again.");
@@ -1464,12 +1469,13 @@ const deleteResult = async (studentId, examId) => {
 
   const savePassword = async (examId) => {
     const newPassword = editingPasswords[examId] || '';
-    const { error } = await supabase.from('exams').update({
-      exam_password: newPassword || null,
-      has_password: !!newPassword,
-    }).eq('id', examId);
-    if (error) {
-      alert("Error saving password. Please try again.");
+    try {
+      await updateAssessment(examId, {
+        exam_password: newPassword || null,
+        has_password: !!newPassword,
+      });
+    } catch (error) {
+      alert('Could not save the password: ' + error.message);
       console.error(error);
       return;
     }

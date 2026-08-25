@@ -396,47 +396,20 @@ export default function ExamBoard({ student, exam, examSet }) {
         p_violation_logs: violationLogs,
       });
 
-      let correctCount, mcTotal;
-
       if (rpcError) {
-        // The RPC only exists once sql/002 has been applied. Rather than lose a
-        // student's paper mid-exam, fall back to the old client-side path.
-        // Delete this fallback — and this comment — once 003 has run, because
-        // after that the browser can no longer read correct_answer and this
-        // branch would silently record everyone as scoring zero.
-        console.error('submit_assessment unavailable, falling back:', rpcError.message);
-
-        const { data: answerKey } = await supabase.from('questions')
-          .select('id, correct_answer, question_type').eq('exam_id', exam.id);
-        correctCount = 0; mcTotal = 0;
-        const formattedAnswers = {};
-        (answerKey || []).forEach(qd => {
-          const qId = String(qd.id);
-          if ((qd.question_type || 'multiple_choice') === 'essay') {
-            const essayText = submittedEssayAnswers[qId];
-            if (essayText?.trim()) formattedAnswers[qId] = { type: 'essay', text: essayText.trim() };
-          } else {
-            mcTotal++;
-            if (submittedAnswers[qId] !== undefined) {
-              const isCorrect = Number(submittedAnswers[qId]) === Number(qd.correct_answer);
-              if (isCorrect) correctCount++;
-              formattedAnswers[qId] = { chosen: Number(submittedAnswers[qId]), is_correct: isCorrect };
-            }
-          }
-        });
-        const { error: saveError } = await supabase.from('results').insert([{
-          student_id: student?.id, exam_id: exam.id, answers_json: formattedAnswers,
-          score: correctCount, total_items: mcTotal,
-          time_taken_seconds: startingSeconds - timeLeft,
-          tab_switches: tabSwitchCount, violation_logs: violationLogs,
-        }]);
-        if (saveError && saveError.code !== '23505') throw saveError;
-      } else {
-        correctCount = outcome?.score ?? 0;
-        mcTotal = outcome?.total_items ?? 0;
-        setCanReviewAnswers(!!outcome?.can_review);
-        setAttemptNo(outcome?.attempt_no ?? 1);
+        // No client-side fallback any more: sql/003 revokes anon's access to
+        // correct_answer, so the browser cannot mark a paper even if it wanted
+        // to. Marking here would silently record everyone as zero, which is
+        // far worse than refusing. Fail loudly and keep the local copy so
+        // nothing the student typed is lost.
+        console.error('submit_assessment failed:', rpcError.message);
+        throw new Error(rpcError.message);
       }
+
+      const correctCount = outcome?.score ?? 0;
+      const mcTotal = outcome?.total_items ?? 0;
+      setCanReviewAnswers(!!outcome?.can_review);
+      setAttemptNo(outcome?.attempt_no ?? 1);
 
       // Essays are not marked server-side (there is nothing to mark against),
       // so they are attached to the stored row separately.
@@ -444,7 +417,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       Object.entries(submittedEssayAnswers).forEach(([qId, text]) => {
         if (text?.trim()) essayPayload[String(qId)] = { type: 'essay', text: text.trim() };
       });
-      if (!rpcError && Object.keys(essayPayload).length > 0) {
+      if (Object.keys(essayPayload).length > 0) {
         const { data: existing } = await supabase.from('results')
           .select('id, answers_json').eq('student_id', student?.id).eq('exam_id', exam.id).limit(1);
         if (existing?.[0]) {

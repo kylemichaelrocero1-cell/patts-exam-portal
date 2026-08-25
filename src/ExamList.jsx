@@ -52,46 +52,48 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         const alreadyScored = result.answers_json && Object.keys(result.answers_json).length > 0;
         if (alreadyScored) { localStorage.removeItem(key); continue; }
 
-        // Fetch questions to score
-        const { data: questions } = await supabase
-          .from('questions')
-          .select('id, correct_answer, question_type')
-          .eq('exam_id', examId);
-        if (!questions?.length) continue;
-
-        let correctCount = 0;
-        let mcTotal = 0;
-        const formattedAnswers = {};
-
-        questions.forEach(q => {
-          const qId = String(q.id);
-          if ((q.question_type || 'multiple_choice') === 'essay') {
-            const text = saved.essayAnswers?.[qId];
-            if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
-          } else {
-            mcTotal++;
-            const studentValue = saved.answers[qId];
-            if (studentValue !== undefined) {
-              const isCorrect = Number(studentValue) === Number(q.correct_answer);
-              if (isCorrect) correctCount++;
-              formattedAnswers[qId] = { chosen: Number(studentValue), is_correct: isCorrect };
-            }
-          }
+        // Re-score through the server. This used to fetch every correct_answer
+        // and mark in the browser; sql/003 revokes that access, so after it
+        // runs this path would mark everyone zero and quietly overwrite a
+        // recovered paper with a wrong score.
+        const { error: rpcErr } = await supabase.rpc('submit_assessment', {
+          p_student_id: student.id,
+          p_assessment_id: examId,
+          p_answers: Object.fromEntries(
+            Object.entries(saved.answers || {})
+              .filter(([, v]) => v !== undefined && v !== null)
+              .map(([k, v]) => [String(k), Number(v)])
+          ),
+          p_time_taken_seconds: null,
         });
+        if (rpcErr) { console.error('Recovery re-score failed:', rpcErr.message); continue; }
 
-        // Compute time_taken_seconds from localStorage endTime if result has none
+        // submit_assessment writes the row itself, so only the fields it does
+        // not own are patched here.
         let timeTaken = result.time_taken_seconds;
         if ((!timeTaken || timeTaken === 0) && saved.endTime && result.created_at) {
           const elapsed = Math.round((saved.endTime - new Date(result.created_at).getTime()) / 1000);
           if (elapsed > 0) timeTaken = elapsed;
         }
-
-        const updatePayload = {
-          score: correctCount,
-          total_items: mcTotal,
-          answers_json: formattedAnswers,
-        };
+        const updatePayload = {};
         if (timeTaken && timeTaken > 0) updatePayload.time_taken_seconds = timeTaken;
+
+        // Essays cannot be machine-marked, so merge them in alongside.
+        const essays = {};
+        Object.entries(saved.essayAnswers || {}).forEach(([qId, text]) => {
+          if (text?.trim()) essays[String(qId)] = { type: 'essay', text: text.trim() };
+        });
+        if (Object.keys(essays).length > 0) {
+          const { data: fresh } = await supabase.from('results')
+            .select('answers_json').eq('id', result.id).maybeSingle();
+          updatePayload.answers_json = { ...(fresh?.answers_json || {}), ...essays };
+        }
+
+        if (Object.keys(updatePayload).length === 0) {
+          localStorage.removeItem(key);
+          recovered++;
+          continue;
+        }
 
         const { error } = await supabase
           .from('results')

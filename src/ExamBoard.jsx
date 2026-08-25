@@ -4,6 +4,12 @@ import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
 
 export default function ExamBoard({ student, exam, examSet }) {
+  // Practice papers (unlimited retakes) still COUNT suspicious activity — the
+  // instructor wants that signal — but are never locked for it. Locking a
+  // revision paper the student can simply restart is pure friction, and it
+  // strands them behind a screen only an instructor can clear.
+  const isPractice = !!exam?.allow_retakes;
+
   const storageKey = `exam_progress_${student?.id}_${exam?.id}`;
   const startingSeconds = exam?.duration_minutes ? (exam.duration_minutes * 60) : 14400;
 
@@ -46,7 +52,11 @@ export default function ExamBoard({ student, exam, examSet }) {
   // --- LIVE PROCTORING STATES ---
   // Restored from localStorage so a locked student sees the lock screen immediately on
   // page refresh — no bypass window while waiting for initLiveSession to complete.
-  const [examStatus, setExamStatus] = useState(initialState.examStatus || 'active');
+  // A student locked on a practice paper before locking was disabled would
+  // otherwise stay stuck behind a screen only an instructor can clear, on a
+  // paper that is no longer supposed to lock at all.
+  const [examStatus, setExamStatus] = useState(
+    isPractice ? 'active' : (initialState.examStatus || 'active'));
   const [liveSessionId, setLiveSessionId] = useState(null);
 
   // Refs for anti-cheat deduplication (prevent blur+visibilitychange double-counting)
@@ -225,7 +235,10 @@ export default function ExamBoard({ student, exam, examSet }) {
             event: 'UPDATE', schema: 'public', table: 'live_sessions',
             filter: `id=eq.${currentSessionId}`
           }, payload => {
-            if (payload.new.status === 'locked') setExamStatus('locked');
+            // A practice paper is never locked, by the counter or by an
+            // instructor — there is nothing to protect and the student can
+            // just start it again.
+            if (payload.new.status === 'locked') { if (!isPractice) setExamStatus('locked'); }
             else if (payload.new.status === 'active') setExamStatus('active');
           })
           .subscribe();
@@ -501,9 +514,12 @@ export default function ExamBoard({ student, exam, examSet }) {
         pendingBlurRef.current = null;
       }
       logViolation("Tab hidden or switched to another app");
-      alertActiveRef.current = true;
-      alert("⚠️ SYSTEM WARNING: Tab switch detected.");
-      alertActiveRef.current = false;
+      // Counted either way; only a real exam interrupts the student for it.
+      if (!isPractice) {
+        alertActiveRef.current = true;
+        alert("⚠️ SYSTEM WARNING: Tab switch detected.");
+        alertActiveRef.current = false;
+      }
     };
 
     // Fires on both tab close AND page refresh.
@@ -525,7 +541,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       try {
         const saved = localStorage.getItem(storageKey);
         const progress = saved ? JSON.parse(saved) : {};
-        const shouldLock = finalCount > 0 && finalCount % 4 === 0;
+        const shouldLock = !isPractice && finalCount > 0 && finalCount % 4 === 0;
         localStorage.setItem(storageKey, JSON.stringify({
           ...progress,
           tabSwitchCount: finalCount,
@@ -557,7 +573,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       if (forbidden) {
         e.preventDefault();
         logViolation("Screenshot or Print shortcut attempted");
-        alert("⚠️ SECURITY VIOLATION: Screenshot/Print disabled.");
+        if (!isPractice) alert("⚠️ SECURITY VIOLATION: Screenshot/Print disabled.");
       }
     };
 
@@ -584,6 +600,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   useEffect(() => {
     tabSwitchCountRef.current = tabSwitchCount; // keep sync ref current (e.g. after server restore)
     if (
+      !isPractice &&
       tabSwitchCount > prevViolationCountRef.current &&
       tabSwitchCount % 4 === 0 &&
       !scoreDisplay &&
@@ -592,7 +609,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       setExamStatus('locked');
     }
     prevViolationCountRef.current = tabSwitchCount;
-  }, [tabSwitchCount, scoreDisplay, isSubmitting]);
+  }, [tabSwitchCount, scoreDisplay, isSubmitting, isPractice]);
 
   const formatTime = (seconds) => {
     const h = Math.floor(seconds / 3600).toString().padStart(2, '0');

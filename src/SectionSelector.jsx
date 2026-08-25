@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { selectAssessments, isAvailableNow, availabilityState } from './lib/assessments';
 
 export default function SectionSelector({ student, onSelect, onLogout }) {
   const [sections, setSections] = useState([]);
@@ -14,11 +14,17 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
   useEffect(() => {
     async function fetchSections() {
       try {
-        const { data, error } = await supabase.from('exams').select('target_section').eq('is_open', true);
-        if (error) throw error;
+        // Through the assessments reader, not the legacy exams table: mock
+        // exams exist only in assessments, so querying exams meant a section
+        // whose only material is mock exams — Pre-Boards PATTS — never showed
+        // up here, and the student could not get past this screen.
+        const data = await selectAssessments(q => q.eq('is_open', true));
         if (data) {
           const openSections = new Set();
           data.forEach(e => {
+            // A paper scheduled for later still counts: the section should be
+            // reachable so the student can see what is coming.
+            if (!isAvailableNow(e) && availabilityState(e) !== 'scheduled') return;
             if (e.target_section)
               e.target_section.split(',').map(s => s.trim()).filter(Boolean).forEach(s => openSections.add(s));
           });

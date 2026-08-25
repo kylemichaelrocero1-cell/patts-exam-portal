@@ -1190,17 +1190,20 @@ async function fetchDashboardData() {
       // Fetch shared exam data + outgoing shares + students + co-section exams in parallel
       const sharedExamIdsFromShares = [...new Set(inShares.map(s => s.exam_id))];
       const [sharedExamsRes, outSharesRes, studentsData, ...coSectionExamResults] = await Promise.all([
+        // Through the reader, so a shared or co-taught MOCK exam is found too —
+        // those live only in assessments and the legacy query missed them.
         sharedExamIdsFromShares.length > 0
-          ? supabase.from('exams').select('id, title, is_open, duration_minutes, target_section, exam_password').in('id', sharedExamIdsFromShares)
+          ? selectAssessments(q => q.in('id', sharedExamIdsFromShares), INSTRUCTOR_COLUMNS)
+              .then(data => ({ data, error: null }), error => ({ data: null, error }))
           : Promise.resolve({ data: [] }),
         supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
         fetchAllRows(() => supabase.from('users').select('id, full_name, section')),
         // For each co-managed section, fetch other instructors' exams targeting it
         ...coManagedSectionNames.map(sec =>
-          supabase.from('exams')
-            .select('id, title, is_open, duration_minutes, target_section, exam_password, instructor_id')
-            .ilike('target_section', `%${sec}%`)
-            .neq('instructor_id', instructorId)
+          selectAssessments(
+            q => q.ilike('target_section', `%${sec}%`).neq('instructor_id', instructorId),
+            INSTRUCTOR_COLUMNS,
+          ).then(data => ({ data, error: null }), error => ({ data: null, error }))
         ),
       ]);
 

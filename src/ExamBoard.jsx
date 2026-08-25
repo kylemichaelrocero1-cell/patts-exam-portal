@@ -604,7 +604,16 @@ export default function ExamBoard({ student, exam, examSet }) {
   useEffect(() => {
     async function loadQuestions() {
       if (!exam?.id) return;
-      const { data, error } = await supabase.from('questions').select('*').eq('exam_id', exam.id).order('id', { ascending: true });
+      // Explicit columns, never select('*'): anon is granted every column of
+      // questions EXCEPT correct_answer (sql/003), and a wildcard asks for the
+      // withheld column too, so PostgREST refuses the whole request and no
+      // student can load the paper at all.
+      const { data, error } = await supabase.from('questions')
+        .select('id, exam_id, assessment_id, question_number, question_text, ' +
+                'question_type, category, choice_a, choice_b, choice_c, choice_d, ' +
+                'image_url, created_at')
+        .eq('exam_id', exam.id)
+        .order('id', { ascending: true });
 
       if (error || !data || data.length === 0) {
         console.error("Error loading questions:", error);

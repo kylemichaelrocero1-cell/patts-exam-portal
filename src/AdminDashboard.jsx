@@ -10,6 +10,7 @@ const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
 // Pure presentation over data the dashboard already holds — no queries of its
 // own — but split out because it is a large view most sessions never open.
 const ClassReview = lazy(() => import('./dashboard/ClassReview'));
+const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -71,6 +72,7 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   // --- NEW: Create Exam States ---
 const [newTitle, setNewTitle] = useState('');
 const [targetSection, setTargetSection] = useState('');
+  const [reviewSettingsFor, setReviewSettingsFor] = useState(null);
   const [newKind, setNewKind] = useState('exam');          // 'exam' | 'seatwork'
   const [newOpensAt, setNewOpensAt] = useState('');        // datetime-local
   const [newClosesAt, setNewClosesAt] = useState('');
@@ -1979,6 +1981,17 @@ const deleteResult = async (studentId, examId) => {
           )}
 
           {/* --- RESULTS PANEL --- */}
+        {reviewSettingsFor && (
+          <Suspense fallback={null}>
+            <ReviewSettings
+              assessment={reviewSettingsFor}
+              sections={[...instructorSections, 'Pre-Boards PATTS']}
+              onClose={() => setReviewSettingsFor(null)}
+              onSaved={() => fetchDashboardData()}
+            />
+          </Suspense>
+        )}
+
         {activeView === 'class' && (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading class review…</div>}>
             <ClassReview
@@ -2308,6 +2321,17 @@ const deleteResult = async (studentId, examId) => {
                       )}
                     </button>
                     <button onClick={() => openExamStats(exam.id)} className="btn ghost sm"><Icon name="bar-chart" size={13} /></button>
+                    <button
+                      onClick={() => setReviewSettingsFor({
+                        ...exam,
+                        _resultCount: results.filter(r => r.exam_id === exam.id).length,
+                      })}
+                      className="btn ghost sm"
+                      title="Retakes, answer review, and duplicating as a mock exam"
+                      style={{ width: 'auto' }}
+                    >
+                      <Icon name="refresh" size={13} /> Review
+                    </button>
                     <button onClick={() => deleteExam(exam.id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
                   </div>
                 </td>

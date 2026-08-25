@@ -15,7 +15,7 @@
 */
 
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, IS_DEMO } from './supabase';
 import Icon from './components/Icon';   // PORTED: new icon component
 
 const MAX_ATTEMPTS = 3;
@@ -23,8 +23,10 @@ const LOCKOUT_SECONDS = 30;
 
 export default function Login({ onLogin }) {
   const [loginMode, setLoginMode] = useState('student');
-  const [email, setEmail] = useState('');
-  const [credential, setCredential] = useState('');
+  // Prefilled in the demo build so a student can get straight in; empty in the
+  // real build, where these must always be typed.
+  const [email, setEmail] = useState(IS_DEMO ? 'juan.delacruz@demo.local' : '');
+  const [credential, setCredential] = useState(IS_DEMO ? '2026-1-0001' : '');
   const [errorMsg, setErrorMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -37,6 +39,14 @@ export default function Login({ onLogin }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   const isInstructor = loginMode === 'instructor';
+
+  // Keep the demo prefill in step with the chosen role, so either tab is a
+  // single click away from a working session.
+  useEffect(() => {
+    if (!IS_DEMO) return;
+    if (loginMode === 'instructor') { setEmail('instructor@demo.local'); setCredential('demo'); }
+    else { setEmail('juan.delacruz@demo.local'); setCredential('2026-1-0001'); }
+  }, [loginMode]);
   const isLocked = lockoutUntil > Date.now();
 
   useEffect(() => {
@@ -167,6 +177,12 @@ export default function Login({ onLogin }) {
           <p style={{ margin: '6px auto 0', color: 'rgba(255,255,255,.7)', fontSize: 13.5, maxWidth: 380 }}>
             Sign in to access your lessons, seatwork and examinations.
           </p>
+          {IS_DEMO && (
+            <p style={{ margin: '10px auto 0', color: 'var(--gold-bright)', fontSize: 12.5, maxWidth: 420, lineHeight: 1.5 }}>
+              Demo credentials are filled in for you — just press <strong>Log in</strong>.
+              Instructor view: any email and password.
+            </p>
+          )}
         </div>
       </div>
 

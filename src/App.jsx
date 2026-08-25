@@ -1,11 +1,27 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabase';
+import { supabase, IS_DEMO } from './supabase';
 import Login from './Login';
 import StudentShell from './StudentShell';
 import ExamBoard from './ExamBoard';
 import SectionSelector from './SectionSelector';
 import AdminDashboard from './AdminDashboard';
 import './index.css';
+
+// A standing reminder that nothing here is real, so a student never mistakes
+// the practice portal for the one their marks come from.
+function DemoRibbon() {
+  if (!IS_DEMO) return null;
+  return (
+    <div style={{
+      background: 'var(--gold)', color: 'var(--navy-dark)',
+      padding: '7px 16px', textAlign: 'center',
+      fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em',
+      position: 'sticky', top: 0, zIndex: 9999,
+    }}>
+      PRACTICE DEMO — sample data only. Nothing you do here is saved or graded.
+    </div>
+  );
+}
 
 export default function App() {
   const [student, setStudent] = useState(null);
@@ -86,62 +102,73 @@ export default function App() {
     setExamSet(null);
   };
 
-  // getSession() is async — render nothing until it resolves, or a restored
-  // instructor sees the login form flash before the dashboard appears.
-  if (isRestoring) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        background: 'var(--paper, #F7F8FA)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <img
-          src="/patts-logo.png"
-          alt="PATTS College of Aeronautics"
-          style={{ height: 56, width: 'auto', objectFit: 'contain', opacity: 0.5 }}
+  // All the routing lives in here so the demo ribbon can wrap it once rather
+  // than being repeated before every early return.
+  const route = () => {
+    // getSession() is async — render nothing until it resolves, or a restored
+    // instructor sees the login form flash before the dashboard appears.
+    if (isRestoring) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          background: 'var(--paper, #F7F8FA)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <img
+            src="/patts-logo.png"
+            alt="PATTS College of Aeronautics"
+            style={{ height: 56, width: 'auto', objectFit: 'contain', opacity: 0.5 }}
+          />
+        </div>
+      );
+    }
+
+    // Admin via Supabase Auth (student.role set in Login.jsx)
+    if (student?.role === 'admin') {
+      return <AdminDashboard instructorId={student.id} instructorName={student.full_name} onLogout={handleLogout} />;
+    }
+
+    if (!student) {
+      return <Login onLogin={setStudent} />;
+    }
+
+    if (!selectedSection) {
+      return (
+        <SectionSelector
+          student={student}
+          onSelect={setSelectedSection}
+          onLogout={handleLogout}
         />
-      </div>
-    );
-  }
+      );
+    }
 
-  // Admin via Supabase Auth (student.role set in Login.jsx)
-  if (student?.role === 'admin') {
-    return <AdminDashboard instructorId={student.id} instructorName={student.full_name} onLogout={handleLogout} />;
-  }
+    if (!selectedExam) {
+      // StudentShell owns the header and the Summary / Lessons / Seatwork /
+      // Exams tabs, and renders ExamList inside itself.
+      return (
+        <StudentShell
+          student={student}
+          selectedSection={selectedSection}
+          onStartExam={(exam, set) => { setSelectedExam(exam); setExamSet(set || null); }}
+          onLogout={handleLogout}
+        />
+      );
+    }
 
-  if (!student) {
-    return <Login onLogin={setStudent} />;
-  }
-
-  if (!selectedSection) {
     return (
-      <SectionSelector
+      <ExamBoard
+        exam={selectedExam}
+        examSet={examSet}
         student={student}
-        onSelect={setSelectedSection}
-        onLogout={handleLogout}
+        onFinish={() => { setSelectedExam(null); setExamSet(null); }}
       />
     );
-  }
-
-  if (!selectedExam) {
-    // StudentShell owns the header and the Lessons / Exams & Seatwork tabs, and
-    // renders ExamList inside itself.
-    return (
-      <StudentShell
-        student={student}
-        selectedSection={selectedSection}
-        onStartExam={(exam, set) => { setSelectedExam(exam); setExamSet(set || null); }}
-        onLogout={handleLogout}
-      />
-    );
-  }
+  };
 
   return (
-    <ExamBoard
-      exam={selectedExam}
-      examSet={examSet}
-      student={student}
-      onFinish={() => { setSelectedExam(null); setExamSet(null); }}
-    />
+    <>
+      <DemoRibbon />
+      {route()}
+    </>
   );
 }

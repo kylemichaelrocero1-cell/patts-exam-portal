@@ -13,6 +13,7 @@ const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
 // own — but split out because it is a large view most sessions never open.
 const ClassReview = lazy(() => import('./dashboard/ClassReview'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
+const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -45,6 +46,10 @@ export default function AdminDashboard({ instructorId, instructorName, onLogout 
 
   // Data States
   const [results, setResults] = useState([]);
+  // Retakeable papers write to review_attempts, never results (results carries
+  // UNIQUE(student_id, exam_id) and must stay the graded record). Class Review
+  // has to see both or a whole cohort of mock exams reads as "nothing submitted".
+  const [practiceAttempts, setPracticeAttempts] = useState([]);
   const [examsList, setExamsList] = useState([]); // Holds full exam data for the Manage tab
   const [examsDict, setExamsDict] = useState({}); // Holds just titles for the Results tab
   const [students, setStudents] = useState({});
@@ -1239,6 +1244,16 @@ async function fetchDashboardData() {
             .in('exam_id', allExamIds))
         : [];
 
+      // Every attempt on a retakeable paper. Kept out of `results` state on
+      // purpose: the Results tab edits and deletes rows in the results table,
+      // and an attempt row has no home there. Class Review folds them in.
+      const attemptsData = allExamIds.length > 0
+        ? await fetchAllRows(() => supabase.from('review_attempts')
+            .select('student_id, assessment_id, attempt_no, score, total_items, time_taken_seconds, submitted_at')
+            .in('assessment_id', allExamIds))
+            .catch(err => { console.error('Could not load practice attempts:', err); return []; })
+        : [];
+
       // Process own exam metadata
       const dict = {}, times = {}, secs = {}, passwords = {}, titles = {};
       examsData.forEach(e => {
@@ -1301,6 +1316,7 @@ async function fetchDashboardData() {
       setEditingStudentSections(studentSecs);
       setStudents(studentDict);
       setResults(resultsData || []);
+      setPracticeAttempts(attemptsData || []);
     } catch (error) {
       console.error("Error loading dashboard:", error);
     } finally {
@@ -1796,6 +1812,7 @@ const deleteResult = async (studentId, examId) => {
             { id: 'home',       label: 'Overview',     icon: 'home' },
             { id: 'class',      label: 'Class Review',  icon: 'graduation' },
             { id: 'results',    label: 'Results',       icon: 'bar-chart' },
+            { id: 'practice',   label: 'Practice Results', icon: 'refresh' },
             { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
             { id: 'lessons',    label: 'Lessons',       icon: 'book' },
             { id: 'students',   label: 'Students',      icon: 'users' },
@@ -1895,6 +1912,7 @@ const deleteResult = async (studentId, examId) => {
               home: 'Overview',
               class: 'Class Review',
               results: 'Results',
+              practice: 'Practice Results',
               manage: 'Manage Exams',
               lessons: 'Lessons',
               students: 'Students',
@@ -2019,6 +2037,18 @@ const deleteResult = async (studentId, examId) => {
             <ClassReview
               studentsList={studentsList}
               results={results}
+              practiceAttempts={practiceAttempts}
+              examsList={examsList}
+            />
+          </Suspense>
+        )}
+
+        {activeView === 'practice' && (
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading practice results…</div>}>
+            <PracticeResults
+              attempts={practiceAttempts}
+              students={students}
+              examsDict={examsDict}
               examsList={examsList}
             />
           </Suspense>

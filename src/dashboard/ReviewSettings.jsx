@@ -9,12 +9,6 @@ import { supabase } from '../supabase';
 // still mark hands students the key. So the destructive-feeling option is the
 // one that is loud, and the safe path — duplicating — is the one put forward.
 
-const POLICIES = [
-  ['first',   'First attempt',  'The score they got on their first try.'],
-  ['latest',  'Latest attempt', 'Their most recent score. Best for tracking revision.'],
-  ['highest', 'Best attempt',   'Their highest score across all attempts.'],
-];
-
 // Defined at module scope: a component created inside render is a new type on
 // every pass, which remounts its subtree and loses focus mid-typing.
 function ToggleRow({ on, set, label, hint, danger }) {
@@ -38,7 +32,9 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   const a = assessment;
   const [retakes, setRetakes] = useState(!!a.allow_retakes);
   const [answers, setAnswers] = useState(!!a.show_answers);
-  const [policy, setPolicy] = useState(a.score_policy || 'first');
+  // Kept as-is on save so an existing paper's stored policy is not silently
+  // rewritten; nothing in the dashboard reads it any more.
+  const policy = a.score_policy || 'latest';
   const [busy, setBusy] = useState(false);
 
   const [dupOpen, setDupOpen] = useState(false);
@@ -113,19 +109,16 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
           hint="After a student submits, they can see which questions they got right and what the correct answer was. Only ever switch this on for practice material."
         />
 
+        {/* The which-attempt-counts picker is gone: the dashboard no longer
+            chooses one. Class Review shows the latest attempt — where the
+            student stands today — and Practice Results shows first, latest,
+            best and the whole history. score_policy stays in the database for
+            the assessment_scores view, set to 'latest' on new mock copies. */}
         {retakes && (
-          <div style={{ marginTop: 6, marginBottom: 4 }}>
-            <label className="label">Which attempt should I see in Results?</label>
-            {POLICIES.map(([id, label, hint]) => (
-              <label key={id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 12px', cursor: 'pointer' }}>
-                <input type="radio" name="policy" checked={policy === id} onChange={() => setPolicy(id)} style={{ marginTop: 3 }} />
-                <span>
-                  <span style={{ fontWeight: 600, fontSize: 13.5 }}>{label}</span>
-                  <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-4)' }}>{hint}</span>
-                </span>
-              </label>
-            ))}
-          </div>
+          <p style={{ margin: '2px 2px 10px', fontSize: 12.5, color: 'var(--ink-4)', lineHeight: 1.55 }}>
+            Class Review will show each student's <strong>latest</strong> attempt on this paper.
+            Every attempt is listed in the Practice Results tab.
+          </p>
         )}
 
         <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '18px 0' }} />

@@ -5,6 +5,12 @@ import Icon from '../components/Icon';
 // who hasn't submitted, who is struggling, and how did the class do on each
 // assessment. Everything is derived from data AdminDashboard already holds, so
 // this view issues no queries of its own.
+//
+// Two sources of scores, not one. A paper with retakes on never writes to
+// `results` — every sitting lands in `review_attempts` — so a section made up
+// of mock exams used to read as "nothing submitted" no matter how many students
+// had sat them. A retakeable paper shows its LATEST attempt, which is where the
+// student actually stands today; the full history is in the Practice Results tab.
 
 const PASS = 75;
 
@@ -29,7 +35,12 @@ function Stat({ label, value, sub, tone }) {
   );
 }
 
-export default function ClassReview({ studentsList, results, examsList }) {
+// Where the student stands now: the most recent sitting.
+function latestAttempt(attempts) {
+  return attempts.reduce((best, a) => (!best || a.attempt_no > best.attempt_no ? a : best), null);
+}
+
+export default function ClassReview({ studentsList, results, practiceAttempts, examsList }) {
   const [section, setSection] = useState('');
   const [sort, setSort] = useState('name');
 
@@ -54,15 +65,30 @@ export default function ClassReview({ studentsList, results, examsList }) {
     (e.target_section || '').split(',').map(x => x.trim()).includes(active)
   ), [examsList, active]);
 
-  // student_id -> exam_id -> result
+  // student_id -> exam_id -> { score, total_items, is_practice, attempts }
   const byStudent = useMemo(() => {
     const m = new Map();
-    (results || []).forEach(r => {
-      if (!m.has(r.student_id)) m.set(r.student_id, new Map());
-      m.get(r.student_id).set(r.exam_id, r);
+    const put = (studentId, examId, row) => {
+      if (!m.has(studentId)) m.set(studentId, new Map());
+      m.get(studentId).set(examId, row);
+    };
+
+    // Practice first, so a graded result always wins if a paper somehow has both.
+    const grouped = new Map(); // `${student}|${assessment}` -> attempt rows
+    (practiceAttempts || []).forEach(a => {
+      const key = `${a.student_id}|${a.assessment_id}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(a);
     });
+    grouped.forEach(list => {
+      const { student_id, assessment_id } = list[0];
+      const shown = latestAttempt(list);
+      put(student_id, assessment_id, { ...shown, is_practice: true, attempts: list.length });
+    });
+
+    (results || []).forEach(r => put(r.student_id, r.exam_id, { ...r, is_practice: false, attempts: 1 }));
     return m;
-  }, [results]);
+  }, [results, practiceAttempts]);
 
   const rows = useMemo(() => roster.map(s => {
     const mine = byStudent.get(s.student_id ?? s.id) || new Map();
@@ -235,6 +261,11 @@ export default function ClassReview({ studentsList, results, examsList }) {
                     return (
                       <td key={it.id} style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: toneFor(p) }}>
                         {res ? (p === null ? `${res.score}/${res.total_items}` : `${Math.round(p)}%`) : '—'}
+                        {res && res.attempts > 1 && (
+                          <span title={`Latest of ${res.attempts} attempts`} style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 3 }}>
+                            ×{res.attempts}
+                          </span>
+                        )}
                       </td>
                     );
                   })}
@@ -255,7 +286,9 @@ export default function ClassReview({ studentsList, results, examsList }) {
 
       <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '10px 2px 0' }}>
         — means not submitted. Averages count only graded submissions, so an
-        unsubmitted assessment does not read as a zero.
+        unsubmitted assessment does not read as a zero. On a paper with retakes
+        on, the score shown is the student's latest attempt and ×n is how many
+        times they have sat it — the full history is in Practice Results.
       </p>
     </div>
   );

@@ -254,7 +254,23 @@ console.log('\n=== 004: MOCK EXAM CREATION ===');
   ck('no original made retakeable', orig[0].ar===0);
   ck('originals keep their own open/closed state', orig[0].o===1, String(orig[0].o));
 
-  // idempotency
+  // 005 renames copies made before the naming changed. Applied here to an
+  // already-correct set, it must be a no-op — that is what makes it safe to
+  // run on a database where 004 was applied after the rename.
+  const beforeRename = (await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE '%Mock Exam %'`))[0].c;
+  await x(`UPDATE public.assessments SET title = 'Mock Exam Powerplant 9'
+           WHERE title = 'Powerplant Mock Exam 1'`);
+  await x(fs.readFileSync(P+'/sql/005_rename_mock_exams.sql','utf8'));
+  const renamed = await q(`SELECT count(*)::int c FROM public.assessments WHERE title='Powerplant Mock Exam 9'`);
+  ck('005 flips an old-style name', renamed[0].c===1);
+  const leftovers = await q(`SELECT count(*)::int c FROM public.assessments WHERE title ~ '^Mock Exam .+ [0-9]+$'`);
+  ck('no old-style names remain', leftovers[0].c===0);
+  await x(fs.readFileSync(P+'/sql/005_rename_mock_exams.sql','utf8'));
+  const after = (await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE '%Mock Exam %'`))[0].c;
+  ck('005 is a no-op when already renamed', after===beforeRename, `${after} vs ${beforeRename}`);
+  await x(`UPDATE public.assessments SET title='Powerplant Mock Exam 1' WHERE title='Powerplant Mock Exam 9'`);
+
+  // idempotency of 004 itself
   await x(fs.readFileSync(P+'/sql/004_create_mock_exams.sql','utf8'));
   const again=await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE '%Mock Exam %'`);
   ck('re-running creates no duplicates', again[0].c===expectCopies, String(again[0].c));

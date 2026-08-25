@@ -1,41 +1,60 @@
 -- =====================================================================
--- PHASE 5a — review mode, unlimited retakes, server-side scoring
+-- PHASE 5a — retakes, answer review, server-side scoring
 -- Run in the Supabase SQL editor. Idempotent; safe to re-run.
 --
--- ADDITIVE ONLY. Nothing is dropped, no grant is revoked, and the
--- currently deployed app keeps working untouched. The revoke that
--- actually closes the answer-key hole lives in 003, which must not be
--- run until the new app is deployed — see the note at the bottom.
+-- ADDITIVE ONLY. Nothing is dropped, no grant is revoked, no existing
+-- paper is opened or altered, and the deployed app keeps working.
+-- The revoke that closes the answer-key hole is 003, which must not run
+-- until the new app is deployed.
 --
 -- WHAT THIS ADDS
---   1. assessments.allow_review — unlimited retakes + answers revealed.
---   2. review_attempts — every practice take. Deliberately NOT results:
---      results is the graded record, has UNIQUE(student_id, exam_id) so
---      it physically cannot hold retakes, and practice scores must never
---      move a student's real average or the Class Review numbers.
---   3. submit_exam() / submit_review_attempt() — scoring moves to the
---      server so the answer key no longer has to be shipped to the
---      browser. Today ExamBoard.jsx fetches every correct_answer to mark
---      the paper client-side, which is why the key is currently readable
---      by anyone with the anon key.
---   4. get_attempt_review() — lets a student re-open a past attempt and
---      see which ones they got wrong.
---   5. The Pre-Boards PATTS cohort and its review material.
+--   1. Three per-assessment switches the instructor controls:
+--        allow_retakes — unlimited attempts
+--        show_answers  — reveal correct answers AFTER submitting
+--        score_policy  — which attempt the instructor is shown
+--      All default OFF / 'first', so every existing paper keeps behaving
+--      exactly as it does today. Nothing becomes reviewable by accident.
+--   2. review_attempts — every retake. Deliberately NOT results: results
+--      is the graded record, carries UNIQUE(student_id, exam_id) so it
+--      cannot hold retakes, and practice must never move a real average.
+--   3. Server-side marking, so the answer key stops being shipped to the
+--      browser. Correct answers reach a student only through
+--      get_answer_review(), only on a paper with show_answers on, and
+--      only after they have submitted.
+--   4. assessment_scores — one clean row per student per assessment,
+--      honouring score_policy, so instructor views do not have to deal
+--      with hundreds of attempt rows.
+--   5. duplicate_assessment() — makes the mock-exam copies.
+--   6. The Pre-Boards PATTS cohort.
 -- =====================================================================
 
 BEGIN;
 
 -- ---------------------------------------------------------------------
--- 1. Review flag
+-- 1. Per-assessment switches
 -- ---------------------------------------------------------------------
 ALTER TABLE public.assessments
-  ADD COLUMN IF NOT EXISTS allow_review boolean NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS allow_retakes boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS show_answers  boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS score_policy  text    NOT NULL DEFAULT 'first';
 
-COMMENT ON COLUMN public.assessments.allow_review IS
-  'Unlimited retakes, and correct answers revealed after submitting. Never enable on a paper still being used for marks.';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='assessments_score_policy_chk') THEN
+    ALTER TABLE public.assessments ADD CONSTRAINT assessments_score_policy_chk
+      CHECK (score_policy IN ('first','latest','highest'));
+  END IF;
+END $$;
+
+COMMENT ON COLUMN public.assessments.allow_retakes IS
+  'Unlimited attempts. Off for real exams.';
+COMMENT ON COLUMN public.assessments.show_answers IS
+  'Reveal correct answers after a student submits. NEVER switch on for a paper still being used for marks — it hands over the key.';
+COMMENT ON COLUMN public.assessments.score_policy IS
+  'Which attempt the instructor is shown when retakes are on: first, latest or highest.';
 
 -- ---------------------------------------------------------------------
--- 2. review_attempts — practice takes, kept away from the graded record
+-- 2. review_attempts
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.review_attempts (
   id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -50,54 +69,73 @@ CREATE TABLE IF NOT EXISTS public.review_attempts (
   CONSTRAINT review_attempts_no_key UNIQUE (student_id, assessment_id, attempt_no)
 );
 
-CREATE INDEX IF NOT EXISTS review_attempts_student_idx
-  ON public.review_attempts (student_id, assessment_id, submitted_at DESC);
-
-COMMENT ON TABLE public.review_attempts IS
-  'Practice retakes. Separate from results on purpose: results is the graded record and must not be moved by revision.';
+CREATE INDEX IF NOT EXISTS review_attempts_lookup_idx
+  ON public.review_attempts (assessment_id, student_id, attempt_no);
 
 -- ---------------------------------------------------------------------
--- 3. Scoring, server-side
+-- 2b. Point the child foreign keys at assessments
 -- ---------------------------------------------------------------------
--- Shared marker. p_answers is { "<question_id>": <chosen index 0-3> }.
--- Returns the stored answers_json shape the dashboard already renders
--- ({ chosen, is_correct }), so existing views keep working unchanged.
+-- questions.exam_id, results.exam_id and live_sessions.exam_id still
+-- reference public.exams. That was fine while every assessment was a
+-- mirrored exam, but a mock exam created directly in assessments has no
+-- exams row, so inserting its questions — or a student's submission —
+-- fails the constraint.
+--
+-- Repointing at assessments is safe: migration 001 copied every exam
+-- across preserving its id, and the sync trigger keeps them in step, so
+-- no existing row can violate the new target. It is also a step the
+-- cutover needs regardless, since exams is eventually renamed away.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.conname, t.relname AS tbl
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_class f ON f.oid = c.confrelid
+    WHERE c.contype = 'f'
+      AND f.relname = 'exams'
+      AND t.relname IN ('questions','results','live_sessions')
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I DROP CONSTRAINT %I', r.tbl, r.conname);
+    EXECUTE format(
+      'ALTER TABLE public.%I ADD CONSTRAINT %I FOREIGN KEY (exam_id) '
+      'REFERENCES public.assessments(id) ON DELETE CASCADE', r.tbl, r.conname);
+    RAISE NOTICE 'repointed %.% -> assessments', r.tbl, r.conname;
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------
+-- 3. Marking, server-side
+-- ---------------------------------------------------------------------
+-- p_answers is { "<question_id>": <chosen index 0-3> }. Returns the stored
+-- shape the dashboard already renders, so existing views keep working.
 CREATE OR REPLACE FUNCTION public.score_answers(
-  p_assessment_id uuid,
-  p_answers       jsonb
+  p_assessment_id uuid, p_answers jsonb
 ) RETURNS TABLE (score int, total_items int, answers_json jsonb)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   WITH mc AS (
-    SELECT q.id, q.correct_answer
-    FROM public.questions q
+    SELECT q.id, q.correct_answer FROM public.questions q
     WHERE q.exam_id = p_assessment_id
-      AND coalesce(q.question_type, 'multiple_choice') <> 'essay'
-  ),
-  marked AS (
-    SELECT mc.id,
-           (p_answers ->> mc.id::text) AS chosen_raw,
-           CASE
-             WHEN (p_answers ->> mc.id::text) IS NULL THEN NULL
-             ELSE ((p_answers ->> mc.id::text)::int = mc.correct_answer)
-           END AS is_correct
+      AND coalesce(q.question_type,'multiple_choice') <> 'essay'
+  ), marked AS (
+    SELECT mc.id, (p_answers ->> mc.id::text) AS chosen_raw,
+           CASE WHEN (p_answers ->> mc.id::text) IS NULL THEN NULL
+                ELSE ((p_answers ->> mc.id::text)::int = mc.correct_answer) END AS is_correct
     FROM mc
   )
-  SELECT
-    coalesce(count(*) FILTER (WHERE is_correct), 0)::int,
-    (SELECT count(*) FROM mc)::int,
-    coalesce(
-      jsonb_object_agg(
-        id::text,
-        jsonb_build_object('chosen', chosen_raw::int, 'is_correct', is_correct)
-      ) FILTER (WHERE chosen_raw IS NOT NULL),
-      '{}'::jsonb
-    )
+  SELECT coalesce(count(*) FILTER (WHERE is_correct),0)::int,
+         (SELECT count(*) FROM mc)::int,
+         coalesce(jsonb_object_agg(id::text,
+           jsonb_build_object('chosen', chosen_raw::int, 'is_correct', is_correct)
+         ) FILTER (WHERE chosen_raw IS NOT NULL), '{}'::jsonb)
   FROM marked;
 $$;
 
--- Official submission. Writes the graded record, once per student per
--- assessment, mirroring the existing UNIQUE constraint.
-CREATE OR REPLACE FUNCTION public.submit_exam(
+-- One entry point for every submission. Routes to review_attempts when
+-- retakes are on, and to the graded results table when they are not, so the
+-- client never has to know which table it is writing to.
+CREATE OR REPLACE FUNCTION public.submit_assessment(
   p_student_id         uuid,
   p_assessment_id      uuid,
   p_answers            jsonb,
@@ -106,138 +144,211 @@ CREATE OR REPLACE FUNCTION public.submit_exam(
   p_violation_logs     jsonb   DEFAULT '[]'::jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
-DECLARE s int; t int; a jsonb;
+DECLARE s int; t int; a jsonb; n int; retakes boolean; reveal boolean;
 BEGIN
+  SELECT allow_retakes, show_answers INTO retakes, reveal
+  FROM public.assessments WHERE id = p_assessment_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Unknown assessment'; END IF;
+
   SELECT score, total_items, answers_json INTO s, t, a
   FROM public.score_answers(p_assessment_id, p_answers);
 
-  INSERT INTO public.results
-    (student_id, exam_id, assessment_id, score, total_items, answers_json,
-     time_taken_seconds, tab_switches, violation_logs, submitted_at)
-  VALUES
-    (p_student_id, p_assessment_id, p_assessment_id, s, t, a,
-     p_time_taken_seconds, coalesce(p_tab_switches, 0),
-     coalesce(p_violation_logs, '[]'::jsonb), now())
-  ON CONFLICT ON CONSTRAINT results_student_exam_key DO NOTHING;
+  IF retakes THEN
+    SELECT coalesce(max(attempt_no),0)+1 INTO n FROM public.review_attempts
+    WHERE student_id = p_student_id AND assessment_id = p_assessment_id;
 
-  RETURN jsonb_build_object('score', s, 'total_items', t);
-END $$;
-
--- Practice submission. Unlimited, and only where review is switched on.
-CREATE OR REPLACE FUNCTION public.submit_review_attempt(
-  p_student_id         uuid,
-  p_assessment_id      uuid,
-  p_answers            jsonb,
-  p_time_taken_seconds integer DEFAULT NULL
-) RETURNS jsonb
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
-DECLARE s int; t int; a jsonb; n int; new_id uuid;
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM public.assessments
-    WHERE id = p_assessment_id AND allow_review
-  ) THEN
-    RAISE EXCEPTION 'Review is not enabled for this assessment';
+    INSERT INTO public.review_attempts
+      (student_id, assessment_id, attempt_no, score, total_items, answers_json, time_taken_seconds)
+    VALUES (p_student_id, p_assessment_id, n, s, t, a, p_time_taken_seconds);
+  ELSE
+    n := 1;
+    INSERT INTO public.results
+      (student_id, exam_id, assessment_id, score, total_items, answers_json,
+       time_taken_seconds, tab_switches, violation_logs, submitted_at)
+    VALUES (p_student_id, p_assessment_id, p_assessment_id, s, t, a,
+            p_time_taken_seconds, coalesce(p_tab_switches,0),
+            coalesce(p_violation_logs,'[]'::jsonb), now())
+    ON CONFLICT ON CONSTRAINT results_student_exam_key DO NOTHING;
   END IF;
 
-  SELECT score, total_items, answers_json INTO s, t, a
-  FROM public.score_answers(p_assessment_id, p_answers);
-
-  SELECT coalesce(max(attempt_no), 0) + 1 INTO n
-  FROM public.review_attempts
-  WHERE student_id = p_student_id AND assessment_id = p_assessment_id;
-
-  INSERT INTO public.review_attempts
-    (student_id, assessment_id, attempt_no, score, total_items, answers_json, time_taken_seconds)
-  VALUES (p_student_id, p_assessment_id, n, s, t, a, p_time_taken_seconds)
-  RETURNING id INTO new_id;
-
-  RETURN jsonb_build_object('attempt_id', new_id, 'attempt_no', n, 'score', s, 'total_items', t);
+  RETURN jsonb_build_object(
+    'score', s, 'total_items', t, 'attempt_no', n, 'can_review', reveal
+  );
 END $$;
 
--- The only route to a correct answer. Returns the key for one attempt the
--- student has already submitted, and only on a review-enabled assessment —
--- so answers can never be pulled before sitting the paper.
-CREATE OR REPLACE FUNCTION public.get_attempt_review(
-  p_attempt_id uuid
+-- The ONLY route to a correct answer. Refuses unless the paper has
+-- show_answers on AND this student has already submitted it, so the key
+-- can never be pulled before or during a sitting.
+CREATE OR REPLACE FUNCTION public.get_answer_review(
+  p_student_id    uuid,
+  p_assessment_id uuid,
+  p_attempt_no    integer DEFAULT NULL   -- null = most recent
 ) RETURNS jsonb
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT coalesce(jsonb_agg(x ORDER BY x->>'question_number'), '[]'::jsonb)
-  FROM (
-    SELECT jsonb_build_object(
-             'question_id',     q.id,
-             'question_number', q.question_number,
-             'question_text',   q.question_text,
-             'choices',    jsonb_build_array(q.choice_a, q.choice_b, q.choice_c, q.choice_d),
-             'correct',    q.correct_answer,
-             'chosen',     (ra.answers_json -> q.id::text ->> 'chosen')::int,
-             'is_correct', coalesce((ra.answers_json -> q.id::text ->> 'is_correct')::boolean, false)
-           ) AS x
-    FROM public.review_attempts ra
-    JOIN public.assessments a ON a.id = ra.assessment_id AND a.allow_review
-    JOIN public.questions   q ON q.exam_id = ra.assessment_id
-    WHERE ra.id = p_attempt_id
-      AND coalesce(q.question_type, 'multiple_choice') <> 'essay'
-  ) s;
-$$;
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE reveal boolean; ans jsonb;
+BEGIN
+  SELECT show_answers INTO reveal FROM public.assessments WHERE id = p_assessment_id;
+  IF NOT coalesce(reveal, false) THEN
+    RAISE EXCEPTION 'Answers are not available for this assessment';
+  END IF;
 
-GRANT EXECUTE ON FUNCTION public.submit_exam(uuid, uuid, jsonb, integer, integer, jsonb) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.submit_review_attempt(uuid, uuid, jsonb, integer)        TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.get_attempt_review(uuid)                                  TO anon, authenticated;
--- score_answers is an internal helper; it is never called directly by the client.
-REVOKE EXECUTE ON FUNCTION public.score_answers(uuid, jsonb) FROM anon;
+  SELECT ra.answers_json INTO ans
+  FROM public.review_attempts ra
+  WHERE ra.student_id = p_student_id AND ra.assessment_id = p_assessment_id
+    AND (p_attempt_no IS NULL OR ra.attempt_no = p_attempt_no)
+  ORDER BY ra.attempt_no DESC LIMIT 1;
+
+  IF ans IS NULL THEN
+    SELECT r.answers_json INTO ans FROM public.results r
+    WHERE r.student_id = p_student_id AND r.assessment_id = p_assessment_id;
+  END IF;
+
+  IF ans IS NULL THEN
+    RAISE EXCEPTION 'Submit this assessment before viewing the answers';
+  END IF;
+
+  RETURN (
+    SELECT coalesce(jsonb_agg(x ORDER BY (x->>'question_number')::int NULLS LAST), '[]'::jsonb)
+    FROM (
+      SELECT jsonb_build_object(
+        'question_id', q.id, 'question_number', q.question_number,
+        'question_text', q.question_text,
+        'choices', jsonb_build_array(q.choice_a,q.choice_b,q.choice_c,q.choice_d),
+        'correct', q.correct_answer,
+        'chosen', (ans -> q.id::text ->> 'chosen')::int,
+        'is_correct', coalesce((ans -> q.id::text ->> 'is_correct')::boolean, false)
+      ) AS x
+      FROM public.questions q
+      WHERE q.exam_id = p_assessment_id
+        AND coalesce(q.question_type,'multiple_choice') <> 'essay'
+    ) s
+  );
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.submit_assessment(uuid,uuid,jsonb,integer,integer,jsonb) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_answer_review(uuid,uuid,integer)                      TO anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.score_answers(uuid,jsonb) FROM anon;
 
 -- ---------------------------------------------------------------------
--- 4. RLS for review_attempts
+-- 4. One clean row per student per assessment
 -- ---------------------------------------------------------------------
--- Follows the existing posture: students are not in Supabase Auth, so rows
--- cannot be scoped per student. Writes go through the RPC above rather than
--- a direct INSERT grant, which is a little tighter than results.
+-- Retakes would otherwise flood the instructor's Results and Class Review
+-- with hundreds of rows. This collapses them to the single attempt
+-- score_policy asks for, and exposes attempt_count alongside.
+CREATE OR REPLACE VIEW public.assessment_scores AS
+WITH ranked AS (
+  SELECT ra.*, a.score_policy,
+         row_number() OVER (
+           PARTITION BY ra.student_id, ra.assessment_id
+           ORDER BY CASE a.score_policy
+                      WHEN 'first'   THEN ra.attempt_no
+                      WHEN 'latest'  THEN -ra.attempt_no
+                      WHEN 'highest' THEN -ra.score
+                    END,
+                    ra.attempt_no
+         ) AS pick,
+         count(*) OVER (PARTITION BY ra.student_id, ra.assessment_id) AS attempts
+  FROM public.review_attempts ra
+  JOIN public.assessments a ON a.id = ra.assessment_id
+)
+SELECT student_id, assessment_id, score, total_items, answers_json,
+       time_taken_seconds, submitted_at,
+       attempts::int AS attempt_count, attempt_no AS shown_attempt_no,
+       true AS is_retake
+FROM ranked WHERE pick = 1
+UNION ALL
+SELECT r.student_id, r.assessment_id, r.score, r.total_items, r.answers_json,
+       r.time_taken_seconds, r.submitted_at,
+       1 AS attempt_count, 1 AS shown_attempt_no,
+       false AS is_retake
+FROM public.results r
+WHERE r.assessment_id IS NOT NULL;
+
+GRANT SELECT ON public.assessment_scores TO anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 5. Mock-exam copies
+-- ---------------------------------------------------------------------
+-- Copies a paper and its questions into a new assessment. Used to turn the
+-- revalida / diagnostic / pretest papers into "Mock Exam ..." practice
+-- versions, so the originals are never opened or made reviewable.
+CREATE OR REPLACE FUNCTION public.duplicate_assessment(
+  p_source_id      uuid,
+  p_new_title      text,
+  p_target_section text,
+  p_allow_retakes  boolean DEFAULT true,
+  p_show_answers   boolean DEFAULT true,
+  p_score_policy   text    DEFAULT 'latest'
+) RETURNS uuid
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
+DECLARE new_id uuid;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Not authenticated'; END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.assessments a
+    WHERE a.id = p_source_id
+      AND (a.instructor_id = auth.uid()
+           OR EXISTS (SELECT 1 FROM public.exam_shares s
+                      WHERE s.exam_id = a.id AND s.shared_with = auth.uid()))
+  ) THEN
+    RAISE EXCEPTION 'You do not have access to this assessment';
+  END IF;
+
+  -- Created closed. Open it deliberately once the copy looks right.
+  INSERT INTO public.assessments
+    (kind, title, description, target_section, instructor_id, is_open,
+     duration_minutes, exam_password, has_password,
+     allow_retakes, show_answers, score_policy)
+  SELECT a.kind, p_new_title, a.description, p_target_section, auth.uid(), false,
+         a.duration_minutes, a.exam_password, a.has_password,
+         p_allow_retakes, p_show_answers, p_score_policy
+  FROM public.assessments a WHERE a.id = p_source_id
+  RETURNING id INTO new_id;
+
+  INSERT INTO public.questions
+    (exam_id, assessment_id, question_number, question_text, question_type,
+     category, choice_a, choice_b, choice_c, choice_d, correct_answer, image_url)
+  SELECT new_id, new_id, q.question_number, q.question_text, q.question_type,
+         q.category, q.choice_a, q.choice_b, q.choice_c, q.choice_d,
+         q.correct_answer, q.image_url
+  FROM public.questions q WHERE q.exam_id = p_source_id;
+
+  RETURN new_id;
+END $$;
+
+GRANT EXECUTE ON FUNCTION public.duplicate_assessment(uuid,text,text,boolean,boolean,text) TO authenticated;
+
+-- ---------------------------------------------------------------------
+-- 6. RLS
+-- ---------------------------------------------------------------------
 ALTER TABLE public.review_attempts ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS review_attempts_anon_select ON public.review_attempts;
 DROP POLICY IF EXISTS review_attempts_auth_all    ON public.review_attempts;
-
 CREATE POLICY review_attempts_anon_select ON public.review_attempts
   FOR SELECT TO anon USING (true);
 CREATE POLICY review_attempts_auth_all ON public.review_attempts
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- Writes go through submit_assessment(), not a direct INSERT grant.
 GRANT SELECT ON public.review_attempts TO anon;
 GRANT ALL    ON public.review_attempts TO authenticated;
 
 -- ---------------------------------------------------------------------
--- 5. Pre-Boards PATTS cohort
+-- 7. Pre-Boards PATTS cohort
 -- ---------------------------------------------------------------------
 -- Appended, never replacing: keeping AENG 426 preserves every existing
--- result, grade and Class Review row for this cohort.
+-- result, grade and Class Review row for these students.
+--
+-- NOTE: this adds the section only. It deliberately does NOT touch any
+-- existing paper — no exam is opened, made reviewable, or retargeted. The
+-- mock exams are created as copies from the dashboard.
 UPDATE public.users u
-SET section = btrim(coalesce(u.section, '')) || ', Pre-Boards PATTS'
-WHERE EXISTS (
-        SELECT 1 FROM unnest(string_to_array(coalesce(u.section, ''), ',')) AS t(x)
-        WHERE btrim(t.x) = 'AENG 426'
-      )
-  AND NOT EXISTS (
-        SELECT 1 FROM unnest(string_to_array(coalesce(u.section, ''), ',')) AS t(x)
-        WHERE btrim(t.x) = 'Pre-Boards PATTS'
-      );
-
--- Every AENG 426 paper becomes review material, and is targeted at the new
--- section so it shows up for the cohort. is_open is set so they can reach it.
-UPDATE public.assessments a
-SET allow_review   = true,
-    is_open        = true,
-    target_section = CASE
-      WHEN EXISTS (
-        SELECT 1 FROM unnest(string_to_array(coalesce(a.target_section, ''), ',')) AS t(x)
-        WHERE btrim(t.x) = 'Pre-Boards PATTS')
-      THEN a.target_section
-      ELSE btrim(coalesce(a.target_section, '')) || ', Pre-Boards PATTS'
-    END
-WHERE EXISTS (
-  SELECT 1 FROM unnest(string_to_array(coalesce(a.target_section, ''), ',')) AS t(x)
-  WHERE btrim(t.x) = 'AENG 426'
-);
+SET section = btrim(coalesce(u.section,'')) || ', Pre-Boards PATTS'
+WHERE EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(u.section,''),',')) AS t(x)
+              WHERE btrim(t.x) = 'AENG 426')
+  AND NOT EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(u.section,''),',')) AS t(x)
+                  WHERE btrim(t.x) = 'Pre-Boards PATTS');
 
 COMMIT;
 
@@ -249,24 +360,16 @@ SELECT 'cohort' AS check,
        count(*) FILTER (WHERE section LIKE '%AENG 426%')         AS still_in_426
 FROM public.users;
 
-SELECT 'review material' AS check,
-       count(*) FILTER (WHERE allow_review) AS review_enabled,
-       count(*) FILTER (WHERE allow_review AND is_open) AS reachable
+-- Must be 0 / 0 / 0: no existing paper was altered by this migration.
+SELECT 'no paper altered' AS check,
+       count(*) FILTER (WHERE allow_retakes) AS retakes_on,
+       count(*) FILTER (WHERE show_answers)  AS answers_on,
+       count(*) FILTER (WHERE target_section LIKE '%Pre-Boards%') AS retargeted
 FROM public.assessments;
-
--- Scoring sanity: mark a real paper with an empty answer set. score must be
--- 0 and total_items must equal its multiple-choice question count.
-SELECT 'scorer' AS check, s.score, s.total_items,
-       (SELECT count(*) FROM public.questions q
-        WHERE q.exam_id = a.id AND coalesce(q.question_type,'multiple_choice') <> 'essay') AS expected_total
-FROM public.assessments a
-CROSS JOIN LATERAL public.score_answers(a.id, '{}'::jsonb) s
-WHERE a.allow_review
-LIMIT 3;
 
 -- =====================================================================
 -- NEXT: 003_lock_answer_key.sql revokes anon's access to
--- questions.correct_answer. DO NOT run it until the app that uses these
--- RPCs is deployed — the currently live build scores in the browser and
--- would break the moment the key is withdrawn.
+-- questions.correct_answer. DO NOT run it until the app using
+-- submit_assessment() is deployed — the live build still marks in the
+-- browser and would break the moment the key is withdrawn.
 -- =====================================================================

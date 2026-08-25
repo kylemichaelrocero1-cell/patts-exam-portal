@@ -25,3 +25,16 @@ dist-ssr
 .vercel
 .env
 .env*.local
+
+# THIS REPO IS PUBLIC. Never commit student data or answer keys.
+# Protection must not depend on remembering a filename prefix, so this is
+# deliberately broad — rename a file rather than loosening a rule.
+roster_*.sql
+roster_*.csv
+*roster*.csv
+*students*.csv
+*_answers*.sql
+*answer_key*
+# Per-student / per-section working files (contain names, emails, IDs)
+transfer_*.sql
+coinstructor_*.sql

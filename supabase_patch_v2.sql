@@ -1,16 +1,16 @@
 -- =====================================================================
--- PATCH v2 — run this ONCE in the NEW project (jkzisorxeaogwosdzyru)
+-- PATCH v2 — run once, after supabase_setup.sql
 --
--- Corrects two mismatches found by comparing against the live old
--- project before migrating data:
+-- Corrects two schema mismatches:
 --
---   1. questions.id must be UUID, not bigint. results.answers_json is
---      keyed by the question UUID, so a bigint id would orphan every
---      one of the 1,210 stored results.
---   2. questions.question_number + questions.category (populated on all
---      1,210 rows) and exams.description (11 rows) were missing.
+--   1. questions.id must be uuid, not bigint. results.answers_json is
+--      keyed by the question uuid, so a bigint id would orphan every
+--      stored result.
+--   2. questions.question_number, questions.category and
+--      exams.description were missing.
 --
--- The questions table is empty right now, so dropping it loses nothing.
+-- Only safe while the questions table is still empty — it is dropped
+-- and recreated. Check before running.
 -- =====================================================================
 
 DROP TABLE IF EXISTS public.questions CASCADE;

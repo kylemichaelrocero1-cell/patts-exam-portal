@@ -4,7 +4,7 @@
 --
 --   1. exams_auth_update RLS: co-instructors cannot update multi-section
 --      exams. LATENT today (section_instructors is empty) but it will
---      bite the moment you run coinstructor_add_patts_laher_section.sql.
+--      bite the moment a co-instructor is added to a section.
 --
 --   2. "Mathematics - Diagnostic Examination" has a stray leading comma
 --      in target_section. Cosmetic — every code path filters empties —

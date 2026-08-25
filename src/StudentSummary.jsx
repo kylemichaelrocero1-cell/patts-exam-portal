@@ -34,7 +34,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     let cancelled = false;
     (async () => {
       try {
-        const [assessments, resultsRes, lessonsRes, progressRes] = await Promise.all([
+        const [assessments, resultsRes, lessonsRes, progressRes, attemptsRes] = await Promise.all([
           selectAssessments(q => q.eq('is_open', true)),
           supabase.from('results')
             .select('exam_id, score, total_items, submitted_at')
@@ -45,14 +45,41 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           supabase.from('lesson_progress')
             .select('lesson_id, completed_at')
             .eq('student_id', student.id),
+          // Practice retakes are not in results, so without this a student who
+          // had sat five mock exams saw "0 submitted" and an empty list.
+          supabase.from('review_attempts')
+            .select('assessment_id, attempt_no, score, total_items, submitted_at')
+            .eq('student_id', student.id),
         ]);
         if (cancelled) return;
 
         const mine = assessments.filter(a =>
           (a.target_section || '').split(',').map(s => s.trim()).includes(selectedSection)
         );
-        const results = resultsRes.data || [];
-        const doneIds = new Set(results.map(r => r.exam_id));
+        const graded = resultsRes.data || [];
+        const rawAttempts = attemptsRes.data || [];
+
+        // Show the most recent attempt per mock exam in the list, but keep the
+        // full history so the count and the per-exam totals stay honest.
+        const latestPerAssessment = new Map();
+        rawAttempts.forEach(a => {
+          const prev = latestPerAssessment.get(a.assessment_id);
+          if (!prev || a.attempt_no > prev.attempt_no) latestPerAssessment.set(a.assessment_id, a);
+        });
+
+        const results = [
+          ...graded.map(r => ({ ...r, attempts: 1, is_practice: false })),
+          ...[...latestPerAssessment.values()].map(a => ({
+            exam_id: a.assessment_id,
+            score: a.score,
+            total_items: a.total_items,
+            submitted_at: a.submitted_at,
+            attempts: rawAttempts.filter(x => x.assessment_id === a.assessment_id).length,
+            is_practice: true,
+          })),
+        ];
+        // Practice never counts as "done" — a retakeable paper stays open.
+        const doneIds = new Set(graded.map(r => r.exam_id));
 
         // Lessons tables may not exist on an un-migrated database; treat a
         // failure as "no lessons" rather than breaking the whole summary.
@@ -167,8 +194,15 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                   {results.slice(0, 8).map(r => {
                     const pct = r.total_items > 0 ? Math.round((r.score / r.total_items) * 100) : null;
                     return (
-                      <tr key={r.exam_id}>
-                        <td style={{ fontWeight: 600 }}>{titles[r.exam_id] || 'Assessment'}</td>
+                      <tr key={`${r.exam_id}-${r.is_practice ? 'p' : 'g'}`}>
+                        <td style={{ fontWeight: 600 }}>
+                          {titles[r.exam_id] || 'Assessment'}
+                          {r.is_practice && r.attempts > 1 && (
+                            <span style={{ marginLeft: 7, fontSize: 11.5, color: 'var(--ink-4)', fontWeight: 500 }}>
+                              attempt {r.attempts}
+                            </span>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: pct === null ? 'var(--ink-4)' : pct >= 75 ? 'var(--ok)' : 'var(--ink-1)' }}>
                           {r.score}/{r.total_items}{pct !== null ? ` · ${pct}%` : ''}
                         </td>

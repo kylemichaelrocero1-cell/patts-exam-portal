@@ -9,6 +9,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   const [exams, setExams] = useState([]);
   const [completedExams, setCompletedExams] = useState([]);
   const [activeSessions, setActiveSessions] = useState({});
+  const [attempts, setAttempts] = useState({});   // assessment_id -> attempts, newest first
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
@@ -140,7 +141,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     setFetchError(false);
     try {
       // Fetch exams + completed results + active live sessions in parallel
-      const [examsRes, resultsRes, liveRes] = await Promise.all([
+      const [examsRes, resultsRes, liveRes, attemptsRes] = await Promise.all([
         // Reads assessments (exams + seatworks + schedule) and transparently
         // falls back to exams if the migration has not been run yet.
         selectAssessments(q => q.eq('is_open', true).order('created_at', { ascending: false }))
@@ -154,6 +155,13 @@ export default function ExamList({ embedded = false, kind = null, student, selec
           .select('exam_id, exam_set, answers_count, status, created_at')
           .eq('student_id', student.id)
           .in('status', ['active', 'locked']),
+        // Retakes live here, not in results — without this a student saw no
+        // trace of the mock exams they had already sat.
+        supabase
+          .from('review_attempts')
+          .select('assessment_id, attempt_no, score, total_items, submitted_at')
+          .eq('student_id', student.id)
+          .order('attempt_no', { ascending: false }),
       ]);
 
       if (examsRes.error) throw examsRes.error;
@@ -176,6 +184,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
       if (resultsRes.data) {
         setCompletedExams(resultsRes.data.map(r => r.exam_id));
+      }
+
+      if (attemptsRes.data) {
+        const byAssessment = {};
+        attemptsRes.data.forEach(a => {
+          (byAssessment[a.assessment_id] = byAssessment[a.assessment_id] || []).push(a);
+        });
+        setAttempts(byAssessment);
       }
 
       if (liveRes.data) {
@@ -394,6 +410,12 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               const windowLabel = formatWindow(exam);
               const isSeatwork = exam.kind === 'seatwork';
 
+              // Practice history for this paper, newest first.
+              const myAttempts = attempts[exam.id] || [];
+              const bestAttempt = myAttempts.reduce(
+                (b, a) => (!b || a.score > b.score ? a : b), null);
+              const lastAttempt = myAttempts[0] || null;
+
               return (
                 <div key={exam.id} className="exam-card" style={{
                   background: 'var(--white)',
@@ -424,6 +446,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           🗓 {windowLabel}
                         </span>
                       )}
+                      {exam.allow_retakes && (
+                        <span style={{ background: 'var(--ok-bg)', color: 'var(--ok)', border: '1px solid var(--ok-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: 12, fontWeight: 600 }}>
+                          Unlimited retakes
+                        </span>
+                      )}
                       {exam.has_password && !isAlreadyDone && !isResumable && (
                         <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
                           🔒 Password required
@@ -435,6 +462,40 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         </span>
                       )}
                     </div>
+
+                    {myAttempts.length > 0 && (
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-lt, var(--border))' }}>
+                        <div style={{ fontSize: 11, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-4)', fontWeight: 700, marginBottom: 6 }}>
+                          Your attempts ({myAttempts.length})
+                          {bestAttempt && bestAttempt.total_items > 0 && (
+                            <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--ok)', marginLeft: 8 }}>
+                              best {bestAttempt.score}/{bestAttempt.total_items}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {/* Newest first, capped — a student with 30 retakes
+                              should not get a wall of pills. */}
+                          {myAttempts.slice(0, 6).map(a => {
+                            const pct = a.total_items > 0 ? Math.round((a.score / a.total_items) * 100) : null;
+                            const tone = pct === null ? 'var(--text-3)'
+                              : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
+                            return (
+                              <span key={a.attempt_no} title={new Date(a.submitted_at).toLocaleString()}
+                                style={{ fontSize: 12, padding: '3px 9px', borderRadius: 'var(--r-full)', background: 'var(--surface-2)', border: '1px solid var(--line)', color: tone, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                                #{a.attempt_no} · {a.score}/{a.total_items}
+                                {pct !== null && <span style={{ opacity: .7 }}> · {pct}%</span>}
+                              </span>
+                            );
+                          })}
+                          {myAttempts.length > 6 && (
+                            <span style={{ fontSize: 12, color: 'var(--text-4)', alignSelf: 'center' }}>
+                              +{myAttempts.length - 6} earlier
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="exam-card-actions">
@@ -460,6 +521,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                     ) : (
                       <div className="exam-card-btns">
                         <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'A')}
+                          data-retake={lastAttempt ? 'true' : undefined}
                           style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
                           {isCheckingSession ? 'Checking…' : 'Set A'}
                         </button>

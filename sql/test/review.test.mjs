@@ -212,7 +212,7 @@ console.log('\n=== 004: MOCK EXAM CREATION ===');
   const src=await q(`SELECT a.id, a.title,
                             (SELECT count(*)::int FROM public.questions z WHERE z.exam_id=a.id) AS qn
                      FROM public.assessments a
-                     WHERE a.title NOT LIKE 'Mock Exam %'
+                     WHERE a.title NOT LIKE '%Mock Exam %'
                        AND EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(a.target_section,''),',')) t(x)
                                    WHERE btrim(t.x)='AENG 426')`);
   const expectCopies = src.length;
@@ -220,18 +220,24 @@ console.log('\n=== 004: MOCK EXAM CREATION ===');
 
   const m=await q(`SELECT title,is_open,allow_retakes,show_answers,score_policy,target_section,has_password,
                           (SELECT count(*)::int FROM public.questions z WHERE z.exam_id=a.id) AS qn
-                   FROM public.assessments a WHERE title LIKE 'Mock Exam %' ORDER BY title`);
+                   FROM public.assessments a WHERE title LIKE '%Mock Exam %' ORDER BY title`);
   ck(`one copy per AENG 426 paper (${expectCopies})`, m.length===expectCopies, String(m.length));
-  ck('numbered oldest-first within a subject',
-     m.some(r=>r.title==='Mock Exam Powerplant 1') && m.some(r=>r.title==='Mock Exam Powerplant 2'),
+  ck('named "<Subject> Mock Exam <n>", oldest first',
+     m.some(r=>r.title==='Powerplant Mock Exam 1') && m.some(r=>r.title==='Powerplant Mock Exam 2'),
      m.map(r=>r.title).join(' | '));
-  ck('EEMLE numbering restarts at 1', m.some(r=>r.title==='Mock Exam EEMLE 1'));
+  ck('the count RESTARTS for each subject (EEMLE begins at 1, not 3)',
+     m.some(r=>r.title==='EEMLE Mock Exam 1') && !m.some(r=>r.title==='EEMLE Mock Exam 3'),
+     m.map(r=>r.title).join(' | '));
+  // the oldest Powerplant paper must be number 1, not merely present
+  const ppOrder = m.filter(r=>r.title.startsWith('Powerplant Mock Exam ')).map(r=>r.title).sort();
+  ck('Powerplant numbered contiguously from 1',
+     ppOrder.every((t,i)=>t===`Powerplant Mock Exam ${i+1}`), ppOrder.join(' | '));
   ck('all created CLOSED', m.every(r=>r.is_open===false));
   ck('all have retakes + answers on', m.every(r=>r.allow_retakes && r.show_answers));
   ck('all show the latest attempt', m.every(r=>r.score_policy==='latest'));
   ck('all aimed at Pre-Boards PATTS only', m.every(r=>r.target_section==='Pre-Boards PATTS'));
   ck('no password on revision material', m.every(r=>r.has_password===false));
-  const pp1=m.find(r=>r.title==='Mock Exam Powerplant 1');
+  const pp1=m.find(r=>r.title==='Powerplant Mock Exam 1');
   ck('questions copied (3 for the oldest Powerplant paper)', pp1.qn===3, String(pp1?.qn));
   const tot=m.reduce((t,r)=>t+r.qn,0);
   ck(`every question copied (${expectQs})`, tot===expectQs, String(tot));
@@ -250,10 +256,10 @@ console.log('\n=== 004: MOCK EXAM CREATION ===');
 
   // idempotency
   await x(fs.readFileSync(P+'/sql/004_create_mock_exams.sql','utf8'));
-  const again=await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE 'Mock Exam %'`);
+  const again=await q(`SELECT count(*)::int c FROM public.assessments WHERE title LIKE '%Mock Exam %'`);
   ck('re-running creates no duplicates', again[0].c===expectCopies, String(again[0].c));
   const qs=await q(`SELECT count(*)::int c FROM public.questions z
-                    JOIN public.assessments a ON a.id=z.exam_id WHERE a.title LIKE 'Mock Exam %'`);
+                    JOIN public.assessments a ON a.id=z.exam_id WHERE a.title LIKE '%Mock Exam %'`);
   ck('re-running does not double the questions', qs[0].c===expectQs, String(qs[0].c));
 }
 

@@ -5,13 +5,13 @@
 --
 -- Copies every AENG 426 paper into a practice version:
 --
---   Mock Exam Powerplant 1..6     from the Powerplant papers
---   Mock Exam EEMLE 1..6          from the EEMLE papers
---   Mock Exam Mathematics 1       from the maths diagnostic
---   Mock Exam Practice 1          from the practice exam
+--   Powerplant Mock Exam 1..6     from the Powerplant papers
+--   EEMLE Mock Exam 1..6          from the EEMLE papers
+--   Mathematics Mock Exam 1       from the maths diagnostic
+--   Practice Mock Exam 1          from the practice exam
 --
--- Numbered oldest first within each subject, so the ordering matches the
--- order the originals were sat.
+-- Numbered oldest first, and the count RESTARTS for each subject — so
+-- Powerplant runs 1..6 and EEMLE runs 1..6 rather than 7..12.
 --
 -- Each copy:
 --   * targets Pre-Boards PATTS ONLY
@@ -43,7 +43,8 @@ WITH src AS (
 ),
 numbered AS (
   SELECT src.*,
-         'Mock Exam ' || subject || ' ' ||
+         -- PARTITION BY subject is what restarts the numbering per subject
+         subject || ' Mock Exam ' ||
            row_number() OVER (PARTITION BY subject ORDER BY created_at) AS new_title
   FROM src
 ),
@@ -91,14 +92,14 @@ SELECT a.title,
        a.target_section,
        (SELECT count(*) FROM public.questions q WHERE q.exam_id = a.id) AS questions
 FROM public.assessments a
-WHERE a.title LIKE 'Mock Exam %'
+WHERE a.title LIKE '%Mock Exam %'
 ORDER BY a.title;
 
 -- Question counts must match the papers they came from.
 SELECT 'question parity' AS check,
        (SELECT count(*) FROM public.questions q
         JOIN public.assessments a ON a.id = q.exam_id
-        WHERE a.title LIKE 'Mock Exam %') AS copied,
+        WHERE a.title LIKE '%Mock Exam %') AS copied,
        960 AS expected;
 
 -- The source papers must be exactly as they were. Scoped to the AENG 426
@@ -110,7 +111,7 @@ SELECT 'source papers untouched' AS check,
        count(*) FILTER (WHERE show_answers)  AS revealing,
        count(*) FILTER (WHERE allow_retakes) AS retakeable
 FROM public.assessments a
-WHERE a.title NOT LIKE 'Mock Exam %'
+WHERE a.title NOT LIKE '%Mock Exam %'
   AND EXISTS (
     SELECT 1 FROM unnest(string_to_array(coalesce(a.target_section,''), ',')) AS t(x)
     WHERE btrim(t.x) = 'AENG 426'

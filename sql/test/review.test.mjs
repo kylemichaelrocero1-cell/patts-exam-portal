@@ -193,6 +193,19 @@ console.log('\n=== ANSWER REVIEW (only after submitting, only when enabled) ==='
   ck('refused for a student who has not submitted', threw);
 }
 
+console.log('\n=== 002b: STUDENT-VISIBLE SWITCHES ===');
+{
+  await x(fs.readFileSync(P+'/sql/002b_grant_new_columns.sql','utf8'));
+  const g=await q(`SELECT string_agg(column_name,',' ORDER BY column_name) AS c
+                   FROM information_schema.column_privileges
+                   WHERE grantee='anon' AND table_name='assessments' AND privilege_type='SELECT'`);
+  const cols=(g[0].c||'').split(',');
+  ck('anon can read allow_retakes', cols.includes('allow_retakes'), g[0].c);
+  ck('anon can read show_answers',  cols.includes('show_answers'));
+  ck('score_policy stays instructor-only', !cols.includes('score_policy'));
+  ck('exam_password still withheld', !cols.includes('exam_password'));
+}
+
 console.log('\n=== 003: ANSWER KEY LOCKED ===');
 {
   await x(fs.readFileSync(P+'/sql/003_lock_answer_key.sql','utf8'));

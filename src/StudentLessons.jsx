@@ -3,6 +3,14 @@ import Icon from './components/Icon';
 import LessonContent from './components/LessonContent';
 import { supabase } from './supabase';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
+import {
+  LESSON_COLUMNS_STUDENT, makeLessonReader, isPdfLesson, formatFileSize,
+} from './lib/lessonMaterial';
+
+// One reader per module — see LessonsManager.jsx. Falls back to the
+// pre-migration column set, so a student never sees the lessons tab break
+// because sql/006 has not been run yet.
+const lessonReader = makeLessonReader((table) => supabase.from(table));
 
 export default function StudentLessons({ student, selectedSection }) {
   const [lessons, setLessons] = useState([]);
@@ -18,20 +26,17 @@ export default function StudentLessons({ student, selectedSection }) {
       try {
         // RLS already limits anon to published lessons; the client-side section
         // filter is about relevance, not access.
-        const [lRes, sRes, pRes] = await Promise.all([
-          supabase.from('lessons')
-            .select('id, subject_id, title, content_md, target_section, is_published, published_at')
-            .eq('is_published', true)
-            .order('sort_order', { ascending: true }),
+        const [lRows, sRes, pRes] = await Promise.all([
+          lessonReader.select(LESSON_COLUMNS_STUDENT, q =>
+            q.eq('is_published', true).order('sort_order', { ascending: true })),
           supabase.from('lesson_subjects').select('id, title, sort_order'),
           supabase.from('lesson_progress')
             .select('lesson_id, viewed_at, completed_at')
             .eq('student_id', student.id),
         ]);
-        if (lRes.error) throw lRes.error;
         if (cancelled) return;
 
-        setLessons((lRes.data || []).filter(l => lessonVisibleTo(l, selectedSection)));
+        setLessons(lRows.filter(l => lessonVisibleTo(l, selectedSection)));
         setSubjects(sRes.data || []);
         const map = {};
         (pRes.data || []).forEach(p => { map[p.lesson_id] = p; });
@@ -87,7 +92,8 @@ export default function StudentLessons({ student, selectedSection }) {
   if (open) {
     const done = !!progress[open.id]?.completed_at;
     return (
-      <div style={{ maxWidth: 780, margin: '0 auto' }}>
+      // A PDF page needs more room than a column of prose does.
+      <div style={{ maxWidth: isPdfLesson(open) ? 960 : 780, margin: '0 auto' }}>
         <button className="btn ghost sm" style={{ width: 'auto', marginBottom: 18 }} onClick={() => setOpen(null)}>
           <Icon name="arrow-left" size={14} /> All lessons
         </button>
@@ -101,7 +107,51 @@ export default function StudentLessons({ student, selectedSection }) {
               Posted {new Date(open.published_at).toLocaleDateString()}
             </p>
           )}
-          <LessonContent markdown={open.content_md} />
+          {/* A typed lesson always renders (LessonContent says so when it is
+              empty); on a PDF lesson the markdown is optional notes. */}
+          {(!isPdfLesson(open) || (open.content_md || '').trim()) && (
+            <LessonContent markdown={open.content_md} />
+          )}
+
+          {isPdfLesson(open) && (
+            <div style={{ marginTop: (open.content_md || '').trim() ? 22 : 0 }}>
+              {/* The buttons come first on purpose: the inline viewer is blank
+                  on some phone browsers, and a student who cannot see the file
+                  must still have an obvious way to open it. */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                padding: '12px 14px', border: '1px solid var(--line)',
+                borderRadius: 'var(--r-lg)', background: 'var(--surface-2)',
+              }}>
+                <Icon name="file-text" size={18} color="var(--navy)" />
+                <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, overflowWrap: 'anywhere' }}>
+                    {open.file_name || 'Lesson handout (PDF)'}
+                  </div>
+                  {open.file_size ? (
+                    <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>PDF · {formatFileSize(open.file_size)}</div>
+                  ) : null}
+                </div>
+                <a className="btn ghost sm" style={{ width: 'auto' }}
+                  href={open.file_url} target="_blank" rel="noopener noreferrer">
+                  <Icon name="external" size={13} /> Open
+                </a>
+                {/* `download` is ignored cross-origin, and storage is a
+                    different origin — Supabase's ?download= sets the
+                    Content-Disposition server-side instead. */}
+                <a className="btn ghost sm" style={{ width: 'auto' }}
+                  href={`${open.file_url}?download=${encodeURIComponent(open.file_name || 'lesson.pdf')}`}>
+                  <Icon name="download" size={13} /> Download
+                </a>
+              </div>
+
+              <object className="lesson-pdf" data={open.file_url} type="application/pdf">
+                <p style={{ padding: 16, margin: 0, color: 'var(--ink-3)', fontSize: 13.5 }}>
+                  Your browser cannot show the PDF here — use Open or Download above.
+                </p>
+              </object>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'center', margin: '22px 0 40px' }}>
@@ -188,12 +238,15 @@ export default function StudentLessons({ student, selectedSection }) {
                     background: p?.completed_at ? 'var(--ok-bg)' : 'var(--navy-tint)',
                     color: p?.completed_at ? 'var(--ok)' : 'var(--navy)',
                   }}>
-                    <Icon name={p?.completed_at ? 'check' : 'book'} size={16} />
+                    <Icon name={p?.completed_at ? 'check' : isPdfLesson(l) ? 'file-text' : 'book'} size={16} />
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: 14.5, color: 'var(--ink-1)' }}>{l.title}</div>
                     <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginTop: 2 }}>
+                      {isPdfLesson(l) && (
+                        <>PDF{l.file_size ? ` · ${formatFileSize(l.file_size)}` : ''} · </>
+                      )}
                       {p?.completed_at ? 'Completed' : p ? 'Opened' : 'Not started'}
                     </div>
                   </div>

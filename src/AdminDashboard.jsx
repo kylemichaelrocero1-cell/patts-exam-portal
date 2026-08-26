@@ -406,13 +406,23 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   // --- FORCE SUBMIT ---
+  // One place to resolve an exam, so a duration or a retake flag is never read
+  // from only half the papers this instructor can see (own + shared/co-taught).
+  const findExamById = (examId) =>
+    examsList.find(e => e.id === examId) || sharedExamsList.find(e => e.id === examId) || null;
+
+  const examDurationFor = (examId) =>
+    Number(editingTimes[examId]) || Number(findExamById(examId)?.duration_minutes) || 0;
+
+  const examAllowsRetakes = (examId) => !!findExamById(examId)?.allow_retakes;
+
   // Returns true if a live session has run past the exam's time limit.
-  const isSessionTimedOut = (session) => {
-    const duration = editingTimes[session.exam_id]
-      || sharedExamsList.find(e => e.id === session.exam_id)?.duration_minutes
-      || 0;
+  // extraGraceMs is for the automatic sweep: the student's own tab submits at
+  // 0:00, so waiting a little longer keeps the two from racing into two attempts.
+  const isSessionTimedOut = (session, extraGraceMs = 0) => {
+    const duration = examDurationFor(session.exam_id);
     if (!duration || !session.created_at) return false;
-    const deadline = new Date(session.created_at).getTime() + duration * 60 * 1000 + 30000;
+    const deadline = new Date(session.created_at).getTime() + duration * 60 * 1000 + 30000 + extraGraceMs;
     return Date.now() > deadline;
   };
 
@@ -427,89 +437,185 @@ const [targetSection, setTargetSection] = useState('');
   const [isForceSubmitting, setIsForceSubmitting] = useState(false);
   const [forceSubmitConfirmList, setForceSubmitConfirmList] = useState(null); // sessions[] | null
 
-  const doForceSubmit = async (sessions) => {
-    setIsForceSubmitting(true);
-    const examIds = [...new Set(sessions.map(s => s.exam_id))];
-
-    // Load questions for all affected exams in parallel and keep the returned data
-    // directly — do NOT read from examQuestionsCache state, which is a stale closure.
-    const questionsByExam = {};
-    await Promise.all(examIds.map(async id => {
-      questionsByExam[id] = await loadExamQuestions(id);
-    }));
+  // `silent` is the automatic sweep below: no modal, no spinner, no alert.
+  const doForceSubmit = async (sessions, { silent = false } = {}) => {
+    if (!silent) setIsForceSubmitting(true);
 
     const errors = [];
+    const submitted = [];
+
     for (const session of sessions) {
       try {
-        const questions = questionsByExam[session.exam_id] || [];
-        const rawAnswers = session.answers_json || {};
-        const rawEssays = session.essay_answers_json || {};
+        // Claim the session before submitting it. Co-instructors share a live
+        // monitor and the auto-sweep runs in every open dashboard; without an
+        // atomic claim the same student is submitted twice, which on a
+        // retakeable paper writes two attempts instead of one.
+        const { data: claimed, error: claimErr } = await supabase
+          .from('live_sessions')
+          .update({ status: 'finished', updated_at: new Date() })
+          .eq('id', session.id).neq('status', 'finished').select('id');
 
-        let correctCount = 0, mcTotal = 0;
-        const formattedAnswers = {};
-
-        questions.forEach(q => {
-          const qId = String(q.id);
-          if ((q.question_type || 'multiple_choice') === 'essay') {
-            const text = rawEssays[qId];
-            if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
-          } else {
-            mcTotal++;
-            if (rawAnswers[qId] !== undefined) {
-              const chosen = Number(rawAnswers[qId]);
-              const isCorrect = chosen === Number(q.correct_answer);
-              if (isCorrect) correctCount++;
-              formattedAnswers[qId] = { chosen, is_correct: isCorrect };
-            }
-          }
-        });
-
-        const duration = editingTimes[session.exam_id]
-          || sharedExamsList.find(e => e.id === session.exam_id)?.duration_minutes
-          || 0;
-        const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
-        const timeTaken = Math.min(elapsed, duration * 60);
-
-        const { error: insertErr } = await supabase.from('results').insert([{
-          student_id: session.student_id,
-          exam_id: session.exam_id,
-          answers_json: formattedAnswers,
-          score: correctCount,
-          total_items: mcTotal,
-          time_taken_seconds: timeTaken,
-          tab_switches: session.violation_count || 0,
-          violation_logs: session.violation_log || [],
-        }]);
-
-        // 23505 = duplicate (already submitted) — treat as success
-        if (insertErr && insertErr.code !== '23505') {
-          errors.push(`${session.student_name}: ${insertErr.message}`);
+        if (claimErr) { errors.push(`${session.student_name}: ${claimErr.message}`); continue; }
+        if (!claimed || claimed.length === 0) {
+          // Another dashboard got there first — nothing left to submit.
+          setLiveSessions(prev => prev.filter(s => s.id !== session.id));
           continue;
         }
 
-        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', session.id);
+        const mcAnswers = {};
+        Object.entries(session.answers_json || {}).forEach(([qId, chosen]) => {
+          if (chosen === undefined || chosen === null || chosen === '') return;
+          const n = Number(chosen);
+          if (Number.isFinite(n)) mcAnswers[String(qId)] = n;
+        });
+
+        const duration = examDurationFor(session.exam_id);
+        const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
+        const timeTaken = duration ? Math.min(elapsed, duration * 60) : elapsed;
+
+        // Marked in Postgres, exactly like the student's own submission.
+        // submit_assessment() routes a retakeable paper to review_attempts and
+        // a graded one to results. The old direct INSERT into results filed
+        // practice sittings in the graded table, and marked in the browser off
+        // correct_answer — which sql/003 has since revoked from the client.
+        const { data: outcome, error: rpcErr } = await supabase.rpc('submit_assessment', {
+          p_student_id: session.student_id,
+          p_assessment_id: session.exam_id,
+          p_answers: mcAnswers,
+          p_time_taken_seconds: timeTaken,
+          p_tab_switches: session.violation_count || 0,
+          p_violation_logs: session.violation_log || [],
+        });
+
+        if (rpcErr) {
+          // Hand the session back so it stays visible and force-submittable
+          // instead of vanishing from the monitor unsubmitted.
+          await supabase.from('live_sessions')
+            .update({ status: session.status === 'locked' ? 'locked' : 'active' })
+            .eq('id', session.id);
+          errors.push(`${session.student_name}: ${rpcErr.message}`);
+          continue;
+        }
+
+        const isRetake = examAllowsRetakes(session.exam_id);
+        const score = outcome?.score ?? 0;
+        const mcTotal = outcome?.total_items ?? 0;
+
+        // Essays are not marked server-side (there is nothing to mark against),
+        // so they are attached to the stored graded row separately. A
+        // retakeable paper has no results row to attach them to.
+        const essayPayload = {};
+        Object.entries(session.essay_answers_json || {}).forEach(([qId, text]) => {
+          if (typeof text === 'string' && text.trim()) {
+            essayPayload[String(qId)] = { type: 'essay', text: text.trim() };
+          }
+        });
+        if (!isRetake && Object.keys(essayPayload).length > 0) {
+          const { data: existing } = await supabase.from('results')
+            .select('id, answers_json')
+            .eq('student_id', session.student_id).eq('exam_id', session.exam_id).limit(1);
+          if (existing?.[0]) {
+            await supabase.from('results')
+              .update({ answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } })
+              .eq('id', existing[0].id);
+          }
+        }
+
         setLiveSessions(prev => prev.filter(s => s.id !== session.id));
-        if (insertErr?.code !== '23505') {
-          // Add to local results so dashboard updates immediately
-          setResults(prev => [...prev, {
+        submitted.push(session.student_name || 'a student');
+
+        // Keep the dashboard in step without a refetch — and file the row where
+        // it actually landed, so a practice sitting never shows up as a grade.
+        if (isRetake) {
+          setPracticeAttempts(prev => [...prev, {
             student_id: session.student_id,
-            exam_id: session.exam_id,
-            score: correctCount,
+            assessment_id: session.exam_id,
+            attempt_no: outcome?.attempt_no ?? 1,
+            score,
             total_items: mcTotal,
             time_taken_seconds: timeTaken,
-            tab_switches: session.violation_count || 0,
             submitted_at: new Date().toISOString(),
           }]);
+        } else {
+          setResults(prev => (
+            prev.some(r => r.student_id === session.student_id && r.exam_id === session.exam_id)
+              ? prev
+              : [...prev, {
+                  student_id: session.student_id,
+                  exam_id: session.exam_id,
+                  score,
+                  total_items: mcTotal,
+                  time_taken_seconds: timeTaken,
+                  tab_switches: session.violation_count || 0,
+                  violation_logs: session.violation_log || [],
+                  submitted_at: new Date().toISOString(),
+                }]
+          ));
         }
       } catch (err) {
         errors.push(`${session.student_name}: ${err.message}`);
       }
     }
 
-    setIsForceSubmitting(false);
-    setForceSubmitConfirmList(null);
-    if (errors.length > 0) alert(`Force submit completed with errors:\n${errors.join('\n')}`);
+    if (!silent) {
+      setIsForceSubmitting(false);
+      setForceSubmitConfirmList(null);
+      if (errors.length > 0) alert(`Force submit completed with errors:\n${errors.join('\n')}`);
+    } else if (errors.length > 0) {
+      console.error('Auto force-submit errors:', errors.join(' | '));
+    }
   };
+
+  // --- AUTO FORCE-SUBMIT: TIMED-OUT PRACTICE SITTINGS ---
+  // A paper with unlimited retakes is revision, not a grade, so there is nothing
+  // for an instructor to decide when the clock runs out: submit what the student
+  // had. Their own tab does this at 0:00, but a closed laptop or a dead
+  // connection leaves the sitting stranded with answers already saved to
+  // live_sessions and no attempt recorded. This sweeps those up.
+  //
+  // Graded papers are deliberately NOT swept — those stay a manual, confirmed
+  // decision on the instructor's part.
+  const AUTO_SUBMIT_GRACE_MS = 90000;
+
+  // Nothing answered is nothing to submit: a student who opened a practice
+  // paper and walked away should not be handed a 0 that then sits in their
+  // attempt history. The instructor can still force one through by hand.
+  const hasSavedWork = (session) =>
+    Object.keys(session.answers_json || {}).length > 0 ||
+    Object.keys(session.essay_answers_json || {}).length > 0;
+
+  const isAutoSubmittable = (session) =>
+    examAllowsRetakes(session.exam_id) &&
+    isSessionTimedOut(session, AUTO_SUBMIT_GRACE_MS) &&
+    hasSavedWork(session);
+
+  const autoSubmitSweepRef = useRef({ liveSessions: [] });
+  autoSubmitSweepRef.current = { liveSessions, isAutoSubmittable, doForceSubmit };
+  const autoSubmittedIdsRef = useRef(new Set());
+  const autoSweepBusyRef = useRef(false);
+
+  useEffect(() => {
+    const sweep = async () => {
+      if (autoSweepBusyRef.current) return;
+      const snap = autoSubmitSweepRef.current;
+      const due = (snap.liveSessions || []).filter(s =>
+        s.status !== 'finished' &&
+        !autoSubmittedIdsRef.current.has(s.id) &&
+        snap.isAutoSubmittable(s));
+      if (due.length === 0) return;
+
+      autoSweepBusyRef.current = true;
+      due.forEach(s => autoSubmittedIdsRef.current.add(s.id));
+      try {
+        await snap.doForceSubmit(due, { silent: true });
+      } finally {
+        autoSweepBusyRef.current = false;
+      }
+    };
+    sweep();
+    const t = setInterval(sweep, 20000);
+    return () => clearInterval(t);
+  }, []);
 
   // --- RESCORE / REPAIR ZERO RESULTS ---
   const [isRescoring, setIsRescoring] = useState(false);
@@ -2847,7 +2953,9 @@ const deleteResult = async (studentId, examId) => {
             return !hasResult;
           });
           const stuckCount = liveSessions.length - activeSessions.length;
-          const forceSubmittable = activeSessions.filter(isSessionForceSubmittable);
+          // A timed-out sitting on a retakeable paper is submitted by the sweep
+          // above without anyone clicking, so it is not offered as work to do.
+          const forceSubmittable = activeSessions.filter(s => isSessionForceSubmittable(s) && !isAutoSubmittable(s));
 
           return (
             <div>
@@ -2945,7 +3053,11 @@ const deleteResult = async (studentId, examId) => {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                            {isSessionForceSubmittable(session) ? (
+                            {isAutoSubmittable(session) ? (
+                              <span className="px-pill" style={{ fontWeight: 600 }}>
+                                <Icon name="send" size={11} style={{ marginRight: 4 }} /> Auto-submitting…
+                              </span>
+                            ) : isSessionForceSubmittable(session) ? (
                               <button
                                 className="btn sm"
                                 onClick={() => setForceSubmitConfirmList([session])}

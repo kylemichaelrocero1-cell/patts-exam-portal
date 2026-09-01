@@ -12,8 +12,9 @@
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
     "test:material": "node src/lib/__tests__/lessonMaterial.test.mjs",
-    "test": "npm run test:migration && npm run test:lessons && npm run test:assessments && npm run test:material",
-    "test:review": "node sql/test/review.test.mjs"
+    "test": "npm run test:migration && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material",
+    "test:review": "node sql/test/review.test.mjs",
+    "test:preboards": "node sql/test/preboards_review.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

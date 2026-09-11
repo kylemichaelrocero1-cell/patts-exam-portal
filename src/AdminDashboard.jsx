@@ -116,8 +116,14 @@ const [targetSection, setTargetSection] = useState('');
   const [csvExamParsed, setCsvExamParsed] = useState(null); // { questions, errors } attached to Create Exam form
   const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors } for Students tab
   const [studentCsvImporting, setStudentCsvImporting] = useState(false);
-  // Instructor-managed sections (derived from exam list)
+  // Every section this instructor teaches: their exams' targets, the sections
+  // they have explicitly claimed (see claimSections), and the ones another
+  // instructor co-assigned them. Exams are no longer the only thing keeping a
+  // section — and therefore its roster — alive.
   const [instructorSections, setInstructorSections] = useState(new Set());
+  // Sections claimed in section_instructors as (me, added_by = me). These are
+  // what survive when the last exam for a section is deleted.
+  const [claimedSections, setClaimedSections] = useState(new Set());
 
   // --- ADD STUDENT STATES ---
   const [newStudentName, setNewStudentName] = useState('');
@@ -394,6 +400,68 @@ const [targetSection, setTargetSection] = useState('');
       updated[row.section_name] = (updated[row.section_name] || []).filter(r => r.instructor_id !== row.instructor_id);
       return updated;
     });
+  };
+
+  // --- SECTION OWNERSHIP ---
+  // A section used to exist only for as long as an exam pointed at it, so a
+  // student added to a section with no exam was invisible, and deleting the
+  // last exam of a section took its whole roster out of the dashboard — while
+  // the students stayed in the database, still able to log in, with no way for
+  // anyone to reach them. Claiming writes the instructor-section link down as
+  // its own row, so the roster no longer depends on an exam existing.
+  const claimSections = async (raw) => {
+    const names = [...new Set(
+      (Array.isArray(raw) ? raw : [raw])
+        .flatMap(v => (v || '').split(',').map(x => x.trim()))
+        .filter(Boolean)
+    )];
+    const fresh = names.filter(n => !claimedSections.has(n));
+    if (fresh.length === 0) return;
+
+    setClaimedSections(prev => new Set([...prev, ...fresh]));
+    setInstructorSections(prev => new Set([...prev, ...fresh]));
+
+    // ignoreDuplicates keeps this ON CONFLICT DO NOTHING: the row may already
+    // exist from an earlier session, and the table has no UPDATE policy for an
+    // upsert to fall back on.
+    const { error } = await supabase.from('section_instructors').upsert(
+      fresh.map(section_name => ({ section_name, instructor_id: instructorId, added_by: instructorId })),
+      { onConflict: 'section_name,instructor_id,added_by', ignoreDuplicates: true },
+    );
+    if (error) {
+      // Put it back, or a failed claim would look claimed and never retry.
+      setClaimedSections(prev => { const n = new Set(prev); fresh.forEach(x => n.delete(x)); return n; });
+      console.error('Could not record section ownership:', error);
+    }
+  };
+
+  // The way back out, so a typo'd section is not permanent. Only ever offered
+  // for a section that has nothing left in it.
+  const releaseSection = async (sec) => {
+    const inList = (str) => (str || '').split(',').map(x => x.trim()).includes(sec);
+    const studentCount = studentsList.filter(s => inList(s.section)).length;
+    const examCount = [...examsList, ...sharedExamsList].filter(e => inList(e.target_section)).length;
+    if (studentCount > 0 || examCount > 0) {
+      return alert(
+        `"${sec}" still has ${studentCount} student${studentCount !== 1 ? 's' : ''} and ` +
+        `${examCount} exam${examCount !== 1 ? 's' : ''}.\n\n` +
+        'Move or delete them first — releasing a section that still has students would hide them from everyone.'
+      );
+    }
+    const coCount = (sectionCoMap[sec] || []).length;
+    if (!window.confirm(
+      `Remove "${sec}" from your sections?\n\nIt is empty — no students, no exams.` +
+      (coCount > 0 ? `\n\nThis also ends the co-instructor access you granted for it (${coCount}).` : '')
+    )) return;
+
+    const { error } = await supabase.from('section_instructors').delete()
+      .eq('section_name', sec).eq('added_by', instructorId);
+    if (error) return alert('Error removing section: ' + error.message);
+
+    setClaimedSections(prev => { const n = new Set(prev); n.delete(sec); return n; });
+    setInstructorSections(prev => { const n = new Set(prev); n.delete(sec); return n; });
+    setSectionCoMap(prev => { const n = { ...prev }; delete n[sec]; return n; });
+    if (studentSectionFilter === sec) setStudentSectionFilter('All');
   };
 
   const clearStuckSessions = async () => {
@@ -1091,6 +1159,7 @@ const [targetSection, setTargetSection] = useState('');
       }
 
       if (inserted.length > 0) {
+        await claimSections(inserted.map(s => s.section));
         setStudentsList(prev => [...prev, ...inserted]);
         setStudents(prev => {
           const next = { ...prev };
@@ -1285,13 +1354,25 @@ async function fetchDashboardData() {
       const inShares = inSharesRes.data || [];
       const allSectionRows = coSectionsRes.data || [];
 
-      // Build section co-instructor map for sections I own (added_by = me)
+      // Build section co-instructor map for sections I own (added_by = me).
+      // Self-claims (instructor_id = me) are ownership markers, not colleagues.
       const newSectionCoMap = {};
-      allSectionRows.filter(r => r.added_by === instructorId).forEach(r => {
-        if (!newSectionCoMap[r.section_name]) newSectionCoMap[r.section_name] = [];
-        newSectionCoMap[r.section_name].push(r);
-      });
+      allSectionRows
+        .filter(r => r.added_by === instructorId && r.instructor_id !== instructorId)
+        .forEach(r => {
+          if (!newSectionCoMap[r.section_name]) newSectionCoMap[r.section_name] = [];
+          newSectionCoMap[r.section_name].push(r);
+        });
       setSectionCoMap(newSectionCoMap);
+
+      // Sections I claimed for myself — these hold the roster up on their own,
+      // with or without an exam pointing at them.
+      const claimedSectionNames = new Set(
+        allSectionRows
+          .filter(r => r.instructor_id === instructorId && r.added_by === instructorId)
+          .map(r => r.section_name)
+      );
+      setClaimedSections(claimedSectionNames);
 
       // Sections I co-manage (added by another instructor, I am the co-instructor)
       const coManagedSectionNames = [
@@ -1379,10 +1460,17 @@ async function fetchDashboardData() {
       setEditingPasswords(passwords);
       setEditingTitles(titles);
 
-      const sections = new Set(
-        examsData.flatMap(e => (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean))
+      const examSections = examsData.flatMap(
+        e => (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean)
       );
-      setInstructorSections(sections);
+      const mySections = new Set([...examSections, ...claimedSectionNames, ...coManagedSectionNames]);
+      setInstructorSections(mySections);
+
+      // Anchor any section that is currently only being held up by an exam.
+      // Without this, an instructor who has never added a student since this
+      // change would still lose their roster the day they delete that exam.
+      const unclaimed = [...new Set(examSections)].filter(n => !claimedSectionNames.has(n));
+      if (unclaimed.length > 0) claimSections(unclaimed);
 
       // Build sharesMap (outgoing) keyed by exam ID
       const newSharesMap = {};
@@ -1411,9 +1499,6 @@ async function fetchDashboardData() {
         studentSecs[s.id] = s.section || '';
       });
 
-      const mySections = new Set(
-        examsData.flatMap(e => (e.target_section || '').split(',').map(s => s.trim()).filter(Boolean))
-      );
       const myStudents = safeStudentsCopy.filter(s =>
         s.section && s.section.split(',').map(x => x.trim()).some(sec => mySections.has(sec))
       );
@@ -1496,6 +1581,8 @@ const deleteResult = async (studentId, examId) => {
         await supabase.from('questions').insert(payload.slice(i, i + 50));
       }
     }
+
+    await claimSections(targetSection);
 
     setNewTitle('');
     setTargetSection('');
@@ -1588,6 +1675,7 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
 
+    await claimSections(newSection);
     alert("Section updated successfully!");
     setExamsList(prev => prev.map(e => e.id === examId ? { ...e, target_section: newSection } : e));
   };
@@ -1625,6 +1713,7 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
 
+    await claimSections(newSection);
     alert("Student section updated successfully!");
     setStudentsList(prev => prev.map(s => s.id === studentId ? { ...s, section: newSection } : s));
     setStudents(prev => ({
@@ -1648,6 +1737,7 @@ const deleteResult = async (studentId, examId) => {
     if (error) {
       alert("Error updating students: " + error.message);
     } else {
+      await claimSections(batchSection.trim());
       setStudentsList(prev => prev.map(s => selectedStudentIds.has(s.id) ? { ...s, section: batchSection.trim() } : s));
       setStudents(prev => {
         const updated = { ...prev };
@@ -1746,6 +1836,9 @@ const deleteResult = async (studentId, examId) => {
     if (error) {
       alert('Error creating student: ' + error.message);
     } else {
+      // Claim first: without the section on record the student would vanish
+      // from the roster on the next reload unless an exam happened to target it.
+      await claimSections(created.section);
       setStudentsList(prev => [...prev, created]);
       setStudents(prev => ({ ...prev, [created.id]: { name: created.full_name, section: created.section } }));
       setEditingStudentSections(prev => ({ ...prev, [created.id]: created.section }));
@@ -1778,6 +1871,7 @@ const deleteResult = async (studentId, examId) => {
     examsList.forEach(e => add(e.target_section));
     sharedExamsList.forEach(e => add(e.target_section));
     studentsList.forEach(st => add(st.section));
+    instructorSections.forEach(sec => add(sec));
     return [...set].sort((a, b) => a.localeCompare(b));
   })();
 
@@ -2669,10 +2763,21 @@ const deleteResult = async (studentId, examId) => {
                 (s.section || '').split(',').map(x => x.trim()).includes(studentSectionFilter)
               );
 
-          // Unique sections for the filter dropdown (from the full list)
-          const studentSections = ['All', ...[...new Set(
-            studentsList.flatMap(s => (s.section || '').split(',').map(x => x.trim()).filter(Boolean))
-          )].sort()];
+          // Unique sections for the filter dropdown — every section this
+          // instructor holds, plus any a student is in, so a section with no
+          // students yet is still selectable instead of silently missing.
+          const studentSections = ['All', ...[...new Set([
+            ...instructorSections,
+            ...studentsList.flatMap(s => (s.section || '').split(',').map(x => x.trim()).filter(Boolean)),
+          ])].sort()];
+
+          const inSection = (str, sec) => (str || '').split(',').map(x => x.trim()).includes(sec);
+          const mySectionChips = [...instructorSections].sort((a, b) => a.localeCompare(b)).map(sec => ({
+            name: sec,
+            students: studentsList.filter(s => inSection(s.section, sec)).length,
+            exams: [...examsList, ...sharedExamsList].filter(e => inSection(e.target_section, sec)).length,
+            claimed: claimedSections.has(sec),
+          }));
 
           // Group filtered students by section for section headers
           const groups = [];
@@ -2693,8 +2798,34 @@ const deleteResult = async (studentId, examId) => {
                 <div>
                   <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Students</h1>
                   <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>
-                    {instructorSections.size > 0 ? `Sections: ${[...instructorSections].join(', ')} · ` : ''}{studentsList.length} student{studentsList.length !== 1 ? 's' : ''}
+                    {studentsList.length} student{studentsList.length !== 1 ? 's' : ''} across {instructorSections.size} section{instructorSections.size !== 1 ? 's' : ''}
                   </p>
+                  {mySectionChips.length > 0 && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                      {mySectionChips.map(chip => (
+                        <span
+                          key={chip.name}
+                          className={`px-pill ${chip.students > 0 ? 'brand' : 'muted'}`}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                          title={
+                            chip.students === 0 && chip.exams === 0
+                              ? `${chip.name} is empty — no students, no exams`
+                              : `${chip.name}: ${chip.students} student${chip.students !== 1 ? 's' : ''}, ${chip.exams} exam${chip.exams !== 1 ? 's' : ''}`
+                          }
+                        >
+                          {chip.name}
+                          <span style={{ opacity: 0.7 }}>{chip.students}</span>
+                          {chip.claimed && chip.students === 0 && chip.exams === 0 && (
+                            <button
+                              onClick={() => releaseSection(chip.name)}
+                              title={`Remove ${chip.name} from your sections`}
+                              style={{ background: 'none', border: 'none', padding: 0, marginLeft: 2, cursor: 'pointer', color: 'inherit', fontSize: 14, lineHeight: 1, fontWeight: 700 }}
+                            >×</button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <button className="btn ghost sm" onClick={downloadStudentCSVTemplate}>
                   <Icon name="download" size={13} /> Download Template

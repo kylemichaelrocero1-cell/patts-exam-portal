@@ -1111,13 +1111,25 @@ const [targetSection, setTargetSection] = useState('');
       if (!section) { errors.push(`Row ${rowNum}: Section is required.`); return; }
       students.push({ full_name: name, student_email: email, student_code: code, section });
     });
-    // Flag in-file duplicates (same email or student_id appearing more than once in the CSV)
-    const seenEmails = new Map(), seenCodes = new Map();
+    // Flag in-file duplicates. One student listed twice for two different
+    // sections is a class list, not a mistake — only the same person in the
+    // same section twice is, so the section is part of what makes a row a
+    // duplicate. The identity columns still have to agree with each other.
+    const seenRows = new Map(), seenEmails = new Map(), seenCodes = new Map();
     students.forEach((s, i) => {
-      if (seenEmails.has(s.student_email)) errors.push(`Duplicate email in CSV: "${s.student_email}" (rows ${seenEmails.get(s.student_email) + 2} & ${i + 2})`);
-      else seenEmails.set(s.student_email, i);
-      if (seenCodes.has(s.student_code)) errors.push(`Duplicate Student ID in CSV: "${s.student_code}" (rows ${seenCodes.get(s.student_code) + 2} & ${i + 2})`);
-      else seenCodes.set(s.student_code, i);
+      const key = `${s.student_email}||${s.section.toLowerCase()}`;
+      if (seenRows.has(key)) errors.push(`Duplicate row in CSV: "${s.student_email}" is listed in "${s.section}" twice (rows ${seenRows.get(key) + 2} & ${i + 2})`);
+      else seenRows.set(key, i);
+
+      const emailFirst = seenEmails.get(s.student_email);
+      if (emailFirst !== undefined && students[emailFirst].student_code !== s.student_code) {
+        errors.push(`"${s.student_email}" is given two different Student IDs (rows ${emailFirst + 2} & ${i + 2})`);
+      } else if (emailFirst === undefined) seenEmails.set(s.student_email, i);
+
+      const codeFirst = seenCodes.get(s.student_code);
+      if (codeFirst !== undefined && students[codeFirst].student_email !== s.student_email) {
+        errors.push(`Student ID "${s.student_code}" is given to two different emails (rows ${codeFirst + 2} & ${i + 2})`);
+      } else if (codeFirst === undefined) seenCodes.set(s.student_code, i);
     });
     return { students, errors };
   };
@@ -1136,20 +1148,64 @@ const [targetSection, setTargetSection] = useState('');
     URL.revokeObjectURL(url);
   };
 
+  // A student is a person, not a seat. The same person sits in AENG 223L and
+  // in Esci 316 -1, and their roster row carries every section they are in as
+  // a comma-separated list. This used to skip any row whose email or Student
+  // ID was already on file, so importing a section made up of students who
+  // already existed added nobody: the new section was never written down, and
+  // the roster came back holding only the handful of genuinely new names.
+  // Match an existing person and merge the section into their list instead.
   const importStudentsFromCSV = async () => {
     if (!studentCsvParsed || studentCsvParsed.students.length === 0) return;
     setStudentCsvImporting(true);
     try {
-      const existing = await fetchAllRows(() => supabase.from('users').select('student_email, student_code'));
-      const existingEmails = new Set((existing || []).map(u => u.student_email));
-      const existingCodes = new Set((existing || []).map(u => u.student_code));
+      const existing = await fetchAllRows(() => supabase.from('users').select('id, student_email, student_code, section'));
+      const byEmail = new Map((existing || []).map(u => [u.student_email, u]));
+      const byCode = new Map((existing || []).map(u => [u.student_code, u]));
 
-      const toInsert = [], skipped = [];
+      const sectionsOf = (str) => (str || '').split(',').map(x => x.trim()).filter(Boolean);
+
+      const toInsert = [], toMerge = [], alreadyIn = [], conflicts = [];
+      // Two CSV rows can name the same person, so merges accumulate per user id
+      // rather than each overwriting the row the previous one just built.
+      const mergeById = new Map();
+      // ...and a student who is new to the system can also appear twice, for
+      // the two sections they are in. They must still become one row, or the
+      // second section would create a second person with the same email.
+      const newByEmail = new Map();
+
       studentCsvParsed.students.forEach(s => {
-        if (existingEmails.has(s.student_email)) { skipped.push(`${s.full_name} — email already exists`); return; }
-        if (existingCodes.has(s.student_code)) { skipped.push(`${s.full_name} — Student ID already exists`); return; }
-        toInsert.push(s);
+        const byE = byEmail.get(s.student_email);
+        const byC = byCode.get(s.student_code);
+        // Email points at one student and Student ID at another: a typo in the
+        // CSV, not a student in two sections. Writing either would corrupt a
+        // roster row, so leave it for a human.
+        if (byE && byC && byE.id !== byC.id) {
+          conflicts.push(`${s.full_name} — email belongs to one student, Student ID to another`);
+          return;
+        }
+        const match = byE || byC;
+        if (!match) {
+          const pending = newByEmail.get(s.student_email);
+          // A copy, so a failed import leaves the parsed file untouched and a
+          // retry does not double up the sections it appended last time.
+          if (!pending) { const row = { ...s }; newByEmail.set(s.student_email, row); toInsert.push(row); }
+          else if (!sectionsOf(pending.section).includes(s.section)) {
+            pending.section = `${pending.section}, ${s.section}`;
+          }
+          return;
+        }
+
+        const current = mergeById.get(match.id) || sectionsOf(match.section);
+        if (current.includes(s.section)) { alreadyIn.push(s.full_name); return; }
+        const next = [...current, s.section];
+        mergeById.set(match.id, next);
+        toMerge.push({ id: match.id, full_name: s.full_name, section: next.join(', ') });
       });
+
+      // Keep only the final state per student, so one UPDATE per person even
+      // when the CSV puts them in two new sections at once.
+      const finalMerges = [...mergeById.entries()].map(([id, secs]) => ({ id, section: secs.join(', ') }));
 
       let inserted = [];
       for (let i = 0; i < toInsert.length; i += 50) {
@@ -1158,27 +1214,43 @@ const [targetSection, setTargetSection] = useState('');
         if (data) inserted = [...inserted, ...data];
       }
 
-      if (inserted.length > 0) {
-        await claimSections(inserted.map(s => s.section));
-        setStudentsList(prev => [...prev, ...inserted]);
-        setStudents(prev => {
-          const next = { ...prev };
-          inserted.forEach(s => { next[s.id] = { name: s.full_name, section: s.section }; });
-          return next;
-        });
-        setEditingStudentSections(prev => {
-          const next = { ...prev };
-          inserted.forEach(s => { next[s.id] = s.section; });
-          return next;
-        });
+      const mergeFailures = [];
+      for (const m of finalMerges) {
+        const { error } = await supabase.from('users').update({ section: m.section }).eq('id', m.id);
+        if (error) mergeFailures.push(m.id);
+      }
+
+      // Claim every section the file touched — including one whose students all
+      // already existed, which would otherwise stay invisible on the dashboard.
+      const touchedSections = [...new Set(studentCsvParsed.students.map(s => s.section))];
+      if (touchedSections.length > 0) await claimSections(touchedSections);
+
+      // A merge can pull in a student who was not on this instructor's roster a
+      // moment ago, so rebuild from the server rather than patching local state.
+      if (inserted.length > 0 || finalMerges.length > mergeFailures.length) {
+        await fetchDashboardData();
       }
 
       setStudentCsvParsed(null);
-      let msg = `✅ ${inserted.length} student${inserted.length !== 1 ? 's' : ''} imported.`;
-      if (skipped.length > 0) {
-        const preview = skipped.slice(0, 8).join('\n');
-        const more = skipped.length > 8 ? `\n…and ${skipped.length - 8} more` : '';
-        msg += `\n\nSkipped ${skipped.length} duplicate${skipped.length !== 1 ? 's' : ''}:\n${preview}${more}`;
+
+      const mergedCount = finalMerges.length - mergeFailures.length;
+      const lines = [];
+      if (inserted.length > 0) lines.push(`✅ ${inserted.length} new student${inserted.length !== 1 ? 's' : ''} added.`);
+      if (mergedCount > 0) lines.push(`✅ ${mergedCount} existing student${mergedCount !== 1 ? 's' : ''} added to their new section.`);
+      if (alreadyIn.length > 0) lines.push(`${alreadyIn.length} already in that section — no change.`);
+      if (lines.length === 0) lines.push('Nothing to import.');
+      let msg = lines.join('\n');
+      const problems = [
+        ...conflicts,
+        ...mergeFailures.map(id => {
+          const m = toMerge.find(x => x.id === id);
+          return `${m ? m.full_name : id} — could not be updated`;
+        }),
+      ];
+      if (problems.length > 0) {
+        const preview = problems.slice(0, 8).join('\n');
+        const more = problems.length > 8 ? `\n…and ${problems.length - 8} more` : '';
+        msg += `\n\n⚠️ ${problems.length} row${problems.length !== 1 ? 's' : ''} need${problems.length === 1 ? 's' : ''} attention:\n${preview}${more}`;
       }
       alert(msg);
     } catch (err) {
@@ -2987,7 +3059,7 @@ const deleteResult = async (studentId, examId) => {
                   </button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--ink-3)' }}>
-                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>full_name, student_email, student_id, section</code> — duplicates (by email or Student ID) are skipped automatically.
+                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>full_name, student_email, student_id, section</code> — a student who is already on file is added to the section instead of being duplicated.
                 </p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

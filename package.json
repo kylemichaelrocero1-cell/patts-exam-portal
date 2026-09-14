@@ -13,10 +13,13 @@
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
     "test:material": "node src/lib/__tests__/lessonMaterial.test.mjs",
-    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:sections-scope",
+    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids",
     "test:review": "node sql/test/review.test.mjs",
     "test:preboards": "node sql/test/preboards_review.test.mjs",
-    "test:sections-scope": "node src/lib/__tests__/sectionScope.test.mjs"
+    "test:sections-scope": "node src/lib/__tests__/sectionScope.test.mjs",
+    "test:five-option": "node sql/test/five_option.test.mjs",
+    "test:student-identity": "node src/lib/__tests__/studentIdentity.test.mjs",
+    "test:shared-ids": "node sql/test/shared_student_ids.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

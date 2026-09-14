@@ -3,6 +3,7 @@ import Icon from './components/Icon';
 import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
 import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
+import { makeRosterIndex, resolveStudent } from './lib/studentIdentity';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
@@ -103,7 +104,14 @@ const [targetSection, setTargetSection] = useState('');
   const [qLoading, setQLoading] = useState(false);
   const [qSaving, setQSaving] = useState(false);
   const [editingQ, setEditingQ] = useState(null); // null = add mode, object = edit mode
-  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', correct_answer: 0, question_type: 'multiple_choice', image_url: null };
+  // An item has four or five choices; choice_e is NULL on the four-choice ones
+  // (sql/012). Everything that renders a question walks this rather than a
+  // hard-coded a..d, so a blank fifth slot is never drawn.
+  const choiceLettersOf = (q) => ['a', 'b', 'c', 'd', 'e']
+    .filter(L => q?.[`choice_${L}`] != null && String(q[`choice_${L}`]).trim() !== '');
+
+  // choice_e is optional (sql/012): blank means a four-choice item.
+  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', choice_e: '', correct_answer: 0, question_type: 'multiple_choice', image_url: null };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
   const [qImageFile, setQImageFile] = useState(null);
@@ -115,7 +123,7 @@ const [targetSection, setTargetSection] = useState('');
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvReplaceMode, setCsvReplaceMode] = useState(false);
   const [csvExamParsed, setCsvExamParsed] = useState(null); // { questions, errors } attached to Create Exam form
-  const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors } for Students tab
+  const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors, warnings } for Students tab
   const [studentCsvImporting, setStudentCsvImporting] = useState(false);
   // Every section this instructor teaches: their exams' targets, the sections
   // they have explicitly claimed (see claimSections), and the ones another
@@ -929,7 +937,11 @@ const [targetSection, setTargetSection] = useState('');
     if (!qForm.question_text.trim()) return alert('Question text is required.');
     if (qForm.question_type !== 'essay') {
       if (!qForm.choice_a.trim() || !qForm.choice_b.trim() || !qForm.choice_c.trim() || !qForm.choice_d.trim())
-        return alert('All four choices are required for multiple choice questions.');
+        return alert('The first four choices are required for multiple choice questions. The fifth is optional.');
+      // Keying E with no E to point at would mark every student wrong, and the
+      // database CHECK would reject the row anyway — say so in words first.
+      if (Number(qForm.correct_answer) === 4 && !(qForm.choice_e || '').trim())
+        return alert('Choice E is marked correct but has been left blank. Fill it in, or pick another correct answer.');
     }
 
     setQSaving(true);
@@ -963,6 +975,9 @@ const [targetSection, setTargetSection] = useState('');
       choice_b: isEssay ? null : qForm.choice_b.trim(),
       choice_c: isEssay ? null : qForm.choice_c.trim(),
       choice_d: isEssay ? null : qForm.choice_d.trim(),
+      // Blank stays NULL rather than '' so the four-choice path is unambiguous
+      // everywhere downstream — ExamBoard renders only the choices present.
+      choice_e: isEssay ? null : ((qForm.choice_e || '').trim() || null),
       correct_answer: isEssay ? null : Number(qForm.correct_answer),
       image_url: imageUrl || null,
     };
@@ -1006,6 +1021,7 @@ const [targetSection, setTargetSection] = useState('');
       choice_b: q.choice_b || '',
       choice_c: q.choice_c || '',
       choice_d: q.choice_d || '',
+      choice_e: q.choice_e || '',
       correct_answer: Number(q.correct_answer || 0),
       question_type: q.question_type || 'multiple_choice',
       image_url: q.image_url || null,
@@ -1039,13 +1055,24 @@ const [targetSection, setTargetSection] = useState('');
       const c = cols[3]?.trim() || '', d = cols[4]?.trim() || '';
       const isEssay = !a;
       if (isEssay) {
-        questions.push({ question_text: qText, question_type: 'essay', choice_a: null, choice_b: null, choice_c: null, choice_d: null, correct_answer: null });
+        questions.push({ question_text: qText, question_type: 'essay', choice_a: null, choice_b: null, choice_c: null, choice_d: null, choice_e: null, correct_answer: null });
       } else {
         if (!b || !c || !d) { errors.push(`Row ${idx + 2}: Missing choices — need A, B, C, and D`); return; }
-        const raw = cols[5]?.trim().toUpperCase() || '';
-        const map = { A: 0, B: 1, C: 2, D: 3, '0': 0, '1': 1, '2': 2, '3': 3 };
-        if (map[raw] === undefined) { errors.push(`Row ${idx + 2}: Invalid answer "${raw}" — use 0, 1, 2, or 3 (0=A 1=B 2=C 3=D)`); return; }
-        questions.push({ question_text: qText, question_type: 'multiple_choice', choice_a: a, choice_b: b, choice_c: c, choice_d: d, correct_answer: map[raw] });
+        // Two layouts have to work: the original
+        //   question_text, A, B, C, D, correct_answer
+        // and the five-choice one, which inserts choice_e before the answer.
+        // correct_answer is the last column in both, so read from the end
+        // rather than a fixed index — a file written before choice_e existed
+        // keeps importing unchanged.
+        const trimmed = [...cols];
+        while (trimmed.length && !(trimmed[trimmed.length - 1] ?? '').trim()) trimmed.pop();
+        const hasE = trimmed.length >= 7;
+        const e = hasE ? (trimmed[5]?.trim() || '') : '';
+        const raw = (trimmed[trimmed.length - 1]?.trim() || '').toUpperCase();
+        const map = { A: 0, B: 1, C: 2, D: 3, E: 4, '0': 0, '1': 1, '2': 2, '3': 3, '4': 4 };
+        if (map[raw] === undefined) { errors.push(`Row ${idx + 2}: Invalid answer "${raw}" — use 0–4 or A–E (0=A 1=B 2=C 3=D 4=E)`); return; }
+        if (map[raw] === 4 && !e) { errors.push(`Row ${idx + 2}: the answer is E but there is no choice E`); return; }
+        questions.push({ question_text: qText, question_type: 'multiple_choice', choice_a: a, choice_b: b, choice_c: c, choice_d: d, choice_e: e || null, correct_answer: map[raw] });
       }
     });
     return { questions, errors };
@@ -1053,10 +1080,11 @@ const [targetSection, setTargetSection] = useState('');
 
   const downloadCSVTemplate = () => {
     const csv = [
-      'question_text,choice_a,choice_b,choice_c,choice_d,correct_answer (0=A 1=B 2=C 3=D)',
-      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",0',
-      '"What is the primary function of an aileron?","Roll control","Pitch control","Yaw control","Speed control",0',
-      '"Explain Bernoulli\'s principle in your own words.",,,,, ',
+      'question_text,choice_a,choice_b,choice_c,choice_d,choice_e,correct_answer (0=A 1=B 2=C 3=D 4=E)',
+      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",,0',
+      '"What is the primary function of an aileron?","Roll control","Pitch control","Yaw control","Speed control",,0',
+      '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",4',
+      '"Explain Bernoulli\'s principle in your own words.",,,,,, ',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -1128,6 +1156,7 @@ const [targetSection, setTargetSection] = useState('');
     // sections is a class list, not a mistake — only the same person in the
     // same section twice is, so the section is part of what makes a row a
     // duplicate. The identity columns still have to agree with each other.
+    const warnings = [];
     const seenRows = new Map(), seenEmails = new Map(), seenCodes = new Map();
     students.forEach((s, i) => {
       const key = `${s.student_email}||${s.section.toLowerCase()}`;
@@ -1139,12 +1168,16 @@ const [targetSection, setTargetSection] = useState('');
         errors.push(`"${s.student_email}" is given two different Student IDs (rows ${emailFirst + 2} & ${i + 2})`);
       } else if (emailFirst === undefined) seenEmails.set(s.student_email, i);
 
+      // One Student ID against two different emails used to be an error. It is
+      // not: two students really can share an ID (sql/014), and the email is
+      // what tells them apart. Kept as a warning so a genuine typo still gets
+      // looked at, but it no longer blocks the import.
       const codeFirst = seenCodes.get(s.student_code);
       if (codeFirst !== undefined && students[codeFirst].student_email !== s.student_email) {
-        errors.push(`Student ID "${s.student_code}" is given to two different emails (rows ${codeFirst + 2} & ${i + 2})`);
+        warnings.push(`Student ID "${s.student_code}" is shared by ${students[codeFirst].student_email} and ${s.student_email} (rows ${codeFirst + 2} & ${i + 2}). They will be imported as two students.`);
       } else if (codeFirst === undefined) seenCodes.set(s.student_code, i);
     });
-    return { students, errors };
+    return { students, errors, warnings };
   };
 
   const downloadStudentCSVTemplate = () => {
@@ -1173,8 +1206,11 @@ const [targetSection, setTargetSection] = useState('');
     setStudentCsvImporting(true);
     try {
       const existing = await fetchAllRows(() => supabase.from('users').select('id, student_email, student_code, section'));
-      const byEmail = new Map((existing || []).map(u => [u.student_email, u]));
-      const byCode = new Map((existing || []).map(u => [u.student_code, u]));
+      // student_code is NOT unique any more (sql/014), so a Map of
+      // code -> student would silently keep whichever row came back last and
+      // hide the other. The rules live in src/lib/studentIdentity.js and are
+      // tested there — npm run test:student-identity.
+      const rosterIndex = makeRosterIndex(existing);
 
       const sectionsOf = (str) => (str || '').split(',').map(x => x.trim()).filter(Boolean);
 
@@ -1188,16 +1224,18 @@ const [targetSection, setTargetSection] = useState('');
       const newByEmail = new Map();
 
       studentCsvParsed.students.forEach(s => {
-        const byE = byEmail.get(s.student_email);
-        const byC = byCode.get(s.student_code);
-        // Email points at one student and Student ID at another: a typo in the
-        // CSV, not a student in two sections. Writing either would corrupt a
-        // roster row, so leave it for a human.
-        if (byE && byC && byE.id !== byC.id) {
+        // Email is the identity; a Student ID identifies only when exactly one
+        // student holds it. A row whose email is unknown and whose ID is shared
+        // therefore becomes a NEW student rather than being merged into
+        // whichever of the sharers happened to come back first.
+        const { match, conflict } = resolveStudent(s, rosterIndex);
+        if (conflict) {
+          // Email points at one student and the Student ID at another: a typo
+          // in the CSV, not a student in two sections. Writing either would
+          // corrupt a roster row, so leave it for a human.
           conflicts.push(`${s.full_name} — email belongs to one student, Student ID to another`);
           return;
         }
-        const match = byE || byC;
         if (!match) {
           const pending = newByEmail.get(s.student_email);
           // A copy, so a failed import leaves the parsed file untouched and a
@@ -1932,12 +1970,15 @@ const deleteResult = async (studentId, examId) => {
 
     setIsAddingStudent(true);
 
-    // Check for duplicate email and student code separately to avoid PostgREST filter injection
+    // Email is the identity of a student row and is still UNIQUE in the
+    // database. The Student ID is NOT (sql/014): two students really do share
+    // one, so a duplicate ID is allowed here — it is only half of a login
+    // credential, and the other half, the email, still tells them apart.
     const email = newStudentEmail.trim().toLowerCase();
     const code = newStudentCode.trim();
-    const [{ data: byEmail }, { data: byCode }] = await Promise.all([
+    const [{ data: byEmail }, { data: sameCode }] = await Promise.all([
       supabase.from('users').select('id').eq('student_email', email).limit(1),
-      supabase.from('users').select('id').eq('student_code', code).limit(1),
+      supabase.from('users').select('id, full_name').eq('student_code', code).limit(2),
     ]);
 
     if (byEmail?.length > 0) {
@@ -1945,8 +1986,12 @@ const deleteResult = async (studentId, examId) => {
       setIsAddingStudent(false);
       return;
     }
-    if (byCode?.length > 0) {
-      alert('A student with that Student ID already exists.');
+    // Not a blocker, but it is nearly always a typo, so make it deliberate.
+    if (sameCode?.length > 0 &&
+        !window.confirm(
+          `Student ID "${code}" already belongs to ${sameCode[0].full_name}.\n\n` +
+          'Two students can share an ID, and they will still sign in separately ' +
+          'with their own email addresses.\n\nAdd this student anyway?')) {
       setIsAddingStudent(false);
       return;
     }
@@ -3157,6 +3202,17 @@ const deleteResult = async (studentId, examId) => {
                     </ul>
                   </div>
                 )}
+
+                {studentCsvParsed?.warnings?.length > 0 && (
+                  <div style={{ marginTop: 12, background: 'var(--warn-bg, var(--surface-2))', border: '1px solid var(--warn-bd, var(--line))', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
+                    <p style={{ margin: '0 0 6px', fontWeight: 700, color: 'var(--warn, var(--ink-2))', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Icon name="alert" size={14} /> Worth a look — these do not block the import:
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--ink-2)', fontSize: 12 }}>
+                      {studentCsvParsed.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* ADD STUDENT FORM */}
@@ -3578,13 +3634,14 @@ const deleteResult = async (studentId, examId) => {
                 {qForm.question_type !== 'essay' && (
                   <>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                      {['a', 'b', 'c', 'd'].map((letter, i) => (
+                      {['a', 'b', 'c', 'd', 'e'].map((letter, i) => (
                         <div key={letter}>
                           <label className="label">
                             Choice {letter.toUpperCase()}
+                            {letter === 'e' && <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> (optional)</span>}
                             {Number(qForm.correct_answer) === i && <span className="px-pill ok" style={{ marginLeft: 8 }}>Correct</span>}
                           </label>
-                          <input className="input" type="text" value={qForm[`choice_${letter}`]} onChange={e => setQForm(f => ({ ...f, [`choice_${letter}`]: e.target.value }))} placeholder={`Choice ${letter.toUpperCase()}...`} style={Number(qForm.correct_answer) === i ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}} />
+                          <input className="input" type="text" value={qForm[`choice_${letter}`]} onChange={e => setQForm(f => ({ ...f, [`choice_${letter}`]: e.target.value }))} placeholder={letter === 'e' ? 'Leave blank for a four-choice question' : `Choice ${letter.toUpperCase()}...`} style={Number(qForm.correct_answer) === i ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}} />
                         </div>
                       ))}
                     </div>
@@ -3592,7 +3649,7 @@ const deleteResult = async (studentId, examId) => {
                     <div style={{ marginBottom: '16px' }}>
                       <label className="label">Correct Answer</label>
                       <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                        {['A', 'B', 'C', 'D'].map((letter, i) => (
+                        {(( qForm.choice_e || '').trim() ? ['A', 'B', 'C', 'D', 'E'] : ['A', 'B', 'C', 'D']).map((letter, i) => (
                           <label key={letter} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: Number(qForm.correct_answer) === i ? 700 : 400, color: Number(qForm.correct_answer) === i ? 'var(--ok)' : 'var(--ink-2)' }}>
                             <input type="radio" name="correct_answer" value={i} checked={Number(qForm.correct_answer) === i} onChange={() => setQForm(f => ({ ...f, correct_answer: i }))} style={{ width: '16px', height: '16px' }} />
                             Choice {letter}
@@ -3631,7 +3688,7 @@ const deleteResult = async (studentId, examId) => {
                   </button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--ink-3)' }}>
-                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>question_text, choice_a, choice_b, choice_c, choice_d, correct_answer</code> — leave choice_a blank for essay questions.
+                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>question_text, choice_a, choice_b, choice_c, choice_d, choice_e, correct_answer</code> — <code style={{ fontFamily: 'var(--font-mono)' }}>choice_e</code> is optional, so a file without it still imports. Leave choice_a blank for essay questions.
                 </p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -3711,11 +3768,11 @@ const deleteResult = async (studentId, examId) => {
                           </div>
                         ) : (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                            {['a', 'b', 'c', 'd'].map((letter, i) => (
+                            {choiceLettersOf(q).map((letter) => { const i = ['a','b','c','d','e'].indexOf(letter); return (
                               <div key={letter} style={{ padding: '6px 10px', borderRadius: 'var(--r-xs)', background: Number(q.correct_answer) === i ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1px solid ${Number(q.correct_answer) === i ? 'var(--ok-bd)' : 'var(--line)'}`, fontSize: '13px', color: Number(q.correct_answer) === i ? 'var(--ok)' : 'var(--ink-2)', fontWeight: Number(q.correct_answer) === i ? 600 : 400 }}>
                                 <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]}{Number(q.correct_answer) === i && ' ✓'}
                               </div>
-                            ))}
+                            ); })}
                           </div>
                         )}
                       </div>
@@ -4085,7 +4142,8 @@ const deleteResult = async (studentId, examId) => {
                         <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
                       )}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        {['a', 'b', 'c', 'd'].map((letter, i) => {
+                        {choiceLettersOf(q).map((letter) => {
+                          const i = ['a','b','c','d','e'].indexOf(letter);
                           const isCorrect = i === correctChoice;
                           const isStudentWrong = i === studentChoice && studentChoice !== correctChoice;
                           return (
@@ -4150,7 +4208,7 @@ const deleteResult = async (studentId, examId) => {
 
                 const examResults = results.filter(r => r.exam_id === viewingStatsExam);
                 const totalAnswers = examResults.length;
-                const counts = { 0: 0, 1: 0, 2: 0, 3: 0 };
+                const counts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
                 examResults.forEach(r => {
                   const aj = answersJsonCache[`${r.student_id}_${r.exam_id}`] || {};
                   const sAnswer = aj[q.id];
@@ -4164,7 +4222,8 @@ const deleteResult = async (studentId, examId) => {
                       <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 14 }} />
                     )}
                     <div style={{ display: 'grid', gap: '8px' }}>
-                      {['a', 'b', 'c', 'd'].map((letter, i) => {
+                      {choiceLettersOf(q).map((letter) => {
+                        const i = ['a','b','c','d','e'].indexOf(letter);
                         const count = counts[i];
                         const percentage = totalAnswers > 0 ? Math.round((count / totalAnswers) * 100) : 0;
                         const isCorrect = i === Number(q.correct_answer);

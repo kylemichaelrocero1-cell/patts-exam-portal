@@ -14,7 +14,7 @@ export const INSTRUCTOR_COLUMNS = {
   assessmentColumns:
     'id, kind, title, description, target_section, instructor_id, is_open, ' +
     'opens_at, closes_at, duration_minutes, has_password, exam_password, created_at, ' +
-    'allow_retakes, show_answers, score_policy',
+    'allow_retakes, show_answers, score_policy, shuffle_choices',
   examColumns:
     'id, title, description, target_section, instructor_id, is_open, ' +
     'duration_minutes, has_password, exam_password, created_at',
@@ -30,7 +30,8 @@ export {
 } from './assessmentsCore';
 
 export const ASSESSMENT_STUDENT_COLUMNS =
-  'id, title, duration_minutes, target_section, has_password, is_open, allow_retakes, show_answers';
+  'id, title, duration_minutes, target_section, has_password, is_open, allow_retakes, ' +
+  'show_answers, shuffle_choices';
 
 // ── Writes ──────────────────────────────────────────────────────────────
 // Mock exams are created straight into `assessments` and have no row in

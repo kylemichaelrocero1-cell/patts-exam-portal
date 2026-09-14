@@ -628,7 +628,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       const { data, error } = await supabase.from('questions')
         .select('id, exam_id, assessment_id, question_number, question_text, ' +
                 'question_type, category, choice_a, choice_b, choice_c, choice_d, ' +
-                'image_url, created_at')
+                'choice_e, image_url, created_at')
         .eq('exam_id', exam.id)
         .order('id', { ascending: true });
 
@@ -659,11 +659,23 @@ export default function ExamBoard({ student, exam, examSet }) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
+        // An item has four or five choices; choice_e is NULL on the four-choice
+        // ones (sql/012), so shuffle only the letters that actually carry text
+        // or a student is offered a blank fifth button.
+        //
+        // shuffle_choices is false on a paper whose options are ordered by
+        // design — ascending numeric answers, say — and then the stored order
+        // is kept. Question order is still randomised either way.
+        const keepOrder = exam.shuffle_choices === false;
         shuffled = shuffled.map(q => {
-          let letters = ['a', 'b', 'c', 'd'];
-          for (let i = letters.length - 1; i > 0; i--) {
-             const j = Math.floor(seededRandom() * (i + 1));
-             [letters[i], letters[j]] = [letters[j], letters[i]];
+          let letters = ['a', 'b', 'c', 'd', 'e']
+            .filter(L => q[`choice_${L}`] !== null && q[`choice_${L}`] !== undefined
+                      && String(q[`choice_${L}`]).trim() !== '');
+          if (!keepOrder) {
+            for (let i = letters.length - 1; i > 0; i--) {
+               const j = Math.floor(seededRandom() * (i + 1));
+               [letters[i], letters[j]] = [letters[j], letters[i]];
+            }
           }
           return { ...q, shuffled_letters: letters };
         });
@@ -673,7 +685,11 @@ export default function ExamBoard({ student, exam, examSet }) {
       setIsLoading(false);
     }
     loadQuestions();
-  }, [exam?.id, student?.id]);
+    // shuffle_choices decides the order the choices are built in, so it belongs
+    // here. Answers are keyed by question id and live in their own state, so a
+    // reload only re-orders what is on screen; nothing a student has picked is
+    // lost if an instructor flips the switch mid-sitting.
+  }, [exam?.id, student?.id, exam?.shuffle_choices]);
 
   if (isLoading && !isSubmitting) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)' }}>
@@ -782,7 +798,10 @@ export default function ExamBoard({ student, exam, examSet }) {
                 })()}
 
                 {reviewRows.map((r, i) => {
-                  const letters = ['A', 'B', 'C', 'D'];
+                  // get_answer_review returns five choices on a five-choice item
+                  // (sql/012), so the labels have to reach E or the last option
+                  // is rendered as "undefined."
+                  const letters = ['A', 'B', 'C', 'D', 'E'];
                   const unanswered = r.chosen === null || r.chosen === undefined;
                   return (
                     <div key={r.question_id || i} className="card" style={{
@@ -1048,7 +1067,9 @@ export default function ExamBoard({ student, exam, examSet }) {
           ) : (
             <div className="choices">
               {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
-                const originalIndex = ['a', 'b', 'c', 'd'].indexOf(letter);
+                // The index is the one stored against the paper, never the
+                // position on screen, so marking is unaffected by shuffling.
+                const originalIndex = ['a', 'b', 'c', 'd', 'e'].indexOf(letter);
                 return (
                   <button
                     key={letter}

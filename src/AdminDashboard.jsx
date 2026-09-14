@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
+import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
@@ -124,6 +125,18 @@ const [targetSection, setTargetSection] = useState('');
   // Sections claimed in section_instructors as (me, added_by = me). These are
   // what survive when the last exam for a section is deleted.
   const [claimedSections, setClaimedSections] = useState(new Set());
+
+  // A student's `section` column lists EVERY section they belong to, including
+  // ones run by other instructors — a student can sit in Esci 316 here and in
+  // AENG 223L with a colleague. This instructor may only see and edit their own
+  // slice of that list:
+  //   * showing the whole list leaks colleagues' section names into the roster,
+  //     the filters and the section pickers;
+  //   * saving the whole list back after editing only their own slice would
+  //     quietly un-enrol the student from the colleague's class.
+  // So split the list in two everywhere, and rejoin on save. The rules live in
+  // src/lib/sectionScope.js and are tested there — npm run test:sections-scope.
+  const mySectionsOf = (str) => sliceMine(str, instructorSections);
 
   // --- ADD STUDENT STATES ---
   const [newStudentName, setNewStudentName] = useState('');
@@ -1566,9 +1579,18 @@ async function fetchDashboardData() {
       // Process students
       const safeStudentsCopy = [...studentsData].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
       const studentDict = {}, studentSecs = {};
+      // Show and edit only this instructor's slice of each student's sections.
+      // `mySections` is the state-bound instructorSections of this load; the
+      // rest of the student's enrolments stay in the database untouched and are
+      // rejoined by saveStudentSection / batchUpdateSection.
+      const mineOf = (str) => (str || '').split(',').map(x => x.trim())
+        .filter(Boolean).filter(sec => mySections.has(sec));
       safeStudentsCopy.forEach(s => {
-        studentDict[s.id] = { name: s.full_name || 'Unknown', section: s.section || 'Unknown' };
-        studentSecs[s.id] = s.section || '';
+        studentDict[s.id] = {
+          name: s.full_name || 'Unknown',
+          section: mineOf(s.section).join(', ') || 'Unknown',
+        };
+        studentSecs[s.id] = mineOf(s.section).join(', ');
       });
 
       const myStudents = safeStudentsCopy.filter(s =>
@@ -1775,9 +1797,15 @@ const deleteResult = async (studentId, examId) => {
       alert('You can only manage students in your sections.');
       return;
     }
-    const newSection = editingStudentSections[studentId] || '';
+    const mineNow = editingStudentSections[studentId] || '';
 
-    const { error } = await supabase.from('users').update({ section: newSection }).eq('id', studentId);
+    // The picker only ever showed this instructor's sections, so the edited
+    // value is just their slice. Rejoin it with the sections the student holds
+    // under other instructors, or saving here would un-enrol them from those.
+    const current = studentsList.find(s => s.id === studentId);
+    const merged = mergeSections(mineNow, current?.section, instructorSections);
+
+    const { error } = await supabase.from('users').update({ section: merged }).eq('id', studentId);
 
     if (error) {
       alert("Error updating student. Please try again.");
@@ -1785,12 +1813,12 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
 
-    await claimSections(newSection);
+    await claimSections(mineNow);
     alert("Student section updated successfully!");
-    setStudentsList(prev => prev.map(s => s.id === studentId ? { ...s, section: newSection } : s));
+    setStudentsList(prev => prev.map(s => s.id === studentId ? { ...s, section: merged } : s));
     setStudents(prev => ({
       ...prev,
-      [studentId]: { ...prev[studentId], section: newSection }
+      [studentId]: { ...prev[studentId], section: splitSections(mineNow).join(', ') || 'Unknown' }
     }));
   };
 
@@ -1804,21 +1832,46 @@ const deleteResult = async (studentId, examId) => {
     const ownedStudentIds = new Set(studentsList.map(s => s.id));
     const ids = [...selectedStudentIds].filter(id => ownedStudentIds.has(id));
     if (ids.length === 0) { setIsBatchSaving(false); return alert('None of the selected students are in your sections.'); }
-    const { error } = await supabase.from('users').update({ section: batchSection.trim() }).in('id', ids);
+    // This sets THIS instructor's slice of each student's sections. Whatever
+    // the student holds under other instructors is carried over untouched, so
+    // a batch assignment here cannot un-enrol anyone from a colleague's class.
+    // The keep-list differs per student, so this cannot be one bulk update.
+    const mine = batchSection.trim();
+    const mergedById = new Map(ids.map(id => [
+      id,
+      mergeSections(mine, studentsList.find(s => s.id === id)?.section, instructorSections),
+    ]));
+
+    let error = null, done = 0;
+    for (let i = 0; i < ids.length && !error; i += 25) {
+      const chunk = ids.slice(i, i + 25);
+      const res = await Promise.all(chunk.map(id =>
+        supabase.from('users').update({ section: mergedById.get(id) }).eq('id', id)
+      ));
+      error = res.find(r => r.error)?.error || null;
+      if (!error) done += chunk.length;
+    }
 
     if (error) {
-      alert("Error updating students: " + error.message);
+      // Per-student writes mean a failure part-way leaves some already saved.
+      // Say so, and reload rather than leave the table showing a state that
+      // does not match the database.
+      alert(done > 0
+        ? `Updated ${done} of ${ids.length} students, then failed: ${error.message}\n\nReloading so the list matches the database.`
+        : `Error updating students: ${error.message}`);
+      setSelectedStudentIds(new Set());
+      if (done > 0) await fetchDashboardData();
     } else {
-      await claimSections(batchSection.trim());
-      setStudentsList(prev => prev.map(s => selectedStudentIds.has(s.id) ? { ...s, section: batchSection.trim() } : s));
+      await claimSections(mine);
+      setStudentsList(prev => prev.map(s => mergedById.has(s.id) ? { ...s, section: mergedById.get(s.id) } : s));
       setStudents(prev => {
         const updated = { ...prev };
-        ids.forEach(id => { if (updated[id]) updated[id] = { ...updated[id], section: batchSection.trim() }; });
+        ids.forEach(id => { if (updated[id]) updated[id] = { ...updated[id], section: mine }; });
         return updated;
       });
       setEditingStudentSections(prev => {
         const updated = { ...prev };
-        ids.forEach(id => { updated[id] = batchSection.trim(); });
+        ids.forEach(id => { updated[id] = mine; });
         return updated;
       });
       setSelectedStudentIds(new Set());
@@ -1934,18 +1987,14 @@ const deleteResult = async (studentId, examId) => {
     return `${m}m ${s}s`;
   };
 
-  // Every section this instructor could reasonably pick: the ones their own
-  // assessments target, plus the ones their students are actually in. Derived
-  // rather than typed, so the picker can only offer real values.
-  const allKnownSections = (() => {
-    const set = new Set();
-    const add = (str) => (str || '').split(',').map(x => x.trim()).filter(Boolean).forEach(x => set.add(x));
-    examsList.forEach(e => add(e.target_section));
-    sharedExamsList.forEach(e => add(e.target_section));
-    studentsList.forEach(st => add(st.section));
-    instructorSections.forEach(sec => add(sec));
-    return [...set].sort((a, b) => a.localeCompare(b));
-  })();
+  // Every section this instructor could reasonably pick — and ONLY those.
+  // instructorSections already folds in the sections their own assessments
+  // target, the ones they have claimed, and the ones a colleague co-assigned
+  // them, so it is the whole of what they hold. Deliberately NOT widened with
+  // the sections found on student rows or on exams shared with them: those
+  // carry other instructors' section names, which have no business in this
+  // instructor's picker.
+  const allKnownSections = [...instructorSections].sort((a, b) => a.localeCompare(b));
 
   const filteredAndSortedResults = results
     .filter(row => {
@@ -2836,12 +2885,10 @@ const deleteResult = async (studentId, examId) => {
               );
 
           // Unique sections for the filter dropdown — every section this
-          // instructor holds, plus any a student is in, so a section with no
-          // students yet is still selectable instead of silently missing.
-          const studentSections = ['All', ...[...new Set([
-            ...instructorSections,
-            ...studentsList.flatMap(s => (s.section || '').split(',').map(x => x.trim()).filter(Boolean)),
-          ])].sort()];
+          // instructor holds, including any with no students yet, and nothing
+          // else. Expanding student rows wholesale used to pull in the other
+          // sections those students sit in under different instructors.
+          const studentSections = ['All', ...[...instructorSections].sort()];
 
           const inSection = (str, sec) => (str || '').split(',').map(x => x.trim()).includes(sec);
           const mySectionChips = [...instructorSections].sort((a, b) => a.localeCompare(b)).map(sec => ({
@@ -2851,11 +2898,13 @@ const deleteResult = async (studentId, examId) => {
             claimed: claimedSections.has(sec),
           }));
 
-          // Group filtered students by section for section headers
+          // Group filtered students by section for section headers. Header by
+          // this instructor's slice only, so a student who also sits in a
+          // colleague's class does not get a header naming that class.
           const groups = [];
           let lastSection = null;
           filteredStudents.forEach(student => {
-            const sec = student.section || '';
+            const sec = mySectionsOf(student.section).join(', ');
             if (sec !== lastSection) {
               groups.push({ type: 'header', section: sec || 'No Section' });
               lastSection = sec;
@@ -3021,7 +3070,7 @@ const deleteResult = async (studentId, examId) => {
                               {student.full_name || 'Unknown'}
                             </div>
                           </td>
-                          <td><span className="px-pill brand">{student.section || '—'}</span></td>
+                          <td><span className="px-pill brand">{mySectionsOf(student.section).join(', ') || '—'}</span></td>
                           <td onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                               <SectionPicker
@@ -3031,7 +3080,7 @@ const deleteResult = async (studentId, examId) => {
                                 placeholder="No sections"
                                 compact
                               />
-                              <button onClick={() => saveStudentSection(student.id)} className="btn sm" style={{ opacity: editingStudentSections[student.id] !== student.section ? 1 : 0.4 }}>Save</button>
+                              <button onClick={() => saveStudentSection(student.id)} className="btn sm" style={{ opacity: editingStudentSections[student.id] !== mySectionsOf(student.section).join(', ') ? 1 : 0.4 }}>Save</button>
                             </div>
                           </td>
                           <td onClick={e => e.stopPropagation()}>
@@ -3324,14 +3373,9 @@ const deleteResult = async (studentId, examId) => {
           if (st) statusCounts[st]++;
         });
 
-        // Collect sections from both exam targets AND student records
-        // so every section a student belongs to is always filterable
-        const allAttendanceSections = new Set([
-          ...instructorSections,
-          ...studentsList.flatMap(s =>
-            (s.section || '').split(',').map(x => x.trim()).filter(Boolean)
-          ),
-        ]);
+        // Only the sections this instructor holds. Expanding student rows here
+        // used to surface the other sections those students sit in elsewhere.
+        const allAttendanceSections = new Set(instructorSections);
         const sectionOptions = allAttendanceSections.size > 0
           ? ['All', ...[...allAttendanceSections].sort()]
           : ['All'];

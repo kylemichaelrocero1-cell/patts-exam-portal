@@ -1074,12 +1074,17 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   const downloadCSVTemplate = () => {
+    // The example rows are the documentation: one of each width, so the rule
+    // "the answer is the last column, everything before it is a choice" can be
+    // read straight off the file without going back to the screen.
     const csv = [
       'question_text,choice_a,choice_b,choice_c,choice_d,choice_e,choice_f,choice_g,correct_answer',
-      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",,,,A',
-      '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",,,E',
-      '"Which are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A',
-      '"Explain Bernoulli\'s principle in your own words.",,,,,,,, ',
+      '"FOUR CHOICES — leave the unused choice columns empty","Pressure difference","Gravity","Drag","Thrust",,,,A',
+      '"FIVE CHOICES — the answer here is the fifth","Flap","Slat","Spoiler","Trim tab","Aileron",,,E',
+      '"SEVEN CHOICES — add as many columns as you need","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A',
+      '"TWO CHOICES — true or false works too","True","False",,,,,,B',
+      '"NUMBER INSTEAD OF A LETTER — 0 is A, 1 is B, 2 is C","Lift","Drag","Thrust","Weight",,,,2',
+      '"ESSAY — leave every choice column empty and no answer","","","","","","","",""',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -3768,9 +3773,31 @@ const deleteResult = async (studentId, examId) => {
                     <Icon name="download" size={13} /> Download Template
                   </button>
                 </div>
-                <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--ink-3)' }}>
-                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>question_text, choice…, correct_answer</code> — put <strong>as many choice columns as you need</strong> between the question and the answer; the answer is always the last column, given as a letter (A, B, C…) or a number counting from 0. Files written for four or five choices still import unchanged. Leave the first choice blank for essay questions.
-                </p>
+                <div style={{ margin: '0 0 12px', fontSize: '12.5px', color: 'var(--ink-2)', lineHeight: 1.65 }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '2px 6px', borderRadius: 3, fontSize: '12px' }}>
+                      question_text, choice_a, choice_b, … , correct_answer
+                    </code>
+                  </div>
+                  <ul style={{ margin: '0 0 10px', paddingLeft: 18 }}>
+                    <li><strong>Add as many choice columns as you like</strong> — four, five, seven, more. There is no limit, and every question in the file can have a different number.</li>
+                    <li><strong>The answer is always the last column.</strong> Everything between the question and it is treated as a choice, so blank columns are simply ignored.</li>
+                    <li>Write the answer as a letter — <code style={{ fontFamily: 'var(--font-mono)' }}>A</code>, <code style={{ fontFamily: 'var(--font-mono)' }}>B</code>, <code style={{ fontFamily: 'var(--font-mono)' }}>C</code>… — or as a number counting from zero (<code style={{ fontFamily: 'var(--font-mono)' }}>0</code> = A).</li>
+                    <li>For an <strong>essay</strong> question, leave every choice column and the answer empty.</li>
+                    <li>A file written for four or five choices still imports exactly as before — nothing needs changing.</li>
+                  </ul>
+                  <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '8px 10px', overflowX: 'auto' }}>
+                    <div style={{ fontSize: 11, color: 'var(--ink-4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
+                      A seven-choice question
+                    </div>
+                    <code style={{ fontFamily: 'var(--font-mono)', fontSize: '11.5px', whiteSpace: 'pre', color: 'var(--ink-2)' }}>
+                      "Which are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A
+                    </code>
+                  </div>
+                  <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--ink-3)' }}>
+                    The template below has one worked example of each shape. Delete the example rows, keep the header, and add your own.
+                  </p>
+                </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <label className={`btn ghost sm ${csvParsed ? 'ok' : ''}`} style={{ width: 'auto', cursor: 'pointer', ...(csvParsed ? { borderColor: 'var(--ok-bd)', color: 'var(--ok)', background: 'var(--ok-bg)' } : {}) }}>

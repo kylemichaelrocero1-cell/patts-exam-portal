@@ -88,6 +88,23 @@ check('at least one example keys the answer by number rather than a letter',
 check('at least one example keys an answer past D, which four columns could not hold',
   parsed.some(r => !r.essay && r.key > 3));
 
+console.log('\n=== the rows are questions, not instructions ===');
+{
+  // Anything in question_text is a question. A row that explained the format
+  // would either be imported as one or be read as part of the paper, so the
+  // explaining belongs on screen next to the button, not in the file.
+  const shouty = parsed.filter(r => /^[A-Z][A-Z ]{3,}\b/.test(r.qText));
+  check('no row shouts a format label in its question text', shouty.length === 0,
+    shouty.map(r => r.qText.slice(0, 40)).join(' | '));
+  const preachy = parsed.filter(r =>
+    /\b(column|leave|delete|template|instead of a letter|as many)\b/i.test(r.qText));
+  check('no row talks about the CSV format at all', preachy.length === 0,
+    preachy.map(r => r.qText.slice(0, 40)).join(' | '));
+  check('every row reads as a real question or task',
+    parsed.every(r => /[?.]$/.test(r.qText.trim())),
+    parsed.filter(r => !/[?.]$/.test(r.qText.trim())).map(r => r.qText.slice(0, 30)).join(' | '));
+}
+
 console.log('\n=== nothing in the file would show up as an import error ===');
 const broken = parsed.filter(r => !r.essay && !(r.list.length >= 2 && keyIsValid(r.key, r.list.length)));
 check('no row is an invalid question', broken.length === 0,

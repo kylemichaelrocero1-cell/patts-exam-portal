@@ -18,7 +18,7 @@
 
 export const ASSESSMENT_COLUMNS =
   'id, kind, title, description, target_section, instructor_id, is_open, ' +
-  'opens_at, closes_at, duration_minutes, has_password, created_at, ' +
+  'opens_at, closes_at, duration_minutes, has_password, created_at, archived_at, ' +
   // score_policy is deliberately absent: it governs what the instructor sees
   // and anon is not granted it (see sql/002b).
   'allow_retakes, show_answers';
@@ -40,6 +40,7 @@ export function normaliseExamRow(row) {
     closes_at: null,
     allow_retakes: false,  // and no retakes or answer reveal
     show_answers: false,
+    archived_at: null,     // and nothing there can be archived
   };
 }
 
@@ -85,6 +86,10 @@ export function makeAssessmentReader(from) {
 // one. Change them together — the test cross-checks against the real function.
 
 export function isAvailableNow(a, now = new Date()) {
+  // Archived beats everything: a put-away paper is unavailable however its
+  // is_open happens to be set. Archiving closes it too, so this is the second
+  // of two locks rather than the only one.
+  if (a?.archived_at) return false;
   if (!a?.is_open) return false;
   const t = now.getTime();
   if (a.opens_at && t < new Date(a.opens_at).getTime()) return false;
@@ -94,6 +99,7 @@ export function isAvailableNow(a, now = new Date()) {
 
 /** Why an assessment is not takeable — drives the student-facing label. */
 export function availabilityState(a, now = new Date()) {
+  if (a?.archived_at) return 'archived';
   if (!a?.is_open) return 'closed';
   const t = now.getTime();
   if (a.opens_at && t < new Date(a.opens_at).getTime()) return 'scheduled';

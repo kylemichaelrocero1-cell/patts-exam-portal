@@ -14,7 +14,7 @@ export const INSTRUCTOR_COLUMNS = {
   assessmentColumns:
     'id, kind, title, description, target_section, instructor_id, is_open, ' +
     'opens_at, closes_at, duration_minutes, has_password, exam_password, created_at, ' +
-    'allow_retakes, show_answers, score_policy, shuffle_choices',
+    'allow_retakes, show_answers, score_policy, shuffle_choices, archived_at',
   examColumns:
     'id, title, description, target_section, instructor_id, is_open, ' +
     'duration_minutes, has_password, exam_password, created_at',
@@ -31,7 +31,7 @@ export {
 
 export const ASSESSMENT_STUDENT_COLUMNS =
   'id, title, duration_minutes, target_section, has_password, is_open, allow_retakes, ' +
-  'show_answers, shuffle_choices';
+  'show_answers, shuffle_choices, archived_at';
 
 // ── Writes ──────────────────────────────────────────────────────────────
 // Mock exams are created straight into `assessments` and have no row in
@@ -100,3 +100,18 @@ export async function fetchAssessmentById(id, columns = ASSESSMENT_STUDENT_COLUM
   return r.data ? { ...r.data, kind: 'exam', allow_retakes: false, show_answers: false } : null;
 }
 
+// ── Archiving ───────────────────────────────────────────────────────────
+// Putting a paper away rather than deleting it: deleteExam() takes the
+// questions and the results with it, and a finished paper's scores are the
+// record of a semester.
+//
+// Archiving also CLOSES the paper. That is what actually keeps it out of the
+// student list, which queries on is_open; the archived_at check in
+// isAvailableNow() is the second lock, not the only one. Restoring
+// deliberately does NOT re-open it — coming back from the archive should
+// never put a live exam in front of a class by surprise.
+export async function setAssessmentArchived(id, archived) {
+  return updateAssessment(id, archived
+    ? { archived_at: new Date().toISOString(), is_open: false }
+    : { archived_at: null });
+}

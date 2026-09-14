@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
+import { choicesOf, letterFor } from './lib/choices';
 import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
 
@@ -627,8 +628,8 @@ export default function ExamBoard({ student, exam, examSet }) {
       // student can load the paper at all.
       const { data, error } = await supabase.from('questions')
         .select('id, exam_id, assessment_id, question_number, question_text, ' +
-                'question_type, category, choice_a, choice_b, choice_c, choice_d, ' +
-                'choice_e, image_url, created_at')
+                'question_type, category, choices, ' +
+                'choice_a, choice_b, choice_c, choice_d, choice_e, image_url, created_at')
         .eq('exam_id', exam.id)
         .order('id', { ascending: true });
 
@@ -659,25 +660,25 @@ export default function ExamBoard({ student, exam, examSet }) {
           [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
 
-        // An item has four or five choices; choice_e is NULL on the four-choice
-        // ones (sql/012), so shuffle only the letters that actually carry text
-        // or a student is offered a blank fifth button.
+        // An item carries any number of choices (sql/016), so shuffle the
+        // ORDER of its indices rather than a fixed list of letters. The index
+        // is what correct_answer means, so it travels with the choice and
+        // marking is unaffected by the order they are shown in.
         //
         // shuffle_choices is false on a paper whose options are ordered by
         // design — ascending numeric answers, say — and then the stored order
         // is kept. Question order is still randomised either way.
         const keepOrder = exam.shuffle_choices === false;
         shuffled = shuffled.map(q => {
-          let letters = ['a', 'b', 'c', 'd', 'e']
-            .filter(L => q[`choice_${L}`] !== null && q[`choice_${L}`] !== undefined
-                      && String(q[`choice_${L}`]).trim() !== '');
+          const opts = choicesOf(q);
+          let order = opts.map((_, i) => i);
           if (!keepOrder) {
-            for (let i = letters.length - 1; i > 0; i--) {
+            for (let i = order.length - 1; i > 0; i--) {
                const j = Math.floor(seededRandom() * (i + 1));
-               [letters[i], letters[j]] = [letters[j], letters[i]];
+               [order[i], order[j]] = [order[j], order[i]];
             }
           }
-          return { ...q, shuffled_letters: letters };
+          return { ...q, choice_list: opts, choice_order: order };
         });
         
         setQuestions(shuffled);
@@ -798,10 +799,6 @@ export default function ExamBoard({ student, exam, examSet }) {
                 })()}
 
                 {reviewRows.map((r, i) => {
-                  // get_answer_review returns five choices on a five-choice item
-                  // (sql/012), so the labels have to reach E or the last option
-                  // is rendered as "undefined."
-                  const letters = ['A', 'B', 'C', 'D', 'E'];
                   const unanswered = r.chosen === null || r.chosen === undefined;
                   return (
                     <div key={r.question_id || i} className="card" style={{
@@ -838,7 +835,7 @@ export default function ExamBoard({ student, exam, examSet }) {
                               border: `1px solid ${isKey ? 'var(--ok-bd)' : isMine ? 'var(--bad-bd)' : 'var(--line)'}`,
                               fontWeight: isKey || isMine ? 600 : 400,
                             }}>
-                              <strong style={{ flexShrink: 0 }}>{letters[ci]}.</strong>
+                              <strong style={{ flexShrink: 0 }}>{letterFor(ci)}.</strong>
                               <span style={{ flex: 1 }}>{choice}</span>
                               {isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>CORRECT</span>}
                               {isMine && !isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>YOUR ANSWER</span>}
@@ -1066,20 +1063,17 @@ export default function ExamBoard({ student, exam, examSet }) {
             </div>
           ) : (
             <div className="choices">
-              {(currentQ?.shuffled_letters || ['a','b','c','d']).map((letter) => {
-                // The index is the one stored against the paper, never the
-                // position on screen, so marking is unaffected by shuffling.
-                const originalIndex = ['a', 'b', 'c', 'd', 'e'].indexOf(letter);
-                return (
-                  <button
-                    key={letter}
-                    className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
-                    onClick={() => setAnswers({...answers, [currentQ.id]: originalIndex})}
-                  >
-                    {currentQ[`choice_${letter}`]}
-                  </button>
-                );
-              })}
+              {(currentQ?.choice_order || []).map((originalIndex) => (
+                // The stored index, never the position on screen, so marking
+                // is unaffected by the order the choices are shown in.
+                <button
+                  key={originalIndex}
+                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
+                  onClick={() => setAnswers({ ...answers, [currentQ.id]: originalIndex })}
+                >
+                  {(currentQ.choice_list || [])[originalIndex]}
+                </button>
+              ))}
             </div>
           )}
 

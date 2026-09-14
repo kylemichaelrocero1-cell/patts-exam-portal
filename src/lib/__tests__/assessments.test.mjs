@@ -94,6 +94,17 @@ await db.exec(`
     SELECT p_is_open
        AND (p_opens_at  IS NULL OR now() >= p_opens_at)
        AND (p_closes_at IS NULL OR now() <  p_closes_at);
+  $$;
+  -- The four-argument form from sql/015. Archiving must mean unavailable on
+  -- both sides, or an archived paper stays takeable on whichever side forgot.
+  CREATE OR REPLACE FUNCTION public.assessment_is_available(
+    p_is_open boolean, p_opens_at timestamptz, p_closes_at timestamptz,
+    p_archived_at timestamptz
+  ) RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT p_archived_at IS NULL
+       AND p_is_open
+       AND (p_opens_at  IS NULL OR now() >= p_opens_at)
+       AND (p_closes_at IS NULL OR now() <  p_closes_at);
   $$;`);
 
 const H = 3600 * 1000;
@@ -122,7 +133,32 @@ for (const [name, is_open, opens_at, closes_at] of cases) {
   check(`${name}: js=${js} sql=${sql}`, js === sql);
 }
 
+console.log('\n=== ARCHIVED, vs THE SAME SQL ===');
+{
+  const archivedCases = [
+    ['archived + open, no window',       true,  null,    null,    iso(-H)],
+    ['archived + closed',                false, null,    null,    iso(-H)],
+    ['archived + open, window active',   true,  iso(-H), iso(+H), iso(-H)],
+    ['NOT archived + open, window active', true, iso(-H), iso(+H), null],
+    ['NOT archived + closed',            false, null,    null,    null],
+  ];
+  for (const [name, is_open, opens_at, closes_at, archived_at] of archivedCases) {
+    const sql = (await db.query(
+      'SELECT public.assessment_is_available($1,$2,$3,$4) AS ok',
+      [is_open, opens_at, closes_at, archived_at]
+    )).rows[0].ok;
+    const js = isAvailableNow({ is_open, opens_at, closes_at, archived_at }, now);
+    check(`${name}: js=${js} sql=${sql}`, js === sql);
+  }
+  check('archiving beats an otherwise perfectly available paper',
+    isAvailableNow({ is_open: true, opens_at: iso(-H), closes_at: iso(+H), archived_at: iso(-H) }, now) === false);
+  check('and the three-argument SQL form is untouched by 015',
+    (await db.query('SELECT public.assessment_is_available(true,NULL,NULL) AS ok')).rows[0].ok === true);
+}
+
 console.log('\n=== STATE LABELS ===');
+check('archived -> archived, whatever else is set',
+  availabilityState({ is_open: true, archived_at: new Date().toISOString() }, now) === 'archived');
 check('closed -> closed',
   availabilityState({ is_open: false }, now) === 'closed');
 check('future window -> scheduled',

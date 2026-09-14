@@ -4,8 +4,9 @@ import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
 import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
 import { makeRosterIndex, resolveStudent } from './lib/studentIdentity';
+import { choicesOf, letterFor, choicesPatch, keyIsValid, indexForLetter } from './lib/choices';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
-         updateAssessment, deleteAssessment } from './lib/assessments';
+         updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -104,14 +105,9 @@ const [targetSection, setTargetSection] = useState('');
   const [qLoading, setQLoading] = useState(false);
   const [qSaving, setQSaving] = useState(false);
   const [editingQ, setEditingQ] = useState(null); // null = add mode, object = edit mode
-  // An item has four or five choices; choice_e is NULL on the four-choice ones
-  // (sql/012). Everything that renders a question walks this rather than a
-  // hard-coded a..d, so a blank fifth slot is never drawn.
-  const choiceLettersOf = (q) => ['a', 'b', 'c', 'd', 'e']
-    .filter(L => q?.[`choice_${L}`] != null && String(q[`choice_${L}`]).trim() !== '');
-
-  // choice_e is optional (sql/012): blank means a four-choice item.
-  const emptyQ = { question_text: '', choice_a: '', choice_b: '', choice_c: '', choice_d: '', choice_e: '', correct_answer: 0, question_type: 'multiple_choice', image_url: null };
+  // An item carries any number of choices (sql/016), so the form holds a list.
+  // Four is the starting point because that is what most papers use.
+  const emptyQ = { question_text: '', choice_list: ['', '', '', ''], correct_answer: 0, question_type: 'multiple_choice', image_url: null };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
   const [qImageFile, setQImageFile] = useState(null);
@@ -123,6 +119,9 @@ const [targetSection, setTargetSection] = useState('');
   const [csvImporting, setCsvImporting] = useState(false);
   const [csvReplaceMode, setCsvReplaceMode] = useState(false);
   const [csvExamParsed, setCsvExamParsed] = useState(null); // { questions, errors } attached to Create Exam form
+  // Archived papers are hidden from Manage Exams by default. They are still
+  // in examsList, so results and class review keep working on them.
+  const [showArchived, setShowArchived] = useState(false);
   const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors, warnings } for Students tab
   const [studentCsvImporting, setStudentCsvImporting] = useState(false);
   // Every section this instructor teaches: their exams' targets, the sections
@@ -936,12 +935,14 @@ const [targetSection, setTargetSection] = useState('');
     if (!qExamId) return;
     if (!qForm.question_text.trim()) return alert('Question text is required.');
     if (qForm.question_type !== 'essay') {
-      if (!qForm.choice_a.trim() || !qForm.choice_b.trim() || !qForm.choice_c.trim() || !qForm.choice_d.trim())
-        return alert('The first four choices are required for multiple choice questions. The fifth is optional.');
-      // Keying E with no E to point at would mark every student wrong, and the
-      // database CHECK would reject the row anyway — say so in words first.
-      if (Number(qForm.correct_answer) === 4 && !(qForm.choice_e || '').trim())
-        return alert('Choice E is marked correct but has been left blank. Fill it in, or pick another correct answer.');
+      const filled = choicesPatch(qForm.choice_list).choices;
+      if (filled.length < 2)
+        return alert('A multiple choice question needs at least two choices.');
+      // Keying a choice that has been left blank would mark every student
+      // wrong, and the database CHECK would reject the row anyway — say so in
+      // words first.
+      if (!keyIsValid(Number(qForm.correct_answer), filled.length))
+        return alert(`Choice ${letterFor(Number(qForm.correct_answer))} is marked correct but is blank or missing. Fill it in, or pick another correct answer.`);
     }
 
     setQSaving(true);
@@ -971,13 +972,9 @@ const [targetSection, setTargetSection] = useState('');
       exam_id: qExamId,
       question_text: qForm.question_text.trim(),
       question_type: qForm.question_type,
-      choice_a: isEssay ? null : qForm.choice_a.trim(),
-      choice_b: isEssay ? null : qForm.choice_b.trim(),
-      choice_c: isEssay ? null : qForm.choice_c.trim(),
-      choice_d: isEssay ? null : qForm.choice_d.trim(),
-      // Blank stays NULL rather than '' so the four-choice path is unambiguous
-      // everywhere downstream — ExamBoard renders only the choices present.
-      choice_e: isEssay ? null : ((qForm.choice_e || '').trim() || null),
+      // Only `choices` is written; the trigger in sql/016 mirrors the first
+      // five into choice_a..choice_e for clients still on the old build.
+      ...(isEssay ? { choices: [] } : choicesPatch(qForm.choice_list)),
       correct_answer: isEssay ? null : Number(qForm.correct_answer),
       image_url: imageUrl || null,
     };
@@ -1017,11 +1014,7 @@ const [targetSection, setTargetSection] = useState('');
     setEditingQ(q);
     setQForm({
       question_text: q.question_text,
-      choice_a: q.choice_a || '',
-      choice_b: q.choice_b || '',
-      choice_c: q.choice_c || '',
-      choice_d: q.choice_d || '',
-      choice_e: q.choice_e || '',
+      choice_list: (() => { const c = choicesOf(q); return c.length ? c : ['', '', '', '']; })(),
       correct_answer: Number(q.correct_answer || 0),
       question_type: q.question_type || 'multiple_choice',
       image_url: q.image_url || null,
@@ -1051,28 +1044,30 @@ const [targetSection, setTargetSection] = useState('');
     dataRows.forEach((cols, idx) => {
       const qText = cols[0]?.trim();
       if (!qText) return;
-      const a = cols[1]?.trim() || '', b = cols[2]?.trim() || '';
-      const c = cols[3]?.trim() || '', d = cols[4]?.trim() || '';
-      const isEssay = !a;
+      // A blank first choice is how an essay row is written.
+      const isEssay = !(cols[1]?.trim());
       if (isEssay) {
-        questions.push({ question_text: qText, question_type: 'essay', choice_a: null, choice_b: null, choice_c: null, choice_d: null, choice_e: null, correct_answer: null });
+        questions.push({ question_text: qText, question_type: 'essay', choices: [], correct_answer: null });
       } else {
-        if (!b || !c || !d) { errors.push(`Row ${idx + 2}: Missing choices — need A, B, C, and D`); return; }
-        // Two layouts have to work: the original
-        //   question_text, A, B, C, D, correct_answer
-        // and the five-choice one, which inserts choice_e before the answer.
-        // correct_answer is the last column in both, so read from the end
-        // rather than a fixed index — a file written before choice_e existed
-        // keeps importing unchanged.
+        // Any number of choice columns (sql/016). correct_answer is always the
+        // LAST column, so everything between the question and it is a choice —
+        // which means a 4-column file, a 5-column one and a 7-column one all
+        // import with no flag and no header needed.
         const trimmed = [...cols];
         while (trimmed.length && !(trimmed[trimmed.length - 1] ?? '').trim()) trimmed.pop();
-        const hasE = trimmed.length >= 7;
-        const e = hasE ? (trimmed[5]?.trim() || '') : '';
         const raw = (trimmed[trimmed.length - 1]?.trim() || '').toUpperCase();
-        const map = { A: 0, B: 1, C: 2, D: 3, E: 4, '0': 0, '1': 1, '2': 2, '3': 3, '4': 4 };
-        if (map[raw] === undefined) { errors.push(`Row ${idx + 2}: Invalid answer "${raw}" — use 0–4 or A–E (0=A 1=B 2=C 3=D 4=E)`); return; }
-        if (map[raw] === 4 && !e) { errors.push(`Row ${idx + 2}: the answer is E but there is no choice E`); return; }
-        questions.push({ question_text: qText, question_type: 'multiple_choice', choice_a: a, choice_b: b, choice_c: c, choice_d: d, choice_e: e || null, correct_answer: map[raw] });
+        const list = trimmed.slice(1, trimmed.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
+        if (list.length < 2) { errors.push(`Row ${idx + 2}: needs at least two choices`); return; }
+        const key = /^\d+$/.test(raw) ? Number(raw) : indexForLetter(raw);
+        if (key === null || key === undefined || Number.isNaN(key)) {
+          errors.push(`Row ${idx + 2}: invalid answer "${raw}" — use a letter (A, B, … ${letterFor(list.length - 1)}) or a number (0–${list.length - 1})`);
+          return;
+        }
+        if (!keyIsValid(key, list.length)) {
+          errors.push(`Row ${idx + 2}: the answer is ${letterFor(key)} but the row only has ${list.length} choices (A–${letterFor(list.length - 1)})`);
+          return;
+        }
+        questions.push({ question_text: qText, question_type: 'multiple_choice', choices: list, correct_answer: key });
       }
     });
     return { questions, errors };
@@ -1080,11 +1075,11 @@ const [targetSection, setTargetSection] = useState('');
 
   const downloadCSVTemplate = () => {
     const csv = [
-      'question_text,choice_a,choice_b,choice_c,choice_d,choice_e,correct_answer (0=A 1=B 2=C 3=D 4=E)',
-      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",,0',
-      '"What is the primary function of an aileron?","Roll control","Pitch control","Yaw control","Speed control",,0',
-      '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",4',
-      '"Explain Bernoulli\'s principle in your own words.",,,,,, ',
+      'question_text,choice_a,choice_b,choice_c,choice_d,choice_e,choice_f,choice_g,correct_answer',
+      '"What is lift?","Pressure difference","Gravity","Drag","Thrust",,,,A',
+      '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",,,E',
+      '"Which are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A',
+      '"Explain Bernoulli\'s principle in your own words.",,,,,,,, ',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -1725,6 +1720,24 @@ const deleteResult = async (studentId, examId) => {
     await fetchDashboardData();
     const label = newKind === 'seatwork' ? 'Seatwork' : 'Exam';
     alert(`${label} created!${csvQs.length > 0 ? ` ${csvQs.length} questions imported.` : ' Add questions in the Questions tab.'}`);
+  };
+
+  // Archive rather than delete: deleteExam takes the questions and the results
+  // with it, and a finished paper's scores are the record of a semester.
+  const toggleArchive = async (exam) => {
+    const archiving = !exam.archived_at;
+    if (archiving && exam.is_open &&
+        !window.confirm(`"${exam.title}" is OPEN. Archiving will close it and hide it from students.\n\nArchive it?`)) return;
+    try {
+      await setAssessmentArchived(exam.id, archiving);
+    } catch (e) {
+      alert('Could not ' + (archiving ? 'archive' : 'restore') + ' this exam: ' + (e.message || e));
+      return;
+    }
+    setExamsList(prev => prev.map(x => x.id === exam.id
+      ? { ...x, archived_at: archiving ? new Date().toISOString() : null,
+               is_open: archiving ? false : x.is_open }
+      : x));
   };
 
   // --- NEW: Delete Exam ---
@@ -2616,6 +2629,16 @@ const deleteResult = async (studentId, examId) => {
                 <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Manage Exams</h1>
                 <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>Edit titles, sections, time limits, and passwords.</p>
               </div>
+              {examsList.some(e => e.archived_at) && (
+                <button
+                  onClick={() => setShowArchived(v => !v)}
+                  className={showArchived ? 'btn sm' : 'btn ghost sm'}
+                  style={{ width: 'auto' }}
+                >
+                  <Icon name="archive" size={13} />
+                  {showArchived ? 'Hide archived' : `Show archived (${examsList.filter(e => e.archived_at).length})`}
+                </button>
+              )}
             </div>
 
             <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
@@ -2632,8 +2655,15 @@ const deleteResult = async (studentId, examId) => {
             </tr>
             </thead>
            <tbody>
-            {examsList.map((exam) => (
-              <tr key={exam.id}>
+            {examsList.filter(e => showArchived ? true : !e.archived_at).length === 0 && (
+              <tr><td colSpan={6} style={{ color: 'var(--ink-3)', fontSize: 13, padding: '18px 14px' }}>
+                {examsList.length === 0
+                  ? 'No exams yet.'
+                  : 'Every exam is archived. Use “Show archived” to bring one back.'}
+              </td></tr>
+            )}
+            {examsList.filter(e => showArchived ? true : !e.archived_at).map((exam) => (
+              <tr key={exam.id} style={exam.archived_at ? { opacity: 0.55 } : undefined}>
                 <td>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
@@ -2687,7 +2717,7 @@ const deleteResult = async (studentId, examId) => {
                     className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}
                     style={{ border: 'none', cursor: 'pointer' }}
                   >
-                    {exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
+                    {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
                   </button>
                 </td>
 
@@ -2727,7 +2757,9 @@ const deleteResult = async (studentId, examId) => {
 
                 {/* Actions */}
                 <td>
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  {/* Six buttons is wide for a phone; let them wrap onto a
+                      second line rather than stretch the table. */}
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button onClick={() => openDupModal(exam)} className="btn ghost sm"><Icon name="copy" size={13} /> Duplicate</button>
                     <button onClick={() => openShareModal(exam)} className="btn ghost sm" style={{ position: 'relative' }}>
                       <Icon name="users" size={13} /> Share
@@ -2748,6 +2780,17 @@ const deleteResult = async (studentId, examId) => {
                       style={{ width: 'auto' }}
                     >
                       <Icon name="refresh" size={13} /> Review
+                    </button>
+                    <button
+                      onClick={() => toggleArchive(exam)}
+                      className="btn ghost sm"
+                      title={exam.archived_at
+                        ? 'Bring this back into the list. It stays closed.'
+                        : 'Hide it from this list and from students. Questions and results are kept.'}
+                      style={{ width: 'auto' }}
+                    >
+                      <Icon name={exam.archived_at ? 'refresh' : 'archive'} size={13} />
+                      {exam.archived_at ? ' Restore' : ' Archive'}
                     </button>
                     <button onClick={() => deleteExam(exam.id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
                   </div>
@@ -2788,7 +2831,7 @@ const deleteResult = async (studentId, examId) => {
                             <td>{exam.target_section || '—'}</td>
                             <td>
                               <span className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}>
-                                {exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
+                                {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
                               </span>
                             </td>
                             <td>
@@ -3468,14 +3511,14 @@ const deleteResult = async (studentId, examId) => {
                   {sharedExamsList.length > 0 ? (
                     <>
                       <optgroup label="My Exams">
-                        {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                        {examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)}
                       </optgroup>
                       <optgroup label="Shared With Me">
                         {sharedExamsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
                       </optgroup>
                     </>
                   ) : (
-                    examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)
+                    examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)
                   )}
                 </select>
               </div>
@@ -3561,14 +3604,14 @@ const deleteResult = async (studentId, examId) => {
               {sharedExamsList.length > 0 ? (
                 <>
                   <optgroup label="My Exams">
-                    {examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                    {examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)}
                   </optgroup>
                   <optgroup label="Shared With Me">
                     {sharedExamsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
                   </optgroup>
                 </>
               ) : (
-                examsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)
+                examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)
               )}
             </select>
           </div>
@@ -3633,30 +3676,68 @@ const deleteResult = async (studentId, examId) => {
 
                 {qForm.question_type !== 'essay' && (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                      {['a', 'b', 'c', 'd', 'e'].map((letter, i) => (
-                        <div key={letter}>
-                          <label className="label">
-                            Choice {letter.toUpperCase()}
-                            {letter === 'e' && <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> (optional)</span>}
-                            {Number(qForm.correct_answer) === i && <span className="px-pill ok" style={{ marginLeft: 8 }}>Correct</span>}
+                    {/* One row per choice, added and removed freely. The radio
+                        lives on the row, so marking the correct one and typing
+                        it are the same gesture rather than two lists to keep in
+                        step. */}
+                    <label className="label" style={{ display: 'block', marginBottom: 6 }}>
+                      Choices <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>— tick the correct one</span>
+                    </label>
+                    <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+                      {qForm.choice_list.map((text, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <label title={`Mark ${letterFor(i)} correct`} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexShrink: 0 }}>
+                            <input
+                              type="radio"
+                              name="correct_answer"
+                              checked={Number(qForm.correct_answer) === i}
+                              onChange={() => setQForm(f => ({ ...f, correct_answer: i }))}
+                              style={{ width: 16, height: 16 }}
+                            />
+                            <span style={{ fontWeight: 700, fontSize: 13, width: 20, color: Number(qForm.correct_answer) === i ? 'var(--ok)' : 'var(--ink-3)' }}>
+                              {letterFor(i)}
+                            </span>
                           </label>
-                          <input className="input" type="text" value={qForm[`choice_${letter}`]} onChange={e => setQForm(f => ({ ...f, [`choice_${letter}`]: e.target.value }))} placeholder={letter === 'e' ? 'Leave blank for a four-choice question' : `Choice ${letter.toUpperCase()}...`} style={Number(qForm.correct_answer) === i ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}} />
+                          <input
+                            className="input"
+                            type="text"
+                            value={text}
+                            onChange={e => setQForm(f => {
+                              const next = [...f.choice_list]; next[i] = e.target.value;
+                              return { ...f, choice_list: next };
+                            })}
+                            placeholder={`Choice ${letterFor(i)}...`}
+                            style={{ flex: 1, ...(Number(qForm.correct_answer) === i ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}) }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setQForm(f => {
+                              const next = f.choice_list.filter((_, j) => j !== i);
+                              // Keep the tick on the same choice it was on: the
+                              // ones after the removed row all shift up by one.
+                              let key = Number(f.correct_answer);
+                              if (key === i) key = 0;
+                              else if (key > i) key -= 1;
+                              return { ...f, choice_list: next, correct_answer: key };
+                            })}
+                            disabled={qForm.choice_list.length <= 2}
+                            title={qForm.choice_list.length <= 2 ? 'A question needs at least two choices' : `Remove choice ${letterFor(i)}`}
+                            className="btn ghost sm"
+                            style={{ width: 'auto', flexShrink: 0, opacity: qForm.choice_list.length <= 2 ? 0.35 : 1 }}
+                          >
+                            <Icon name="trash" size={12} />
+                          </button>
                         </div>
                       ))}
                     </div>
-
-                    <div style={{ marginBottom: '16px' }}>
-                      <label className="label">Correct Answer</label>
-                      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-                        {(( qForm.choice_e || '').trim() ? ['A', 'B', 'C', 'D', 'E'] : ['A', 'B', 'C', 'D']).map((letter, i) => (
-                          <label key={letter} style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontWeight: Number(qForm.correct_answer) === i ? 700 : 400, color: Number(qForm.correct_answer) === i ? 'var(--ok)' : 'var(--ink-2)' }}>
-                            <input type="radio" name="correct_answer" value={i} checked={Number(qForm.correct_answer) === i} onChange={() => setQForm(f => ({ ...f, correct_answer: i }))} style={{ width: '16px', height: '16px' }} />
-                            Choice {letter}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQForm(f => ({ ...f, choice_list: [...f.choice_list, ''] }))}
+                      className="btn ghost sm"
+                      style={{ width: 'auto', marginBottom: 16 }}
+                    >
+                      <Icon name="plus" size={12} /> Add choice {letterFor(qForm.choice_list.length)}
+                    </button>
                   </>
                 )}
 
@@ -3688,7 +3769,7 @@ const deleteResult = async (studentId, examId) => {
                   </button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--ink-3)' }}>
-                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>question_text, choice_a, choice_b, choice_c, choice_d, choice_e, correct_answer</code> — <code style={{ fontFamily: 'var(--font-mono)' }}>choice_e</code> is optional, so a file without it still imports. Leave choice_a blank for essay questions.
+                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>question_text, choice…, correct_answer</code> — put <strong>as many choice columns as you need</strong> between the question and the answer; the answer is always the last column, given as a letter (A, B, C…) or a number counting from 0. Files written for four or five choices still import unchanged. Leave the first choice blank for essay questions.
                 </p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -3768,9 +3849,9 @@ const deleteResult = async (studentId, examId) => {
                           </div>
                         ) : (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                            {choiceLettersOf(q).map((letter) => { const i = ['a','b','c','d','e'].indexOf(letter); return (
+                            {choicesOf(q).map((choiceText, i) => { const letter = letterFor(i); return (
                               <div key={letter} style={{ padding: '6px 10px', borderRadius: 'var(--r-xs)', background: Number(q.correct_answer) === i ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1px solid ${Number(q.correct_answer) === i ? 'var(--ok-bd)' : 'var(--line)'}`, fontSize: '13px', color: Number(q.correct_answer) === i ? 'var(--ok)' : 'var(--ink-2)', fontWeight: Number(q.correct_answer) === i ? 600 : 400 }}>
-                                <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]}{Number(q.correct_answer) === i && ' ✓'}
+                                <strong>{letter}.</strong> {choiceText}{Number(q.correct_answer) === i && ' ✓'}
                               </div>
                             ); })}
                           </div>
@@ -4142,13 +4223,13 @@ const deleteResult = async (studentId, examId) => {
                         <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
                       )}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        {choiceLettersOf(q).map((letter) => {
-                          const i = ['a','b','c','d','e'].indexOf(letter);
+                        {choicesOf(q).map((choiceText, i) => {
+                          const letter = letterFor(i);
                           const isCorrect = i === correctChoice;
                           const isStudentWrong = i === studentChoice && studentChoice !== correctChoice;
                           return (
                             <div key={letter} style={{ padding: '10px 12px', background: isCorrect ? 'var(--ok-bg)' : isStudentWrong ? 'var(--bad-bg)' : 'var(--surface-2)', border: `1.5px solid ${isCorrect ? 'var(--ok-bd)' : isStudentWrong ? 'var(--bad-bd)' : 'var(--line)'}`, borderRadius: 'var(--r-sm)', color: isCorrect ? 'var(--ok)' : isStudentWrong ? 'var(--bad)' : 'var(--ink-2)', fontSize: '13.5px' }}>
-                              <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]}
+                              <strong>{letter}.</strong> {choiceText}
                               {isCorrect && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700 }}>✓ Correct</span>}
                               {isStudentWrong && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700 }}>✗ Picked</span>}
                             </div>
@@ -4208,11 +4289,11 @@ const deleteResult = async (studentId, examId) => {
 
                 const examResults = results.filter(r => r.exam_id === viewingStatsExam);
                 const totalAnswers = examResults.length;
-                const counts = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 };
+                const counts = {};   // any number of choices (sql/016)
                 examResults.forEach(r => {
                   const aj = answersJsonCache[`${r.student_id}_${r.exam_id}`] || {};
                   const sAnswer = aj[q.id];
-                  if (sAnswer !== undefined) counts[sAnswer.chosen]++;
+                  if (sAnswer !== undefined) counts[sAnswer.chosen] = (counts[sAnswer.chosen] || 0) + 1;
                 });
 
                 return (
@@ -4222,16 +4303,16 @@ const deleteResult = async (studentId, examId) => {
                       <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 14 }} />
                     )}
                     <div style={{ display: 'grid', gap: '8px' }}>
-                      {choiceLettersOf(q).map((letter) => {
-                        const i = ['a','b','c','d','e'].indexOf(letter);
-                        const count = counts[i];
+                      {choicesOf(q).map((choiceText, i) => {
+                        const letter = letterFor(i);
+                        const count = counts[i] || 0;
                         const percentage = totalAnswers > 0 ? Math.round((count / totalAnswers) * 100) : 0;
                         const isCorrect = i === Number(q.correct_answer);
                         return (
                           <div key={letter} style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', background: isCorrect ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1.5px solid ${isCorrect ? 'var(--ok-bd)' : 'var(--line)'}` }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                               <span style={{ fontWeight: isCorrect ? 700 : 500, color: isCorrect ? 'var(--ok)' : 'var(--ink-2)', fontSize: '13.5px' }}>
-                                <strong>{letter.toUpperCase()}.</strong> {q[`choice_${letter}`]}
+                                <strong>{letter}.</strong> {choiceText}
                                 {isCorrect && <span className="px-pill ok" style={{ marginLeft: 8, fontSize: '11px' }}>Correct</span>}
                               </span>
                               <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink-2)', whiteSpace: 'nowrap', marginLeft: 12 }}>{count} ({percentage}%)</span>

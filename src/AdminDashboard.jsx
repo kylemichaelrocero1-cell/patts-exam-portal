@@ -2034,13 +2034,47 @@ const deleteResult = async (studentId, examId) => {
     const email = newStudentEmail.trim().toLowerCase();
     const code = newStudentCode.trim();
     const [{ data: byEmail }, { data: sameCode }] = await Promise.all([
-      supabase.from('users').select('id').eq('student_email', email).limit(1),
+      supabase.from('users').select('id, full_name, section').eq('student_email', email).limit(1),
       supabase.from('users').select('id, full_name').eq('student_code', code).limit(2),
     ]);
 
+    // A student already on file is not an error. They are almost always
+    // somebody else's student who is now also in one of yours — a shared
+    // elective, a repeat, a transfer — and the thing to do is add your section
+    // to them, not refuse. Refusing used to leave no way through at all: the
+    // roster only lists students in your own sections, so the very student you
+    // needed to edit was the one you could not see.
     if (byEmail?.length > 0) {
-      alert('A student with that email already exists.');
+      const them = byEmail[0];
+      const want = newStudentSection.trim();
+      const already = splitSections(them.section);
       setIsAddingStudent(false);
+
+      if (already.includes(want)) {
+        alert(`${them.full_name} is already in ${want}.`);
+        return;
+      }
+      const theirs = already.filter(x => !instructorSections.has(x));
+      if (!window.confirm(
+        `${them.full_name} is already on file with that email` +
+        (already.length ? `, in ${already.join(', ')}` : '') + '.\n\n' +
+        `Add them to ${want} as well?` +
+        (theirs.length ? `\n\nThey stay in ${theirs.join(', ')} — nothing is taken away from ` +
+                         'the instructor who has them.' : ''))) return;
+
+      setIsAddingStudent(true);
+      const merged = [...already, want].join(', ');
+      const { error: mergeErr } = await supabase.from('users')
+        .update({ section: merged }).eq('id', them.id);
+      setIsAddingStudent(false);
+      if (mergeErr) return alert('Could not add them to your section: ' + mergeErr.message);
+
+      await claimSections(want);
+      setNewStudentName(''); setNewStudentEmail(''); setNewStudentCode(''); setNewStudentSection('');
+      // They may not have been on this instructor's roster a moment ago, so
+      // rebuild from the server rather than patching local state.
+      await fetchDashboardData();
+      alert(`${them.full_name} added to ${want}.`);
       return;
     }
     // Not a blocker, but it is nearly always a typo, so make it deliberate.

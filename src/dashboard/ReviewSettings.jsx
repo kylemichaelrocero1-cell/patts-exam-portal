@@ -99,9 +99,10 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
           <div style={{ background: 'var(--warn-bg)', border: '1.5px solid var(--warn-bd)', borderRadius: 'var(--r-md)', padding: '12px 14px', marginBottom: 16, display: 'flex', gap: 9 }}>
             <Icon name="alert" size={16} color="#B8860B" />
             <span style={{ fontSize: 13, color: '#7B5800', lineHeight: 1.55 }}>
-              This paper already has <strong>{a._resultCount} graded submissions</strong>. If you
-              might reuse these questions, duplicate it as a mock exam instead — switching answers
-              on here reveals the key for the real paper.
+              This paper already has <strong>{a._resultCount} graded submissions</strong>. Switching
+              review on opens the answers to every one of those students straight away, so treat the
+              questions as public from then on. If you might set this paper again, duplicate it as a
+              mock exam and open the copy instead.
             </span>
           </div>
         )}
@@ -113,8 +114,8 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
         />
         <ToggleRow
           on={answers} set={setAnswers} danger
-          label="Show correct answers after submitting"
-          hint="After a student submits, they can see which questions they got right and what the correct answer was. Only ever switch this on for practice material."
+          label="Let students review their answers"
+          hint="Students see which questions they got right and what the correct answer was, from the Summary tab of their portal. It reaches everyone who has already submitted, so the usual way to use it is to leave it off through the sitting and switch it on once the class is finished — they do not have to be mid-exam, and the paper does not have to stay open."
         />
 
         <div style={{ borderTop: '1px solid var(--line)', margin: '16px 0 12px', paddingTop: 14 }}>

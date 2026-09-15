@@ -193,6 +193,44 @@ console.log('\n=== ANSWER REVIEW (only after submitting, only when enabled) ==='
   ck('refused for a student who has not submitted', threw);
 }
 
+console.log('\n=== REVIEW OPENED AFTER THE SITTING (graded paper, no retakes) ===');
+{
+  // The case the Summary tab is built on: a real exam, sat and marked weeks
+  // ago, retakes OFF and the paper CLOSED, and the instructor only now
+  // switches review on. There is no review_attempts row for it — the answers
+  // have to come off the graded `results` row — and nothing about it may
+  // require the student to be mid-exam or the paper to be open.
+  const shut=await q(`SELECT is_open, allow_retakes FROM public.assessments WHERE id=$1`,[EX]);
+  ck('the paper is closed and takes no retakes', shut[0].is_open===false && shut[0].allow_retakes===false,
+     JSON.stringify(shut[0]));
+  const attempts=await q(`SELECT count(*)::int c FROM public.review_attempts
+                          WHERE student_id=$1 AND assessment_id=$2`,[STU,EX]);
+  ck('and has no practice attempt to fall back on', attempts[0].c===0, String(attempts[0].c));
+
+  await x(`UPDATE public.assessments SET show_answers=true WHERE id='${EX}'`);
+  const r=await q(`SELECT public.get_answer_review($1,$2,null) AS o`,[STU,EX]);
+  const rev=r[0].o;
+  ck('the graded paper becomes reviewable the moment the switch flips', rev.length===4, String(rev.length));
+  ck('read off the graded result, not an attempt', rev.every(z=>z.chosen!==null));
+  ck('with the key attached', rev.every(z=>z.correct!==null));
+  ck('and marked as it was marked (4/4)', rev.filter(z=>z.is_correct).length===4);
+  ck('essay still excluded', !rev.some(z=>z.question_text==='Essay'));
+
+  // Opening it up must not open it up for the whole section.
+  let other=false;
+  try { await q(`SELECT public.get_answer_review($1,$2,null)`,['22222222-2222-2222-2222-222222222222',EX]); }
+  catch { other=true; }
+  ck('a classmate who never sat it still gets nothing', other);
+
+  // And the instructor can take it back.
+  await x(`UPDATE public.assessments SET show_answers=false WHERE id='${EX}'`);
+  let shutAgain=false;
+  try { await q(`SELECT public.get_answer_review($1,$2,null)`,[STU,EX]); } catch { shutAgain=true; }
+  ck('switching it back off closes the answers again', shutAgain);
+  // Left OFF deliberately: EX is an AENG 426 paper, so 004's "no original made
+  // revealing" check below counts it among the mock-exam sources.
+}
+
 console.log('\n=== 004: MOCK EXAM CREATION ===');
 {
   // two AENG 426 papers per subject so the numbering can be checked

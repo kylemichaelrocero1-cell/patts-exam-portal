@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
-import { letterFor } from './lib/choices';
 import { prepareQuestions } from './lib/examOrder';
 import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
+import AnswerReview from './components/AnswerReview';
 
 export default function ExamBoard({ student, exam, examSet }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
@@ -733,11 +733,11 @@ export default function ExamBoard({ student, exam, examSet }) {
           </div>
         </div>
 
-        {/* Answer review.
-            This sits BELOW the navy hero band, on the light page background —
-            the first version reused the hero's white-on-navy text colours and
-            rendered white on white, so every question and choice was invisible.
-            Everything here is explicitly inked for a light surface. */}
+        {/* Answer review. Sits BELOW the navy hero band, on the light page
+            background — AnswerReview inks itself for a light surface, which is
+            why it must stay outside that band. Not the only way in any more:
+            the Summary tab reopens this for any paper the instructor has
+            switched review on for, including long after the sitting. */}
         {canReviewAnswers && (
           <div style={{ maxWidth: 820, margin: '0 auto', width: '100%', padding: '0 4px' }}>
             {reviewRows === null ? (
@@ -753,75 +753,7 @@ export default function ExamBoard({ student, exam, examSet }) {
                 </button>
               </div>
             ) : (
-              <div style={{ marginBottom: 34, textAlign: 'left' }}>
-                {(() => {
-                  const right = reviewRows.filter(r => r.is_correct).length;
-                  const blank = reviewRows.filter(r => r.chosen === null || r.chosen === undefined).length;
-                  return (
-                    <div className="card" style={{ padding: '14px 18px', marginBottom: 14, display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--ink-1)' }}>Answer review</h2>
-                      <span style={{ fontSize: 13, color: 'var(--ok)', fontWeight: 700 }}>{right} correct</span>
-                      <span style={{ fontSize: 13, color: 'var(--bad)', fontWeight: 700 }}>{reviewRows.length - right - blank} wrong</span>
-                      {blank > 0 && <span style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 700 }}>{blank} blank</span>}
-                    </div>
-                  );
-                })()}
-
-                {reviewRows.map((r, i) => {
-                  const unanswered = r.chosen === null || r.chosen === undefined;
-                  return (
-                    <div key={r.question_id || i} className="card" style={{
-                      padding: '16px 18px', marginBottom: 12,
-                      borderLeft: `4px solid ${r.is_correct ? 'var(--ok)' : unanswered ? 'var(--ink-4)' : 'var(--bad)'}`,
-                    }}>
-                      <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginBottom: 12 }}>
-                        <span style={{
-                          flexShrink: 0, width: 22, height: 22, borderRadius: '50%',
-                          display: 'grid', placeItems: 'center', marginTop: 1,
-                          background: r.is_correct ? 'var(--ok-bg)' : unanswered ? 'var(--surface-2)' : 'var(--bad-bg)',
-                          color: r.is_correct ? 'var(--ok)' : unanswered ? 'var(--ink-4)' : 'var(--bad)',
-                          fontWeight: 800, fontSize: 12,
-                        }}>
-                          {r.is_correct ? '✓' : unanswered ? '–' : '✕'}
-                        </span>
-                        <span style={{ color: 'var(--ink-1)', fontSize: 14.5, lineHeight: 1.6, fontWeight: 500 }}>
-                          <strong style={{ marginRight: 6 }}>{r.question_number ?? i + 1}.</strong>
-                          {r.question_text}
-                        </span>
-                      </div>
-
-                      <div style={{ display: 'grid', gap: 5 }}>
-                        {(r.choices || []).map((choice, ci) => {
-                          const isKey = ci === r.correct;
-                          const isMine = ci === r.chosen;
-                          return (
-                            <div key={ci} style={{
-                              fontSize: 13.5, padding: '7px 11px', borderRadius: 'var(--r-sm)',
-                              display: 'flex', gap: 8, alignItems: 'flex-start',
-                              // Neutral choices stay readable ink, not washed out.
-                              color: isKey ? 'var(--ok)' : isMine ? 'var(--bad)' : 'var(--ink-2)',
-                              background: isKey ? 'var(--ok-bg)' : isMine ? 'var(--bad-bg)' : 'var(--surface-2)',
-                              border: `1px solid ${isKey ? 'var(--ok-bd)' : isMine ? 'var(--bad-bd)' : 'var(--line)'}`,
-                              fontWeight: isKey || isMine ? 600 : 400,
-                            }}>
-                              <strong style={{ flexShrink: 0 }}>{letterFor(ci)}.</strong>
-                              <span style={{ flex: 1 }}>{choice}</span>
-                              {isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>CORRECT</span>}
-                              {isMine && !isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>YOUR ANSWER</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {unanswered && (
-                        <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginTop: 9, fontStyle: 'italic' }}>
-                          You left this blank.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <AnswerReview rows={reviewRows} />
             )}
           </div>
         )}

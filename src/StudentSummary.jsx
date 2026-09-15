@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
+import AnswerReview from './components/AnswerReview';
 import { supabase } from './supabase';
 import {
   selectAssessments, availabilityState, formatWindow, KIND_LABEL,
@@ -29,6 +30,9 @@ function Stat({ label, value, sub, tone = 'var(--navy)' }) {
 export default function StudentSummary({ student, selectedSection, onGoToTab }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  // The marked paper, once the student asks for it: { title, rows }.
+  const [review, setReview] = useState(null);
+  const [reviewBusy, setReviewBusy] = useState(null);   // exam_id being fetched
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +85,17 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         // Practice never counts as "done" — a retakeable paper stays open.
         const doneIds = new Set(graded.map(r => r.exam_id));
 
+        // Titles and the answer-review switch have to come from the papers
+        // BEHIND the results, not from `mine`: `mine` is open papers only, and
+        // an instructor almost always CLOSES an exam before letting the class
+        // look at it. Reading from `mine` alone is why a finished paper showed
+        // up here as a bare "Assessment" with no way back into it.
+        const resultIds = [...new Set(results.map(r => r.exam_id).filter(Boolean))];
+        const behind = resultIds.length
+          ? await selectAssessments(q => q.in('id', resultIds))
+          : [];
+        if (cancelled) return;
+
         // Lessons tables may not exist on an un-migrated database; treat a
         // failure as "no lessons" rather than breaking the whole summary.
         const lessons = (lessonsRes.data || []).filter(l => lessonVisibleTo(l, selectedSection));
@@ -90,7 +105,15 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           todo: mine.filter(a => !doneIds.has(a.id) && availabilityState(a) === 'open'),
           upcoming: mine.filter(a => availabilityState(a) === 'scheduled'),
           results: results.slice().sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
-          titles: Object.fromEntries(mine.map(a => [a.id, a.title])),
+          titles: Object.fromEntries([
+            ...mine.map(a => [a.id, a.title]),
+            ...behind.map(a => [a.id, a.title]),
+          ]),
+          // Whose answers the instructor has opened up. The server enforces
+          // this too — get_answer_review() refuses on a paper with
+          // show_answers off — so this only decides whether to offer the
+          // button, never whether the key may be handed over.
+          reviewable: new Set(behind.filter(a => a.show_answers).map(a => a.id)),
           lessons, completed,
         });
       } catch (err) {
@@ -101,6 +124,27 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     return () => { cancelled = true; };
   }, [student.id, selectedSection]);
 
+  // The only route to a correct answer, and it is the server's decision:
+  // get_answer_review() refuses unless the paper has show_answers on AND this
+  // student has already submitted it. So a stale page that still shows the
+  // button after the instructor closes review again fails here, not silently.
+  const openReview = async (examId, title) => {
+    setReviewBusy(examId);
+    const { data: rows, error: rpcError } = await supabase.rpc('get_answer_review', {
+      p_student_id: student.id,
+      p_assessment_id: examId,
+      p_attempt_no: null,
+    });
+    setReviewBusy(null);
+    if (rpcError) {
+      alert(/not available/i.test(rpcError.message)
+        ? 'Your instructor has not opened the answers for this one.'
+        : 'Could not load the answers. Please try again.');
+      return;
+    }
+    setReview({ title, rows: rows || [] });
+  };
+
   if (error) {
     return <div className="card" style={{ ...card, maxWidth: 860, margin: '0 auto' }}>{error}</div>;
   }
@@ -108,13 +152,18 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     return <div style={{ textAlign: 'center', color: 'var(--ink-3)', padding: 40 }}>Loading your summary…</div>;
   }
 
-  const { todo, upcoming, results, titles, lessons, completed } = data;
+  const { todo, upcoming, results, titles, reviewable, lessons, completed } = data;
 
   // Only graded work counts toward an average; a 0/0 row would drag it to zero.
   const graded = results.filter(r => r.total_items > 0);
   const avg = graded.length
     ? Math.round(graded.reduce((a, r) => a + (r.score / r.total_items) * 100, 0) / graded.length)
     : null;
+
+  // The Answers column earns its width only if something in view is actually
+  // reviewable — otherwise it is a row of dashes on a phone.
+  const shown = results.slice(0, 8);
+  const anyReviewable = shown.some(r => reviewable.has(r.exam_id));
 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
@@ -188,10 +237,15 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
             <div className="table-scroll">
               <table>
                 <thead>
-                  <tr><th>Assessment</th><th style={{ textAlign: 'right' }}>Score</th><th style={{ textAlign: 'right' }}>Submitted</th></tr>
+                  <tr>
+                    <th>Assessment</th>
+                    <th style={{ textAlign: 'right' }}>Score</th>
+                    <th style={{ textAlign: 'right' }}>Submitted</th>
+                    {anyReviewable && <th style={{ textAlign: 'right' }}>Answers</th>}
+                  </tr>
                 </thead>
                 <tbody>
-                  {results.slice(0, 8).map(r => {
+                  {shown.map(r => {
                     const pct = r.total_items > 0 ? Math.round((r.score / r.total_items) * 100) : null;
                     return (
                       <tr key={`${r.exam_id}-${r.is_practice ? 'p' : 'g'}`}>
@@ -209,6 +263,23 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                         <td style={{ textAlign: 'right', color: 'var(--ink-4)', fontSize: 12.5 }}>
                           {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}
                         </td>
+                        {anyReviewable && (
+                          <td style={{ textAlign: 'right' }}>
+                            {reviewable.has(r.exam_id) ? (
+                              <button
+                                className="btn ghost sm"
+                                style={{ width: 'auto' }}
+                                disabled={reviewBusy === r.exam_id}
+                                onClick={() => openReview(r.exam_id, titles[r.exam_id] || 'Assessment')}
+                              >
+                                <Icon name="eye" size={13} />
+                                {reviewBusy === r.exam_id ? 'Loading…' : 'Review'}
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>—</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -217,6 +288,36 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
             </div>
           </div>
         </>
+      )}
+
+      {/* The marked paper. An overlay rather than an inline expansion: fifty
+          questions unrolled inside the summary would bury everything under it,
+          and a click on the backdrop puts the student straight back.
+          It scrolls itself — alignItems must stay flex-start or a long review
+          centres and the first questions go off the top, out of reach. */}
+      {review && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', zIndex: 1200, padding: 20, overflowY: 'auto' }}
+          onClick={e => { if (e.target === e.currentTarget) setReview(null); }}
+        >
+          <div style={{ width: '100%', maxWidth: 820 }}>
+            <div className="card" style={{ padding: '14px 18px', marginBottom: 14, display: 'flex', gap: 12, alignItems: 'center', position: 'sticky', top: 0, zIndex: 1 }}>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {review.title}
+              </h2>
+              <button className="btn ghost sm" style={{ width: 'auto', flexShrink: 0 }} onClick={() => setReview(null)}>
+                Close
+              </button>
+            </div>
+            {review.rows.length === 0 ? (
+              <div className="card" style={{ ...card, color: 'var(--ink-3)', fontSize: 13.5 }}>
+                There is nothing to review on this paper — it has no multiple-choice questions.
+              </div>
+            ) : (
+              <AnswerReview rows={review.rows} />
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

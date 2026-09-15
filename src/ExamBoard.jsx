@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
-import { choicesOf, letterFor } from './lib/choices';
+import { letterFor } from './lib/choices';
+import { prepareQuestions } from './lib/examOrder';
 import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
 
@@ -631,7 +632,10 @@ export default function ExamBoard({ student, exam, examSet }) {
                 'question_type, category, choices, ' +
                 'choice_a, choice_b, choice_c, choice_d, choice_e, image_url, created_at')
         .eq('exam_id', exam.id)
-        .order('id', { ascending: true });
+        // question_number, not id. It only ever served as a stable base for the
+        // shuffle, and a uuid order is arbitrary — but once the shuffle can be
+        // switched off (sql/017) the base order is what students actually see.
+        .order('question_number', { ascending: true });
 
       if (error || !data || data.length === 0) {
         console.error("Error loading questions:", error);
@@ -641,56 +645,21 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
 
       if (data) {
-        let seed = 0;
-        if (student?.id) {
-          for (let i = 0; i < student.id.length; i++) {
-            seed = (seed * 31 + student.id.charCodeAt(i)) >>> 0;
-          }
-        } else {
-          seed = 123;
-        }
-        const seededRandom = () => {
-          let x = Math.sin(seed++) * 10000;
-          return x - Math.floor(x);
-        };
-
-        let shuffled = [...data];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(seededRandom() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-
-        // An item carries any number of choices (sql/016), so shuffle the
-        // ORDER of its indices rather than a fixed list of letters. The index
-        // is what correct_answer means, so it travels with the choice and
-        // marking is unaffected by the order they are shown in.
-        //
-        // shuffle_choices is false on a paper whose options are ordered by
-        // design — ascending numeric answers, say — and then the stored order
-        // is kept. Question order is still randomised either way.
-        const keepOrder = exam.shuffle_choices === false;
-        shuffled = shuffled.map(q => {
-          const opts = choicesOf(q);
-          let order = opts.map((_, i) => i);
-          if (!keepOrder) {
-            for (let i = order.length - 1; i > 0; i--) {
-               const j = Math.floor(seededRandom() * (i + 1));
-               [order[i], order[j]] = [order[j], order[i]];
-            }
-          }
-          return { ...q, choice_list: opts, choice_order: order };
-        });
-        
-        setQuestions(shuffled);
+        // Order, and per-question choice order, both seeded on the student so
+        // a reload gives the same paper back. See src/lib/examOrder.js.
+        setQuestions(prepareQuestions(data, exam, student?.id));
       }
       setIsLoading(false);
     }
     loadQuestions();
-    // shuffle_choices decides the order the choices are built in, so it belongs
+    // The two switches decide the order the paper is built in, so they belong
     // here. Answers are keyed by question id and live in their own state, so a
     // reload only re-orders what is on screen; nothing a student has picked is
-    // lost if an instructor flips the switch mid-sitting.
-  }, [exam?.id, student?.id, exam?.shuffle_choices]);
+    // lost if an instructor flips a switch mid-sitting. `exam` itself is NOT a
+    // dependency: it is a fresh object on every parent render, which would
+    // refetch and reshuffle the paper continuously.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exam?.id, student?.id, exam?.shuffle_choices, exam?.shuffle_questions]);
 
   if (isLoading && !isSubmitting) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)' }}>

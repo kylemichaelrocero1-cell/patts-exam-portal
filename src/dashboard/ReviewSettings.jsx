@@ -32,6 +32,10 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   const a = assessment;
   const [retakes, setRetakes] = useState(!!a.allow_retakes);
   const [answers, setAnswers] = useState(!!a.show_answers);
+  // Both default ON: a paper created before these switches existed, or with
+  // the column absent, must keep shuffling exactly as it always has.
+  const [shufQ, setShufQ] = useState(a.shuffle_questions !== false);
+  const [shufC, setShufC] = useState(a.shuffle_choices !== false);
   // Kept as-is on save so an existing paper's stored policy is not silently
   // rewritten; nothing in the dashboard reads it any more.
   const policy = a.score_policy || 'latest';
@@ -46,11 +50,15 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   const save = async () => {
     setBusy(true);
     const { error } = await supabase.from('assessments')
-      .update({ allow_retakes: retakes, show_answers: answers, score_policy: policy })
+      .update({
+        allow_retakes: retakes, show_answers: answers, score_policy: policy,
+        shuffle_questions: shufQ, shuffle_choices: shufC,
+      })
       .eq('id', a.id);
     setBusy(false);
     if (error) return alert('Could not save: ' + error.message);
-    onSaved?.({ ...a, allow_retakes: retakes, show_answers: answers, score_policy: policy });
+    onSaved?.({ ...a, allow_retakes: retakes, show_answers: answers, score_policy: policy,
+                shuffle_questions: shufQ, shuffle_choices: shufC });
     onClose();
   };
 
@@ -108,6 +116,31 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
           label="Show correct answers after submitting"
           hint="After a student submits, they can see which questions they got right and what the correct answer was. Only ever switch this on for practice material."
         />
+
+        <div style={{ borderTop: '1px solid var(--line)', margin: '16px 0 12px', paddingTop: 14 }}>
+          <h4 style={{ margin: '0 0 2px', fontSize: 14 }}>Randomisation</h4>
+          <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+            Both are on by default. Each student gets their own order, so no two
+            papers next to each other look the same.
+          </p>
+          <ToggleRow
+            on={shufQ} set={setShufQ}
+            label="Shuffle the questions"
+            hint="Off: everyone sees the questions in the order you wrote them — the same order as the printed paper. Turn it off for a paper meant to be worked through in sequence."
+          />
+          <ToggleRow
+            on={shufC} set={setShufC}
+            label="Shuffle the choices"
+            hint="Off: the options stay in the order you wrote them. Turn it off when the order carries meaning — answers running in ascending value, or a 'none of these' that has to stay last."
+          />
+          {!shufQ && !shufC && (
+            <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.55, paddingLeft: 2 }}>
+              With both off, every student sits an identical paper in an identical
+              order. Fine for a take-home or a printed form; worth a thought for
+              anything sat in one room.
+            </p>
+          )}
+        </div>
 
         {/* The which-attempt-counts picker is gone: the dashboard no longer
             chooses one. Class Review shows the latest attempt — where the

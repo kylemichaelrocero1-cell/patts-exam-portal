@@ -19,6 +19,7 @@
 export const ASSESSMENT_COLUMNS =
   'id, kind, title, description, target_section, instructor_id, is_open, ' +
   'opens_at, closes_at, duration_minutes, has_password, created_at, archived_at, ' +
+  'shuffle_questions, shuffle_choices, ' +
   // score_policy is deliberately absent: it governs what the instructor sees
   // and anon is not granted it (see sql/002b).
   'allow_retakes, show_answers';
@@ -41,6 +42,8 @@ export function normaliseExamRow(row) {
     allow_retakes: false,  // and no retakes or answer reveal
     show_answers: false,
     archived_at: null,     // and nothing there can be archived
+    shuffle_questions: true,  // the old table has no switches; both default on
+    shuffle_choices: true,
   };
 }
 

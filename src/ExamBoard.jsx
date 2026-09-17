@@ -7,6 +7,11 @@ import AnswerReview from './components/AnswerReview';
 import {
   isMultiSelect, isSelected, toggleIndex, hasAnswer, answeredCount, answersPayload,
 } from './lib/answers';
+import { sittingDecision, restartPatch } from './lib/retakes';
+
+// How long to let an instructor's force submit finish before deciding what a
+// 'finished' row means. The claim and the marking are two round trips.
+const FINISH_SETTLE_MS = 4000;
 
 export default function ExamBoard({ student, exam, examSet }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
@@ -53,6 +58,18 @@ export default function ExamBoard({ student, exam, examSet }) {
   const [attemptNo, setAttemptNo] = useState(1);
   const [reviewRows, setReviewRows] = useState(null);   // null = not fetched
   const [isLoadingReview, setIsLoadingReview] = useState(false);
+  // initLiveSession decides whether this mount continues the sitting on file or
+  // starts a new one — and a new one resets the clock. Until that lands, a stale
+  // end time restored from localStorage can read as 0:00, and auto-submit must
+  // not act on it. Set on every path, failures included, so a student whose
+  // session lookup falls over still gets their timer honoured.
+  const [sittingResolved, setSittingResolved] = useState(false);
+  // The instructor closed this sitting from the live monitor — either because
+  // the clock ran out or because they ended the period on everyone at once.
+  // What the student had saved has already been submitted and marked by then;
+  // this only makes sure they are told rather than left typing into a paper
+  // that is no longer open.
+  const [endedByInstructor, setEndedByInstructor] = useState(false);
 
   // --- LIVE PROCTORING STATES ---
   // Restored from localStorage so a locked student sees the lock screen immediately on
@@ -77,6 +94,13 @@ export default function ExamBoard({ student, exam, examSet }) {
   const visibilityViolationRef = useRef(false);
   // Prevents double-submission when two rapid clicks hit before React re-renders
   const isSubmittingRef = useRef(false);
+  // Set the moment this tab writes its own 'finished'. Realtime replays our own
+  // writes back to us, so without this the student's own submit would arrive a
+  // moment later looking exactly like an instructor ending the sitting.
+  const weFinishedRef = useRef(false);
+  // What was already on file for this paper when this sitting began — see
+  // readFiled() in initLiveSession.
+  const filedRef = useRef({ graded: false, maxAttempt: 0 });
   // Snapshot of answers captured when submit modal opens — prevents last-second tampering
   const answersSnapshotRef = useRef(null);
   const essaySnapshotRef = useRef(null);
@@ -120,16 +144,42 @@ export default function ExamBoard({ student, exam, examSet }) {
     if (!student?.id || !exam?.id) return;
     let channel;
 
+    // What this student already has on file for this paper. A graded sitting
+    // lands in `results`, a practice one in `review_attempts`, and the highest
+    // attempt number is what tells one retake from the next.
+    //
+    // Read once at mount as a baseline, and again whenever the row is finished
+    // from outside this tab: a force submit files a paper and moves one of
+    // these, a dismiss files nothing and moves neither. That is the only way to
+    // tell the two apart, and getting it wrong means telling a student their
+    // work was submitted when it was not.
+    const readFiled = async () => {
+      const [gradedRes, attemptRes] = await Promise.all([
+        supabase.from('results').select('student_id')
+          .eq('student_id', student.id).eq('exam_id', exam.id).limit(1)
+          .then(r => r, () => ({ data: null })),
+        supabase.from('review_attempts').select('attempt_no')
+          .eq('student_id', student.id).eq('assessment_id', exam.id)
+          .order('attempt_no', { ascending: false }).limit(1)
+          .then(r => r, () => ({ data: null })),
+      ]);
+      return {
+        graded: (gradedRes.data?.length || 0) > 0,
+        maxAttempt: attemptRes.data?.[0]?.attempt_no || 0,
+      };
+    };
+
     const initLiveSession = async () => {
       const hasLocalAnswers =
         answeredCount(initialState.answers) > 0 ||
         Object.keys(initialState.essayAnswers || {}).length > 0;
 
-      const { data: rows } = await supabase.from('live_sessions')
-        .select('*')
-        .eq('student_id', student.id)
-        .eq('exam_id', exam.id)
-        .limit(1);
+      const [{ data: rows }, filed] = await Promise.all([
+        supabase.from('live_sessions').select('*')
+          .eq('student_id', student.id).eq('exam_id', exam.id).limit(1),
+        readFiled(),
+      ]);
+      filedRef.current = filed;
       let existing = rows?.[0] || null;
 
       let currentSessionId;
@@ -138,26 +188,56 @@ export default function ExamBoard({ student, exam, examSet }) {
         currentSessionId = existing.id;
 
         if (existing.status === 'finished') {
-          // Check if they already submitted — if so, block re-entry (lock bypass fix)
-          const { data: existingResult } = await supabase.from('results')
-            .select('student_id')
-            .eq('student_id', student.id)
-            .eq('exam_id', exam.id)
-            .limit(1);
+          // What a finished row means depends on what is on file behind it: a
+          // completed sitting either way, or — with neither on file — an
+          // instructor dismiss of a sitting that was still in progress.
+          const decision = sittingDecision({
+            sessionStatus: 'finished',
+            allowRetakes: isPractice,
+            hasGradedResult: filedRef.current.graded,
+            hasPriorAttempt: filedRef.current.maxAttempt > 0,
+          });
 
-          if (existingResult?.length > 0) {
+          if (decision === 'blocked') {
+            // Submitted, and the paper does not allow another go.
             setScoreDisplay({ score: 0, total: 0 });
             return; // liveSessionId intentionally stays null — exam is done
           }
 
-          // No result — was dismissed by instructor, restore as active
-          await supabase.from('live_sessions').update({
-            status: 'active',
-            answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
-            violation_count: tabSwitchCount,
-            updated_at: new Date()
-          }).eq('id', existing.id);
-          setExamStatus('active');
+          if (decision === 'restart') {
+            // A new sitting, not a continuation. Reusing the finished row's
+            // created_at would hand the retake whatever was left of the first
+            // sitting's clock — the live monitor reads that column too and
+            // would force-submit the student seconds after they started.
+            await supabase.from('live_sessions')
+              .update(restartPatch()).eq('id', existing.id);
+            // Nothing carries over into a fresh sitting.
+            endTimeRef.current = Date.now() + startingSeconds * 1000;
+            prevViolationCountRef.current = 0;
+            tabSwitchCountRef.current = 0;
+            violationLogsRef.current = [];
+            setTabSwitchCount(0);
+            setViolationLogs([]);
+            setAnswers({});
+            setEssayAnswers({});
+            setFlaggedQuestions({});
+            try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+            existing = { ...existing, answers_json: {}, essay_answers_json: {} };
+            setExamStatus('active');
+            // The baseline stays as it is: it is what was on file before this
+            // sitting, which is exactly what a later force submit will move.
+
+          } else {
+            // 'reopen' — dismissed by the instructor mid-sitting, so put it
+            // back exactly as it was, clock included.
+            await supabase.from('live_sessions').update({
+              status: 'active',
+              answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+              violation_count: tabSwitchCount,
+              updated_at: new Date()
+            }).eq('id', existing.id);
+            setExamStatus('active');
+          }
         } else {
           setExamStatus(existing.status);
           // Server violation count is authoritative — prevents localStorage manipulation
@@ -240,6 +320,45 @@ export default function ExamBoard({ student, exam, examSet }) {
             event: 'UPDATE', schema: 'public', table: 'live_sessions',
             filter: `id=eq.${currentSessionId}`
           }, payload => {
+            if (payload.new.status === 'finished') {
+              if (weFinishedRef.current || isSubmittingRef.current) return;
+              // Finished from the outside. A force submit files the paper and
+              // this tab has nothing left to send; a dismiss files nothing and
+              // was only ever meant for a row nobody is sitting behind. Which
+              // one it was is decided by what appeared on file, not guessed.
+              (async () => {
+                // Force submit CLAIMS the row by finishing it and only then
+                // marks the paper, so reading the moment the event lands would
+                // see nothing filed yet and mistake it for a dismiss. Wait for
+                // that round trip, then check the row is still finished — a
+                // failed submission hands it straight back.
+                await new Promise(r => setTimeout(r, FINISH_SETTLE_MS));
+                if (weFinishedRef.current || isSubmittingRef.current) return;
+                const { data: rowNow } = await supabase.from('live_sessions')
+                  .select('status').eq('id', currentSessionId).maybeSingle();
+                if (rowNow?.status !== 'finished') return;
+
+                const now = await readFiled();
+                const submitted = (now.graded && !filedRef.current.graded) ||
+                                  now.maxAttempt > filedRef.current.maxAttempt;
+                if (submitted) {
+                  try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
+                  setEndedByInstructor(true);
+                  return;
+                }
+                // A dismiss, and the student is plainly still here. Put the row
+                // back so they reappear on the monitor rather than sitting an
+                // exam nobody can see.
+                await supabase.from('live_sessions')
+                  .update({ status: 'active', updated_at: new Date() })
+                  .eq('id', currentSessionId).eq('status', 'finished');
+              })().catch(err => console.error('Session end check failed:', err));
+              return;
+            }
+            // Back to a live status. doForceSubmit claims a row by finishing it
+            // and hands it back if the submission itself fails, so this is the
+            // student being returned to a sitting that never actually ended.
+            if (!weFinishedRef.current) setEndedByInstructor(false);
             // A practice paper is never locked, by the counter or by an
             // instructor — there is nothing to protect and the student can
             // just start it again.
@@ -250,7 +369,9 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
     };
 
-    initLiveSession();
+    initLiveSession()
+      .catch(err => console.error('Live session init failed:', err))
+      .finally(() => setSittingResolved(true));
 
     return () => { if (channel) supabase.removeChannel(channel); };
   }, [student?.id, exam?.id]);
@@ -345,14 +466,14 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   // --- AUTO-SAVER ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting) return;
+    if (scoreDisplay || isSubmitting || endedByInstructor) return;
     const progressData = { answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current, examSet };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
-  }, [answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting]);
+  }, [answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting, endedByInstructor]);
 
   // --- TIMER & CLOCK ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting) return; 
+    if (scoreDisplay || isSubmitting || endedByInstructor) return;
     const timer = setInterval(() => {
       const now = Date.now();
       setLocalTime(new Date(now).toLocaleTimeString());
@@ -360,7 +481,7 @@ export default function ExamBoard({ student, exam, examSet }) {
       setTimeLeft(secondsRemaining);
     }, 1000);
     return () => clearInterval(timer);
-  }, [scoreDisplay, isSubmitting]);
+  }, [scoreDisplay, isSubmitting, endedByInstructor]);
 
   // Pulls the marked paper back from the server. This is the only route to a
   // correct answer: get_answer_review() refuses unless the assessment has
@@ -447,6 +568,7 @@ export default function ExamBoard({ student, exam, examSet }) {
         }
       }
 
+      weFinishedRef.current = true;
       if (liveSessionId) {
         await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
       } else {
@@ -470,10 +592,10 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   // --- SAFE AUTO-SUBMIT TRIGGER ---
   useEffect(() => {
-    if (timeLeft === 0 && !scoreDisplay && !isSubmitting && !isLoading) {
+    if (timeLeft === 0 && sittingResolved && !scoreDisplay && !isSubmitting && !isLoading && !endedByInstructor) {
       executeSubmission();
     }
-  }, [timeLeft, scoreDisplay, isSubmitting, isLoading, executeSubmission]);
+  }, [timeLeft, sittingResolved, scoreDisplay, isSubmitting, isLoading, endedByInstructor, executeSubmission]);
 
   // --- EXAM-CLOSE WATCHER (30s poll) ---
   // Catches the case where the instructor closes the exam while a student's tab
@@ -481,7 +603,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   // they still have time left — this poll detects the close and auto-submits.
   // Only polls when the student is actively in the exam (not submitted, not locked).
   useEffect(() => {
-    if (!exam?.id || scoreDisplay || isSubmitting) return;
+    if (!exam?.id || scoreDisplay || isSubmitting || endedByInstructor) return;
     const executeRef = { current: executeSubmission };
     executeRef.current = executeSubmission;
     const poll = setInterval(async () => {
@@ -496,11 +618,11 @@ export default function ExamBoard({ student, exam, examSet }) {
       }
     }, 30000);
     return () => clearInterval(poll);
-  }, [exam?.id, scoreDisplay, isSubmitting, executeSubmission]);
+  }, [exam?.id, scoreDisplay, isSubmitting, endedByInstructor, executeSubmission]);
 
   // --- ANTI-CHEAT ---
   useEffect(() => {
-    if (scoreDisplay || isSubmitting || examStatus === 'locked') return;
+    if (scoreDisplay || isSubmitting || examStatus === 'locked' || endedByInstructor) return;
 
     const logViolation = (reason) => {
       const timeStr = new Date().toLocaleTimeString();
@@ -599,7 +721,7 @@ export default function ExamBoard({ student, exam, examSet }) {
         pendingBlurRef.current = null;
       }
     };
-  }, [scoreDisplay, isSubmitting, examStatus]);
+  }, [scoreDisplay, isSubmitting, examStatus, endedByInstructor]);
 
   // Dedicated lock trigger — only fires when count actually increases (not on page restore).
   // Locks at every 4th NEW violation: 4, 8, 12, ...
@@ -674,6 +796,53 @@ export default function ExamBoard({ student, exam, examSet }) {
       </div>
     </div>
   );
+
+  // Ended from the live monitor. Shown ahead of the score screen because the
+  // student never submitted this one themselves — telling them their paper is
+  // in and why is the whole point, and a score they did not choose to end on
+  // would only read as an accusation.
+  if (endedByInstructor) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+        <div className="patts-header" style={{ padding: '36px 24px 80px', textAlign: 'center', position: 'relative' }}>
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: 52, objectFit: 'contain' }} />
+            <div className="eyebrow" style={{ color: 'var(--gold-bright)', fontSize: 11, maxWidth: 340, margin: '14px auto 0', lineHeight: 1.5 }}>
+              Aeronautical Engineering Learning Portal
+            </div>
+            <h1 className="display" style={{ color: 'white', marginTop: 8, fontSize: 24 }}>Time Called</h1>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 20px 40px', marginTop: -56, position: 'relative', zIndex: 1 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 440, padding: 0, overflow: 'hidden', boxShadow: 'var(--s-lg)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #34495E 0%, #22313F 100%)', padding: '36px 32px', textAlign: 'center' }}>
+              <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
+              <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your instructor has ended this exam.</h2>
+              <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
+                {student?.full_name}{examSet ? ` · Set ${examSet}` : ''}
+              </p>
+            </div>
+            <div style={{ padding: '28px 32px', textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: 14, color: 'var(--ink-2)', lineHeight: 1.65 }}>
+                Everything you had answered was saved and has been submitted for marking.
+                There is nothing further for you to do here.
+              </p>
+              <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.6 }}>
+                If you believe this was a mistake, speak to your instructor — only they can reopen a paper.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                style={{ marginTop: 22, width: '100%', background: 'var(--navy)', color: 'white', fontWeight: 700, padding: '12px' }}
+              >
+                Back to my papers
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (scoreDisplay) {
     return (

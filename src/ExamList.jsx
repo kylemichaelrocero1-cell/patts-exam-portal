@@ -4,6 +4,8 @@ import {
   selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
   fetchAssessmentById,
 } from './lib/assessments';
+import { isPaperFinished } from './lib/retakes';
+import ExamReadinessModal from './components/ExamReadinessModal';
 
 export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
@@ -19,6 +21,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+
+  // Pre-sitting briefing: { exam, setChoice }. Shown once per paper per browser
+  // session, and only for a new sitting — a student resuming after a dropout has
+  // already read it and should get back to their paper.
+  const [readinessGate, setReadinessGate] = useState(null);
 
   const [recoveryMsg, setRecoveryMsg] = useState('');
 
@@ -207,7 +214,9 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     }
   };
 
-  const handleStartClick = async (exam, setChoice) => {
+  // Everything that decides whether a student may start is here, so the
+  // readiness gate in front of it stays a pure "have they read this yet".
+  const beginStart = async (exam, setChoice) => {
     setIsCheckingSession(true);
     try {
       // Re-fetch exam metadata (no password — confirms exam is still open and gets latest has_password)
@@ -260,6 +269,26 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     }
   };
 
+  const readinessKey = (examId) => `exam_ready_ok_${examId}`;
+
+  const handleStartClick = (exam, setChoice) => {
+    // Resuming is not a new sitting: the clock is already running and the
+    // briefing would only cost the student time they cannot get back.
+    const resuming = !!activeSessions[exam.id];
+    let acknowledged = false;
+    try { acknowledged = !!sessionStorage.getItem(readinessKey(exam.id)); } catch { /* private mode */ }
+    if (resuming || acknowledged) return beginStart(exam, setChoice);
+    setReadinessGate({ exam, setChoice });
+  };
+
+  const acknowledgeReadiness = () => {
+    const gate = readinessGate;
+    if (!gate) return;
+    try { sessionStorage.setItem(readinessKey(gate.exam.id), '1'); } catch { /* private mode */ }
+    setReadinessGate(null);
+    beginStart(gate.exam, gate.setChoice);
+  };
+
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setIsVerifyingPassword(true);
@@ -301,6 +330,15 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
   return (
     <div style={embedded ? undefined : { minHeight: '100vh', background: 'var(--bg)' }}>
+
+      {/* PRE-SITTING BRIEFING — what to turn off before the timer starts */}
+      {readinessGate && (
+        <ExamReadinessModal
+          exam={readinessGate.exam}
+          onAcknowledge={acknowledgeReadiness}
+          onCancel={() => setReadinessGate(null)}
+        />
+      )}
 
       {/* PASSWORD GATE MODAL */}
       {pendingExam && (
@@ -391,7 +429,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         ) : (
           <div style={{ display: 'grid', gap: '16px' }}>
             {exams.map(exam => {
-              const isAlreadyDone = completedExams.includes(exam.id);
+              // Switching retakes on re-opens a paper this student has already
+              // sat: the graded row stays on file untouched and the new sitting
+              // is filed as an attempt instead.
+              const isAlreadyDone = isPaperFinished(exam, completedExams.includes(exam.id));
+              const isRetakingGraded = !isAlreadyDone && completedExams.includes(exam.id);
 
               // Use server-side live session — works across devices, not just same browser
               const serverSession = activeSessions[exam.id];
@@ -451,6 +493,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           Unlimited retakes
                         </span>
                       )}
+                      {isRetakingGraded && (
+                        <span style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: 12, fontWeight: 600 }}>
+                          ✅ Graded submission on file
+                        </span>
+                      )}
                       {exam.has_password && !isAlreadyDone && !isResumable && (
                         <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
                           🔒 Password required
@@ -462,6 +509,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         </span>
                       )}
                     </div>
+
+                    {isRetakingGraded && myAttempts.length === 0 && (
+                      <p style={{ margin: '12px 0 0', paddingTop: 10, borderTop: '1px solid var(--border-lt, var(--border))', fontSize: 12.5, color: 'var(--text-3)', lineHeight: 1.55 }}>
+                        You have already submitted this paper and it has been marked. Your instructor
+                        has since opened it for practice — sitting it again is revision only and
+                        cannot change the grade already recorded.
+                      </p>
+                    )}
 
                     {myAttempts.length > 0 && (
                       <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-lt, var(--border))' }}>

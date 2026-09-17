@@ -9,6 +9,7 @@ import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
          isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
+import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -424,10 +425,41 @@ const [targetSection, setTargetSection] = useState('');
     window.print();
   };
 
-  const dismissSession = async (sessionId) => {
-    const { error } = await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', sessionId);
+  // Dismiss takes a row off the monitor and files NOTHING. It was written back
+  // when a locked or timed-out sitting had no other way out; force submit and
+  // the auto-sweep do that job now, so the only thing left for it is a ghost —
+  // a row whose paper is already on file, or one a student opened and walked
+  // away from without answering anything. canDismissSession() is what keeps it
+  // off a student who is mid-paper, where clicking it used to make them vanish
+  // from the monitor with their answers unsubmitted.
+  const dismissSession = async (session) => {
+    // sittingAlreadyFiled(), not a bare results lookup: on a paper with retakes
+    // on, the graded row is history and the sitting in front of you is live
+    // work that must not be dismissible.
+    const hasResult = sittingAlreadyFiled(session);
+
+    if (!canDismissSession(session, { hasResult })) {
+      return alert(
+        `${session.student_name || 'This student'} has answers saved on this paper.\n\n` +
+        'Dismissing would take them off the monitor without submitting anything, so their ' +
+        'work would never be marked. Use Force Submit instead — it files what they have ' +
+        'answered so far.'
+      );
+    }
+
+    if (!window.confirm(
+      hasResult
+        ? `Clear ${session.student_name || 'this student'} from the monitor?\n\n` +
+          'Their paper is already submitted and marked — this only removes the leftover row.'
+        : `Dismiss ${session.student_name || 'this student'}?\n\n` +
+          'Nothing has been answered, so nothing is lost and nothing is submitted. ' +
+          'If their tab is still open they will reappear here within a few seconds — ' +
+          'a dismiss only clears a row nobody is sitting behind.'
+    )) return;
+
+    const { error } = await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', session.id);
     if (error) { alert('Failed to dismiss session: ' + error.message); return; }
-    setLiveSessions(prev => prev.filter(s => s.id !== sessionId));
+    setLiveSessions(prev => prev.filter(s => s.id !== session.id));
   };
 
   // --- SECTION CO-INSTRUCTOR FUNCTIONS ---
@@ -530,9 +562,10 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   const clearStuckSessions = async () => {
-    const stuckIds = liveSessions
-      .filter(s => results.some(r => r.student_id === s.student_id && r.exam_id === s.exam_id))
-      .map(s => s.id);
+    // Same carve-out as the monitor's own filter: on a paper with retakes on, a
+    // graded row is history, not a sign that the sitting in front of you has
+    // already been submitted. Sweeping those would end live retakes.
+    const stuckIds = liveSessions.filter(sittingAlreadyFiled).map(s => s.id);
     if (stuckIds.length === 0) return alert("No stuck sessions found.");
     await supabase.from('live_sessions').update({ status: 'finished' }).in('id', stuckIds);
     setLiveSessions(prev => prev.filter(s => !stuckIds.includes(s.id)));
@@ -549,6 +582,18 @@ const [targetSection, setTargetSection] = useState('');
 
   const examAllowsRetakes = (examId) => !!findExamById(examId)?.allow_retakes;
 
+  // Is the paper behind this live row already settled?
+  //
+  // A graded row in `results` only settles a sitting on a paper that does NOT
+  // allow retakes. Once retakes are on, that row is history — the sitting in
+  // front of you is a new attempt, which submit_assessment() files in
+  // review_attempts and which never touches `results` at all. Reading a graded
+  // row as "already submitted" is what made a re-opened paper invisible in the
+  // monitor, unforce-submittable, and liable to be swept as a stuck session.
+  const sittingAlreadyFiled = (session) =>
+    !examAllowsRetakes(session.exam_id) &&
+    results.some(r => r.student_id === session.student_id && r.exam_id === session.exam_id);
+
   // Returns true if a live session has run past the exam's time limit.
   // extraGraceMs is for the automatic sweep: the student's own tab submits at
   // 0:00, so waiting a little longer keeps the two from racing into two attempts.
@@ -559,10 +604,20 @@ const [targetSection, setTargetSection] = useState('');
     return Date.now() > deadline;
   };
 
+  // Whole minutes still on a student's clock, or null when the paper has no
+  // duration to measure against. Used to say plainly how much time an early
+  // force-submit is taking off each student.
+  const minutesLeftFor = (session) => {
+    const duration = examDurationFor(session.exam_id);
+    if (!duration || !session.created_at) return null;
+    const deadline = new Date(session.created_at).getTime() + duration * 60 * 1000;
+    return Math.max(0, Math.round((deadline - Date.now()) / 60000));
+  };
+
   // Returns true if a session should be force-submittable:
   // either timed out OR the exam was closed by the instructor.
   const isSessionForceSubmittable = (session) => {
-    if (results.some(r => r.student_id === session.student_id && r.exam_id === session.exam_id)) return false;
+    if (sittingAlreadyFiled(session)) return false;
     const examClosed = [...examsList, ...sharedExamsList].find(e => e.id === session.exam_id)?.is_open === false;
     return isSessionTimedOut(session) || examClosed;
   };
@@ -710,9 +765,8 @@ const [targetSection, setTargetSection] = useState('');
   // Nothing answered is nothing to submit: a student who opened a practice
   // paper and walked away should not be handed a 0 that then sits in their
   // attempt history. The instructor can still force one through by hand.
-  const hasSavedWork = (session) =>
-    Object.keys(session.answers_json || {}).length > 0 ||
-    Object.keys(session.essay_answers_json || {}).length > 0;
+  // (Shared with the dismiss rule — src/lib/proctoring.js.)
+  const hasSavedWork = sessionHasWork;
 
   const isAutoSubmittable = (session) =>
     examAllowsRetakes(session.exam_id) &&
@@ -724,18 +778,24 @@ const [targetSection, setTargetSection] = useState('');
   const autoSubmittedIdsRef = useRef(new Set());
   const autoSweepBusyRef = useRef(false);
 
+  // Keyed by sitting, not by row: a retake reuses the same live_sessions row
+  // (it is unique on student+exam) and only its created_at moves, so keying on
+  // the id alone would mark a student as swept for good and quietly skip every
+  // attempt they make after the first.
+  const sweepKey = (s) => `${s.id}:${s.created_at || ''}`;
+
   useEffect(() => {
     const sweep = async () => {
       if (autoSweepBusyRef.current) return;
       const snap = autoSubmitSweepRef.current;
       const due = (snap.liveSessions || []).filter(s =>
         s.status !== 'finished' &&
-        !autoSubmittedIdsRef.current.has(s.id) &&
+        !autoSubmittedIdsRef.current.has(sweepKey(s)) &&
         snap.isAutoSubmittable(s));
       if (due.length === 0) return;
 
       autoSweepBusyRef.current = true;
-      due.forEach(s => autoSubmittedIdsRef.current.add(s.id));
+      due.forEach(s => autoSubmittedIdsRef.current.add(sweepKey(s)));
       try {
         await snap.doForceSubmit(due, { silent: true });
       } finally {
@@ -3423,21 +3483,72 @@ const deleteResult = async (studentId, examId) => {
 
 {/* --- TAB 4: LIVE MONITOR --- */}
         {activeView === 'live' && (() => {
-          // Hide sessions only when BOTH a result exists AND the session is not actively locked/being watched
-          // Keeps students visible if they are still in the exam even if a stale result exists
-          const activeSessions = liveSessions.filter(s => {
-            const hasResult = results.some(r => r.student_id === s.student_id && r.exam_id === s.exam_id);
-            // If locked, always keep visible so instructor can manage them
-            if (s.status === 'locked') return true;
-            return !hasResult;
-          });
+          // A row is hidden only when the paper behind it is genuinely settled
+          // — see sittingAlreadyFiled(), which reads the retake switch so a
+          // re-opened paper does not take its class off the monitor. A locked
+          // student always stays visible; they are the one the instructor most
+          // needs to be able to reach.
+          const activeSessions = liveSessions.filter(s =>
+            s.status === 'locked' || !sittingAlreadyFiled(s));
           const stuckCount = liveSessions.length - activeSessions.length;
           // A timed-out sitting on a retakeable paper is submitted by the sweep
           // above without anyone clicking, so it is not offered as work to do.
           const forceSubmittable = activeSessions.filter(s => isSessionForceSubmittable(s) && !isAutoSubmittable(s));
 
+          // Everything still open, whether the clock has run out or not. This is
+          // what "Submit All Now" ends: a class that started late still has time
+          // on their timers, and the period has to close on schedule regardless.
+          const openSittings = activeSessions.filter(s =>
+            !isAutoSubmittable(s) && !sittingAlreadyFiled(s));
+
+          // The last few incidents across everyone being watched, newest first —
+          // the thing an instructor walking the room actually wants at eye level.
+          const recentViolations = violationFeed(activeSessions, { limit: 8 });
+          const flaggedStudents = new Set(recentViolations.map(v => v.studentId)).size;
+
           return (
             <div>
+              {/* RECENT VIOLATIONS — the last few incidents, newest first */}
+              {recentViolations.length > 0 && (
+                <div style={{ background: 'var(--bad-bg)', border: '1.5px solid var(--bad-bd)', borderRadius: 'var(--r-lg)', padding: '12px 14px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <Icon name="flag" size={14} color="var(--bad)" />
+                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--bad)' }}>
+                      Recent violations
+                    </span>
+                    <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+                      {flaggedStudents} student{flaggedStudents !== 1 ? 's' : ''} flagged · newest first
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {recentViolations.map(v => (
+                      <span
+                        key={v.key}
+                        title={`${v.studentName} — ${v.reason}${v.stamp ? ` (${v.stamp})` : ''}`}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 7,
+                          background: 'var(--surface, white)',
+                          border: `1px solid ${v.tone === 'bad' ? 'var(--bad-bd)' : 'var(--warn-bd)'}`,
+                          borderLeft: `3px solid ${v.tone === 'bad' ? 'var(--bad)' : 'var(--warn)'}`,
+                          borderRadius: 'var(--r-sm)', padding: '5px 10px', fontSize: 12.5,
+                          maxWidth: '100%',
+                        }}
+                      >
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
+                          {v.stamp || '—'}
+                        </span>
+                        <strong style={{ color: 'var(--ink-1)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                          {v.studentName}
+                        </strong>
+                        <span style={{ color: v.tone === 'bad' ? 'var(--bad)' : 'var(--warn)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {v.label}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Force-submit warning banner */}
               {forceSubmittable.length > 0 && (
                 <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -3463,7 +3574,7 @@ const deleteResult = async (studentId, examId) => {
                   <span className="px-pill live" style={{ fontSize: '12px' }}>{activeSessions.length} active</span>
                   Live Exam Monitor
                 </h1>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                   <span className="eyebrow">Sort:</span>
                   <button className={`btn ghost sm${liveSort === 'name' ? '' : ''}`} onClick={() => applyLiveSort('name')} style={liveSort === 'name' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>A–Z Name</button>
                   <button className="btn ghost sm" onClick={() => applyLiveSort('section')} style={liveSort === 'section' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>By Section</button>
@@ -3472,9 +3583,22 @@ const deleteResult = async (studentId, examId) => {
                       <Icon name="x" size={14} /> Clear {stuckCount} Finished
                     </button>
                   )}
+                  {openSittings.length > 0 && (
+                    <button
+                      className="btn sm danger"
+                      onClick={() => setForceSubmitConfirmList(openSittings)}
+                      style={{ width: 'auto', fontWeight: 700 }}
+                      title="Submit every open exam right now, including students who still have time left"
+                    >
+                      <Icon name="send" size={13} color="var(--bad)" /> Submit All Now ({openSittings.length})
+                    </button>
+                  )}
                 </div>
               </div>
-              <p style={{ color: 'var(--ink-3)', marginBottom: '16px', fontSize: '13px' }}>Order is locked once set — student data updates in place without shuffling rows.</p>
+              <p style={{ color: 'var(--ink-3)', marginBottom: '16px', fontSize: '13px' }}>
+                Order is locked once set — student data updates in place without shuffling rows.
+                {openSittings.length > 0 && ' “Submit All Now” ends every open sitting on the spot, even one with time left — it asks first.'}
+              </p>
 
               <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
@@ -3549,9 +3673,15 @@ const deleteResult = async (studentId, examId) => {
                                 {session.status === 'locked' ? <><Icon name="unlock" size={13} /> Unlock</> : <><Icon name="lock" size={13} /> Lock</>}
                               </button>
                             )}
-                            <button className="btn ghost sm" onClick={() => dismissSession(session.id)} style={{ width: 'auto' }}>
-                              <Icon name="x" size={13} /> Dismiss
-                            </button>
+                            {/* Only ever offered on a row with nothing to lose.
+                                A sitting with answers in it is force-submitted,
+                                not dismissed — see dismissSession(). */}
+                            {canDismissSession(session, { hasResult: sittingAlreadyFiled(session) }) && (
+                              <button className="btn ghost sm" onClick={() => dismissSession(session)} style={{ width: 'auto' }}
+                                title="Nothing has been answered — take this empty row off the monitor">
+                                <Icon name="x" size={13} /> Dismiss
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -4697,31 +4827,64 @@ const deleteResult = async (studentId, examId) => {
       )}
 
       {/* Force Submit Confirmation Modal */}
-      {forceSubmitConfirmList && (
+      {forceSubmitConfirmList && (() => {
+        // Ending a sitting that still has time on it is a different act from
+        // clearing up one whose clock already ran out, so the modal says so —
+        // loudly, and with the minutes it is taking off each student.
+        const early = forceSubmitConfirmList.filter(s => !isSessionForceSubmittable(s));
+        const isEarly = early.length > 0;
+        const accent = isEarly ? 'var(--bad, #C0392B)' : '#B8860B';
+        const n = forceSubmitConfirmList.length;
+
+        return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}>
-          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 500, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
-            <div style={{ background: '#B8860B', padding: '18px 24px' }}>
+          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: 520, boxShadow: 'var(--sh-modal)', overflow: 'hidden' }}>
+            <div style={{ background: accent, padding: '18px 24px' }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Icon name="send" size={16} color="white" /> Force Submit {forceSubmitConfirmList.length === 1 ? 'Exam' : `${forceSubmitConfirmList.length} Exams`}
+                <Icon name={isEarly ? 'alert' : 'send'} size={16} color="white" />
+                {isEarly
+                  ? `End ${n === 1 ? 'this exam' : `all ${n} exams`} now`
+                  : `Force Submit ${n === 1 ? 'Exam' : `${n} Exams`}`}
               </h2>
               <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.75)', fontSize: 13 }}>
                 Scores will be calculated from answers already saved on the server.
               </p>
             </div>
             <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {isEarly && (
+                <div style={{ background: 'var(--bad-bg)', border: '1.5px solid var(--bad-bd)', borderRadius: 'var(--r-md)', padding: '12px 14px', display: 'flex', gap: 10 }}>
+                  <Icon name="alert" size={16} color="var(--bad)" />
+                  <span style={{ fontSize: 13, color: 'var(--bad)', lineHeight: 1.55 }}>
+                    <strong>{early.length} student{early.length !== 1 ? 's' : ''} still {early.length === 1 ? 'has' : 'have'} time left.</strong>{' '}
+                    Their exam will be submitted where it stands and their timer taken away — anything
+                    not yet answered is marked wrong. Use this to close a period on students who
+                    started late; there is no way to hand the time back.
+                  </span>
+                </div>
+              )}
               <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)' }}>
-                The following student{forceSubmitConfirmList.length !== 1 ? 's' : ''} will have their exam submitted immediately using their last saved answers. <strong>This cannot be undone.</strong>
+                The following student{n !== 1 ? 's' : ''} will have their exam submitted immediately using their last saved answers. <strong>This cannot be undone.</strong>
               </p>
               <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {forceSubmitConfirmList.map(s => (
+                {forceSubmitConfirmList.map(s => {
+                  const left = minutesLeftFor(s);
+                  return (
                   <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
                     <div>
                       <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--ink-1)' }}>{s.student_name}</p>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-3)' }}>{examsDict[s.exam_id] || s.exam_id}</p>
                     </div>
-                    <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{s.answers_count || 0} answered</span>
+                    <span style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'right' }}>
+                      {s.answers_count || 0} answered
+                      {left !== null && left > 0 && (
+                        <span style={{ display: 'block', color: 'var(--bad)', fontWeight: 600 }}>
+                          {left}m cut short
+                        </span>
+                      )}
+                    </span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button className="btn ghost sm" onClick={() => setForceSubmitConfirmList(null)} disabled={isForceSubmitting} style={{ width: 'auto' }}>
@@ -4731,15 +4894,18 @@ const deleteResult = async (studentId, examId) => {
                   className="btn sm"
                   onClick={() => doForceSubmit(forceSubmitConfirmList)}
                   disabled={isForceSubmitting}
-                  style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                  style={{ background: accent, borderColor: accent, color: 'white', width: 'auto', fontWeight: 700 }}
                 >
-                  {isForceSubmitting ? 'Submitting…' : `Submit ${forceSubmitConfirmList.length === 1 ? 'Exam' : 'All'}`}
+                  {isForceSubmitting ? 'Submitting…'
+                    : isEarly ? `Yes, submit ${n === 1 ? 'this exam' : `all ${n}`} now`
+                    : `Submit ${n === 1 ? 'Exam' : 'All'}`}
                 </button>
               </div>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Violation log tooltip */}
       {liveViolationTooltip && (() => {

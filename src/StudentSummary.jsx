@@ -6,6 +6,7 @@ import {
   selectAssessments, availabilityState, formatWindow, KIND_LABEL,
 } from './lib/assessments';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
+import { isPaperFinished } from './lib/retakes';
 
 // A student's landing page: what needs doing, what has been done, how they did.
 // Everything here is derived from data the other tabs already load — this is a
@@ -83,6 +84,10 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           })),
         ];
         // Practice never counts as "done" — a retakeable paper stays open.
+        // Nor does a graded sitting once the instructor switches retakes on:
+        // isPaperFinished reads the switch as it is now, so re-opening a paper
+        // for revision puts it back on the to-do list instead of leaving the
+        // students who already sat it with nowhere to click.
         const doneIds = new Set(graded.map(r => r.exam_id));
 
         // Titles and the answer-review switch have to come from the papers
@@ -102,7 +107,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         const completed = new Set((progressRes.data || []).filter(p => p.completed_at).map(p => p.lesson_id));
 
         setData({
-          todo: mine.filter(a => !doneIds.has(a.id) && availabilityState(a) === 'open'),
+          todo: mine.filter(a => !isPaperFinished(a, doneIds.has(a.id)) && availabilityState(a) === 'open'),
           upcoming: mine.filter(a => availabilityState(a) === 'scheduled'),
           results: results.slice().sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
           titles: Object.fromEntries([

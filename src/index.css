@@ -431,6 +431,38 @@ tbody tr:last-child td { border-bottom: none; }
   transform: none !important;
 }
 
+/* A multi-answer item is ticked, not picked, so the box has to be visible
+   before it is filled — a student must be able to see that several answers
+   are wanted without having to click one to find out. */
+.choice-btn.tickable {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.choice-btn.tickable .tick-box {
+  flex-shrink: 0;
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+  border: 2px solid var(--border);
+  border-radius: 5px;
+  background: var(--white);
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  transition: all var(--t-fast);
+}
+/* min-width:0 so a long choice wraps inside the flex row instead of
+   stretching the button past the panel on a phone. */
+.choice-btn.tickable .tick-text { flex: 1; min-width: 0; }
+.choice-btn.tickable:hover:not(:disabled) .tick-box { border-color: var(--navy); }
+.choice-btn.tickable.selected .tick-box {
+  background: var(--white);
+  border-color: var(--white);
+}
+
 /* ── Exam layout ─────────────────────────────── */
 .exam-layout {
   display: flex;

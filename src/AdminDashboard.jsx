@@ -5,6 +5,8 @@ import { supabase } from './supabase';
 import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
 import { makeRosterIndex, resolveStudent } from './lib/studentIdentity';
 import { choicesOf, letterFor, choicesPatch, keyIsValid, indexForLetter } from './lib/choices';
+import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
+         isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
@@ -62,15 +64,16 @@ function QuestionCsvFormat({ dense = false }) {
         <li><strong>Add as many choice columns as you like</strong> — four, five, seven, more. There is no limit, and each question in the file may have a different number.</li>
         <li><strong>The answer is always the last column.</strong> Everything between the question and it counts as a choice, so blank columns in between are ignored.</li>
         <li>Write the answer as a letter — <code style={mono}>A</code>, <code style={mono}>B</code>, <code style={mono}>C</code>… — or as a number counting from zero (<code style={mono}>0</code> = A).</li>
+        <li><strong>For a question with several right answers</strong>, separate them: <code style={mono}>A;B;C</code>. The student then ticks boxes instead of picking one, and earns the point only by ticking every one of them and nothing else. A separator is what makes a row a multiple-answer question, so a single letter stays a single answer.</li>
         <li>For an <strong>essay</strong> question, leave every choice column and the answer empty.</li>
         <li>A file written for four or five choices still imports unchanged.</li>
       </ul>
       <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '8px 10px', overflowX: 'auto' }}>
         <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
-          A seven-choice question
+          Seven choices, three of them correct
         </div>
         <code style={{ ...mono, fontSize: '11.5px', whiteSpace: 'pre', color: 'var(--ink-2)' }}>
-          "Which of these are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A
+          "Which of these are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A;B;C
         </code>
       </div>
       <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: 'var(--ink-3)' }}>
@@ -144,7 +147,12 @@ const [targetSection, setTargetSection] = useState('');
   const [editingQ, setEditingQ] = useState(null); // null = add mode, object = edit mode
   // An item carries any number of choices (sql/016), so the form holds a list.
   // Four is the starting point because that is what most papers use.
-  const emptyQ = { question_text: '', choice_list: ['', '', '', ''], correct_answer: 0, question_type: 'multiple_choice', image_url: null };
+  //
+  // Both keys are held at once and only the one the type uses is saved
+  // (sql/018 keeps them mutually exclusive in the database). That way
+  // switching between Multiple Choice and Multiple Answers and back does not
+  // throw away what was already ticked.
+  const emptyQ = { question_text: '', choice_list: ['', '', '', ''], correct_answer: 0, correct_answers: [], question_type: 'multiple_choice', image_url: null };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
   const [qImageFile, setQImageFile] = useState(null);
@@ -587,12 +595,9 @@ const [targetSection, setTargetSection] = useState('');
           continue;
         }
 
-        const mcAnswers = {};
-        Object.entries(session.answers_json || {}).forEach(([qId, chosen]) => {
-          if (chosen === undefined || chosen === null || chosen === '') return;
-          const n = Number(chosen);
-          if (Number.isFinite(n)) mcAnswers[String(qId)] = n;
-        });
+        // A multi-answer item's saved progress is an array of indices, so the
+        // shape is taken from the value rather than coerced to a number.
+        const mcAnswers = answersPayload(session.answers_json);
 
         const duration = examDurationFor(session.exam_id);
         const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
@@ -883,10 +888,17 @@ const [targetSection, setTargetSection] = useState('');
         } else {
           mcTotal++;
           if (rawAnswers[qId] !== undefined) {
-            const chosen = Number(rawAnswers[qId]);
-            const isCorrect = chosen === Number(q.correct_answer);
-            if (isCorrect) correctCount++;
-            formattedAnswers[qId] = { chosen, is_correct: isCorrect };
+            // A multi-answer item is all or nothing (sql/018); a single-answer
+            // one compares one index, as it always has. isAnswerCorrect()
+            // applies the same rule score_answers() does in Postgres.
+            const multi = isMultiSelect(q);
+            const set = indexSet(rawAnswers[qId]);
+            if (set !== null) {
+              const chosen = multi ? set : set[0];
+              const isCorrect = isAnswerCorrect(q, rawAnswers[qId]) === true;
+              if (isCorrect) correctCount++;
+              formattedAnswers[qId] = { chosen, is_correct: isCorrect };
+            }
           }
         }
       });
@@ -971,19 +983,28 @@ const [targetSection, setTargetSection] = useState('');
   const saveQuestion = async () => {
     if (!qExamId) return;
     if (!qForm.question_text.trim()) return alert('Question text is required.');
-    if (qForm.question_type !== 'essay') {
+    const isEssay = qForm.question_type === 'essay';
+    const isMulti = qForm.question_type === 'multi_select';
+    const keySet = indexSet(qForm.correct_answers) || [];
+
+    if (!isEssay) {
       const filled = choicesPatch(qForm.choice_list).choices;
       if (filled.length < 2)
         return alert('A multiple choice question needs at least two choices.');
       // Keying a choice that has been left blank would mark every student
       // wrong, and the database CHECK would reject the row anyway — say so in
       // words first.
-      if (!keyIsValid(Number(qForm.correct_answer), filled.length))
+      if (isMulti) {
+        if (keySet.length === 0)
+          return alert('Tick at least one correct answer. A multiple-answer question is marked all or nothing, so it needs a key to compare against.');
+        if (!keySetIsValid(keySet, filled.length))
+          return alert(`Choice ${keySet.filter(i => i >= filled.length).map(letterFor).join(', ')} is marked correct but is blank or missing. Fill it in, or untick it.`);
+      } else if (!keyIsValid(Number(qForm.correct_answer), filled.length)) {
         return alert(`Choice ${letterFor(Number(qForm.correct_answer))} is marked correct but is blank or missing. Fill it in, or pick another correct answer.`);
+      }
     }
 
     setQSaving(true);
-    const isEssay = qForm.question_type === 'essay';
 
     let imageUrl = qForm.image_url;
 
@@ -1012,7 +1033,10 @@ const [targetSection, setTargetSection] = useState('');
       // Only `choices` is written; the trigger in sql/016 mirrors the first
       // five into choice_a..choice_e for clients still on the old build.
       ...(isEssay ? { choices: [] } : choicesPatch(qForm.choice_list)),
-      correct_answer: isEssay ? null : Number(qForm.correct_answer),
+      // Exactly one of the two keys, never both: sql/018 constrains them to
+      // match the type, so sending the unused one would be rejected.
+      correct_answer: (isEssay || isMulti) ? null : Number(qForm.correct_answer),
+      correct_answers: isMulti ? keySet : null,
       image_url: imageUrl || null,
     };
 
@@ -1053,6 +1077,7 @@ const [targetSection, setTargetSection] = useState('');
       question_text: q.question_text,
       choice_list: (() => { const c = choicesOf(q); return c.length ? c : ['', '', '', '']; })(),
       correct_answer: Number(q.correct_answer || 0),
+      correct_answers: indexSet(q.correct_answers) || [],
       question_type: q.question_type || 'multiple_choice',
       image_url: q.image_url || null,
     });
@@ -1095,16 +1120,30 @@ const [targetSection, setTargetSection] = useState('');
         const raw = (trimmed[trimmed.length - 1]?.trim() || '').toUpperCase();
         const list = trimmed.slice(1, trimmed.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
         if (list.length < 2) { errors.push(`Row ${idx + 2}: needs at least two choices`); return; }
-        const key = /^\d+$/.test(raw) ? Number(raw) : indexForLetter(raw);
-        if (key === null || key === undefined || Number.isNaN(key)) {
-          errors.push(`Row ${idx + 2}: invalid answer "${raw}" — use a letter (A, B, … ${letterFor(list.length - 1)}) or a number (0–${list.length - 1})`);
+
+        // Several answers are written with a separator: "A;C", "A C", "A|C",
+        // "A+C". The separator is REQUIRED, and is what makes the row a
+        // multiple-answer question — a bare "AA" already means the 27th
+        // choice in the letter scheme (sql/016) and has to keep meaning that.
+        const parts = raw.split(/[;|+/\s,]+/).filter(Boolean);
+        const keys = parts.map(part => (/^\d+$/.test(part) ? Number(part) : indexForLetter(part)));
+        if (keys.length === 0 || keys.some(k => k === null || k === undefined || Number.isNaN(k))) {
+          errors.push(`Row ${idx + 2}: invalid answer "${raw}" — use a letter (A, B, … ${letterFor(list.length - 1)}) or a number (0–${list.length - 1}), and separate several answers with a semicolon`);
           return;
         }
-        if (!keyIsValid(key, list.length)) {
-          errors.push(`Row ${idx + 2}: the answer is ${letterFor(key)} but the row only has ${list.length} choices (A–${letterFor(list.length - 1)})`);
+        const outOfRange = keys.filter(k => !keyIsValid(k, list.length));
+        if (outOfRange.length > 0) {
+          errors.push(`Row ${idx + 2}: the answer is ${outOfRange.map(letterFor).join(', ')} but the row only has ${list.length} choices (A–${letterFor(list.length - 1)})`);
           return;
         }
-        questions.push({ question_text: qText, question_type: 'multiple_choice', choices: list, correct_answer: key });
+        const set = indexSet(keys);
+        if (set.length !== keys.length) {
+          errors.push(`Row ${idx + 2}: the answer "${raw}" names the same choice twice`);
+          return;
+        }
+        questions.push(set.length > 1
+          ? { question_text: qText, question_type: 'multi_select', choices: list, correct_answer: null, correct_answers: set }
+          : { question_text: qText, question_type: 'multiple_choice', choices: list, correct_answer: set[0] });
       }
     });
     return { questions, errors };
@@ -1115,12 +1154,13 @@ const [targetSection, setTargetSection] = useState('');
     // their own: everything in question_text is a question, so a row that
     // explained the format would be imported as one. The explaining happens on
     // screen, beside the button. What the rows do show, silently, is the range
-    // of shapes — 4, 5, 7 and 2 choices, a key given as a number, and an essay.
+    // of shapes — 4, 5, 7 and 2 choices, a key given as a number, a key naming
+    // three answers at once, and an essay.
     const csv = [
       'question_text,choice_a,choice_b,choice_c,choice_d,choice_e,choice_f,choice_g,correct_answer',
       '"What is lift?","Pressure difference","Gravity","Drag","Thrust",,,,A',
       '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",,,E',
-      '"Which of these are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A',
+      '"Which of these are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A;B;C',
       '"An aerofoil generates lift by accelerating air over its upper surface.","True","False",,,,,,A',
       '"Which force opposes thrust in level flight?","Lift","Drag","Weight","Normal force",,,,1',
       '"Explain Bernoulli\'s principle in your own words.","","","","","","","",""',
@@ -3026,7 +3066,7 @@ const deleteResult = async (studentId, examId) => {
               )}
               {csvExamParsed && csvExamParsed.errors.length === 0 && (
                 <span style={{ fontSize: '12px', color: 'var(--text-4)' }}>
-                  {csvExamParsed.questions.filter(q => q.question_type !== 'essay').length} MC · {csvExamParsed.questions.filter(q => q.question_type === 'essay').length} Essay
+                  {csvExamParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvExamParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvExamParsed.questions.filter(q => q.question_type === 'essay').length} Essay
                 </span>
               )}
             </div>
@@ -3718,7 +3758,7 @@ const deleteResult = async (studentId, examId) => {
                 <div style={{ marginBottom: '16px' }}>
                   <label className="label">Question Type</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    {[{ value: 'multiple_choice', label: 'Multiple Choice' }, { value: 'essay', label: 'Essay / Open-ended' }].map(({ value, label }) => (
+                    {QUESTION_TYPES.map(({ value, label }) => (
                       <button key={value} type="button" className={`btn sm ${qForm.question_type === value ? '' : 'ghost'}`} onClick={() => setQForm(f => ({ ...f, question_type: value }))} style={{ width: 'auto' }}>
                         {label}
                       </button>
@@ -3769,20 +3809,41 @@ const deleteResult = async (studentId, examId) => {
                         it are the same gesture rather than two lists to keep in
                         step. */}
                     <label className="label" style={{ display: 'block', marginBottom: 6 }}>
-                      Choices <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>— tick the correct one</span>
+                      Choices <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>
+                        {qForm.question_type === 'multi_select'
+                          ? '— tick every correct one'
+                          : '— tick the correct one'}
+                      </span>
                     </label>
+                    {qForm.question_type === 'multi_select' && (
+                      <p style={{ margin: '0 0 8px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.55 }}>
+                        Marked all or nothing: the student earns the point only
+                        if they tick every one of these and nothing else. Miss
+                        one and the question scores zero.
+                      </p>
+                    )}
                     <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
-                      {qForm.choice_list.map((text, i) => (
+                      {qForm.choice_list.map((text, i) => {
+                        // The two types key differently — one index, or a set
+                        // (sql/018) — so "is this choice the answer" is asked
+                        // of whichever key the type uses.
+                        const isMulti = qForm.question_type === 'multi_select';
+                        const keyed = isMulti
+                          ? isSelected(qForm.correct_answers, i)
+                          : Number(qForm.correct_answer) === i;
+                        return (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <label title={`Mark ${letterFor(i)} correct`} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexShrink: 0 }}>
                             <input
-                              type="radio"
-                              name="correct_answer"
-                              checked={Number(qForm.correct_answer) === i}
-                              onChange={() => setQForm(f => ({ ...f, correct_answer: i }))}
+                              type={isMulti ? 'checkbox' : 'radio'}
+                              name={isMulti ? `correct_answers_${i}` : 'correct_answer'}
+                              checked={keyed}
+                              onChange={() => setQForm(f => isMulti
+                                ? { ...f, correct_answers: toggleIndex(f.correct_answers, i) }
+                                : { ...f, correct_answer: i })}
                               style={{ width: 16, height: 16 }}
                             />
-                            <span style={{ fontWeight: 700, fontSize: 13, width: 20, color: Number(qForm.correct_answer) === i ? 'var(--ok)' : 'var(--ink-3)' }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, width: 20, color: keyed ? 'var(--ok)' : 'var(--ink-3)' }}>
                               {letterFor(i)}
                             </span>
                           </label>
@@ -3795,18 +3856,22 @@ const deleteResult = async (studentId, examId) => {
                               return { ...f, choice_list: next };
                             })}
                             placeholder={`Choice ${letterFor(i)}...`}
-                            style={{ flex: 1, ...(Number(qForm.correct_answer) === i ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}) }}
+                            style={{ flex: 1, ...(keyed ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}) }}
                           />
                           <button
                             type="button"
                             onClick={() => setQForm(f => {
                               const next = f.choice_list.filter((_, j) => j !== i);
-                              // Keep the tick on the same choice it was on: the
-                              // ones after the removed row all shift up by one.
+                              // Keep the ticks on the same choices they were
+                              // on: the ones after the removed row all shift up
+                              // by one, and a tick on the removed row goes.
                               let key = Number(f.correct_answer);
                               if (key === i) key = 0;
                               else if (key > i) key -= 1;
-                              return { ...f, choice_list: next, correct_answer: key };
+                              const set = (indexSet(f.correct_answers) || [])
+                                .filter(k => k !== i)
+                                .map(k => (k > i ? k - 1 : k));
+                              return { ...f, choice_list: next, correct_answer: key, correct_answers: set };
                             })}
                             disabled={qForm.choice_list.length <= 2}
                             title={qForm.choice_list.length <= 2 ? 'A question needs at least two choices' : `Remove choice ${letterFor(i)}`}
@@ -3816,7 +3881,8 @@ const deleteResult = async (studentId, examId) => {
                             <Icon name="trash" size={12} />
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                     <button
                       type="button"
@@ -3868,7 +3934,7 @@ const deleteResult = async (studentId, examId) => {
                   {csvParsed && (
                     <>
                       <span style={{ fontSize: '12px', color: 'var(--ink-3)' }}>
-                        {csvParsed.questions.filter(q => q.question_type !== 'essay').length} MC · {csvParsed.questions.filter(q => q.question_type === 'essay').length} Essay
+                        {csvParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvParsed.questions.filter(q => q.question_type === 'essay').length} Essay
                       </span>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 600, color: csvReplaceMode ? 'var(--bad)' : 'var(--ink-2)' }}>
                         <input type="checkbox" checked={csvReplaceMode} onChange={e => setCsvReplaceMode(e.target.checked)} style={{ width: '15px', height: '15px' }} />
@@ -3911,6 +3977,7 @@ const deleteResult = async (studentId, examId) => {
                               <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
                               {q.question_text}
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
+                              {isMultiSelect(q) && <span className="px-pill ok" style={{ marginLeft: 10 }}>Multiple answers</span>}
                             </p>
                             {q.image_url && (
                               <img
@@ -3935,11 +4002,16 @@ const deleteResult = async (studentId, examId) => {
                           </div>
                         ) : (
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                            {choicesOf(q).map((choiceText, i) => { const letter = letterFor(i); return (
-                              <div key={letter} style={{ padding: '6px 10px', borderRadius: 'var(--r-xs)', background: Number(q.correct_answer) === i ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1px solid ${Number(q.correct_answer) === i ? 'var(--ok-bd)' : 'var(--line)'}`, fontSize: '13px', color: Number(q.correct_answer) === i ? 'var(--ok)' : 'var(--ink-2)', fontWeight: Number(q.correct_answer) === i ? 600 : 400 }}>
-                                <strong>{letter}.</strong> {choiceText}{Number(q.correct_answer) === i && ' ✓'}
+                            {/* A multi-answer item highlights every keyed
+                                choice, not just one (sql/018). */}
+                            {(() => { const keySet = correctSetOf(q) || []; return choicesOf(q).map((choiceText, i) => {
+                              const letter = letterFor(i);
+                              const keyed = keySet.includes(i);
+                              return (
+                              <div key={letter} style={{ padding: '6px 10px', borderRadius: 'var(--r-xs)', background: keyed ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1px solid ${keyed ? 'var(--ok-bd)' : 'var(--line)'}`, fontSize: '13px', color: keyed ? 'var(--ok)' : 'var(--ink-2)', fontWeight: keyed ? 600 : 400 }}>
+                                <strong>{letter}.</strong> {choiceText}{keyed && ' ✓'}
                               </div>
-                            ); })}
+                            ); }); })()}
                           </div>
                         )}
                       </div>
@@ -4299,29 +4371,51 @@ const deleteResult = async (studentId, examId) => {
                     );
                   }
 
-                  const studentChoice = sAnswer !== undefined ? Number(sAnswer.chosen) : -1;
-                  const correctChoice = Number(q.correct_answer);
+                  // Both the key and the answer may be a set (sql/018), so
+                  // "did they get it right" is set equality, not one index
+                  // against another. is_correct as stored by score_answers()
+                  // is the authority; the comparison is the fallback for a row
+                  // written before it recorded one.
+                  const studentSet = indexSet(sAnswer?.chosen) || [];
+                  const keySet = correctSetOf(q) || [];
+                  const gotIt = typeof sAnswer?.is_correct === 'boolean'
+                    ? sAnswer.is_correct
+                    : isAnswerCorrect(q, sAnswer?.chosen) === true;
+                  const multi = isMultiSelect(q);
 
                   return (
-                    <div key={q.id} className="card" style={{ padding: '20px', borderLeft: studentChoice === correctChoice ? '4px solid var(--ok)' : '4px solid var(--bad)' }}>
-                      <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                    <div key={q.id} className="card" style={{ padding: '20px', borderLeft: gotIt ? '4px solid var(--ok)' : '4px solid var(--bad)' }}>
+                      <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)' }}>
+                        {idx + 1}. {q.question_text}
+                        {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
+                      </p>
                       {q.image_url && (
                         <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
                       )}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         {choicesOf(q).map((choiceText, i) => {
                           const letter = letterFor(i);
-                          const isCorrect = i === correctChoice;
-                          const isStudentWrong = i === studentChoice && studentChoice !== correctChoice;
+                          const isCorrect = keySet.includes(i);
+                          const isStudentWrong = studentSet.includes(i) && !isCorrect;
                           return (
                             <div key={letter} style={{ padding: '10px 12px', background: isCorrect ? 'var(--ok-bg)' : isStudentWrong ? 'var(--bad-bg)' : 'var(--surface-2)', border: `1.5px solid ${isCorrect ? 'var(--ok-bd)' : isStudentWrong ? 'var(--bad-bd)' : 'var(--line)'}`, borderRadius: 'var(--r-sm)', color: isCorrect ? 'var(--ok)' : isStudentWrong ? 'var(--bad)' : 'var(--ink-2)', fontSize: '13.5px' }}>
                               <strong>{letter}.</strong> {choiceText}
-                              {isCorrect && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700 }}>✓ Correct</span>}
+                              {isCorrect && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700 }}>✓ Correct{studentSet.includes(i) ? ' — picked' : ''}</span>}
                               {isStudentWrong && <span style={{ marginLeft: 6, fontSize: '11px', fontWeight: 700 }}>✗ Picked</span>}
                             </div>
                           );
                         })}
                       </div>
+                      {/* All or nothing, so a paper can show three of four
+                          right and still score zero for the item. Spell out
+                          what was missed rather than leaving it to the
+                          colours. */}
+                      {multi && !gotIt && (
+                        <p style={{ margin: '10px 0 0', fontSize: '12.5px', color: 'var(--ink-3)' }}>
+                          Needed {keySet.map(letterFor).join(', ')} and nothing else.
+                          Ticked {studentSet.length ? studentSet.map(letterFor).join(', ') : 'nothing'}.
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -4376,15 +4470,34 @@ const deleteResult = async (studentId, examId) => {
                 const examResults = results.filter(r => r.exam_id === viewingStatsExam);
                 const totalAnswers = examResults.length;
                 const counts = {};   // any number of choices (sql/016)
+                // A multi-answer item's `chosen` is a set (sql/018), so every
+                // index a student ticked is counted. The percentages then read
+                // as "how many of the class ticked this choice" rather than
+                // summing to 100, which is the right question for the type.
+                let fullyRight = 0;
                 examResults.forEach(r => {
                   const aj = answersJsonCache[`${r.student_id}_${r.exam_id}`] || {};
                   const sAnswer = aj[q.id];
-                  if (sAnswer !== undefined) counts[sAnswer.chosen] = (counts[sAnswer.chosen] || 0) + 1;
+                  if (sAnswer === undefined) return;
+                  (indexSet(sAnswer.chosen) || []).forEach(i => { counts[i] = (counts[i] || 0) + 1; });
+                  if (sAnswer.is_correct === true) fullyRight++;
                 });
+                const keySet = correctSetOf(q) || [];
+                const multi = isMultiSelect(q);
 
                 return (
                   <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
-                    <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>{idx + 1}. {q.question_text}</p>
+                    <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
+                      {idx + 1}. {q.question_text}
+                      {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
+                    </p>
+                    {multi && (
+                      <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: 'var(--ink-3)' }}>
+                        Marked all or nothing — {fullyRight} of {totalAnswers} ticked
+                        the whole key ({keySet.map(letterFor).join(', ')}) and nothing else.
+                        Each bar below counts everyone who ticked that choice, so they do not add up to 100%.
+                      </p>
+                    )}
                     {q.image_url && (
                       <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 14 }} />
                     )}
@@ -4393,7 +4506,7 @@ const deleteResult = async (studentId, examId) => {
                         const letter = letterFor(i);
                         const count = counts[i] || 0;
                         const percentage = totalAnswers > 0 ? Math.round((count / totalAnswers) * 100) : 0;
-                        const isCorrect = i === Number(q.correct_answer);
+                        const isCorrect = keySet.includes(i);
                         return (
                           <div key={letter} style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', background: isCorrect ? 'var(--ok-bg)' : 'var(--surface-2)', border: `1.5px solid ${isCorrect ? 'var(--ok-bd)' : 'var(--line)'}` }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>

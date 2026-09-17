@@ -1,4 +1,5 @@
 import { letterFor } from '../lib/choices';
+import { indexSet } from '../lib/answers';
 
 // The marked paper as the student sees it: one card per question, their answer
 // against the key.
@@ -8,13 +9,18 @@ import { letterFor } from '../lib/choices';
 // which is the only route back once that screen is gone.
 //
 // Rows come from get_answer_review(), the single server-side route to a
-// correct answer. Every colour here is inked for a LIGHT surface on purpose:
-// ExamBoard renders this under its navy hero band, and the first version
-// inherited the band's white-on-navy and came out white on white.
+// correct answer. A row carries `correct` (one index) for a single-answer item
+// and `correct_set` (an array) for a multi-answer one (sql/018), and `chosen`
+// follows the same shape, so both sides are read as sets here.
+//
+// Every colour here is inked for a LIGHT surface on purpose: ExamBoard renders
+// this under its navy hero band, and the first version inherited the band's
+// white-on-navy and came out white on white.
 
 export default function AnswerReview({ rows }) {
   const right = rows.filter(r => r.is_correct).length;
-  const blank = rows.filter(r => r.chosen === null || r.chosen === undefined).length;
+  const isBlank = (r) => indexSet(r.chosen) === null;
+  const blank = rows.filter(isBlank).length;
 
   return (
     <div style={{ marginBottom: 34, textAlign: 'left' }}>
@@ -26,7 +32,13 @@ export default function AnswerReview({ rows }) {
       </div>
 
       {rows.map((r, i) => {
-        const unanswered = r.chosen === null || r.chosen === undefined;
+        const unanswered = isBlank(r);
+        const keySet = indexSet(r.correct_set) ?? indexSet(r.correct) ?? [];
+        const mineSet = indexSet(r.chosen) ?? [];
+        // question_type is authoritative; the array checks are the fallback
+        // for a row fetched before sql/018 taught the function to send it.
+        const multi = r.question_type === 'multi_select'
+          || Array.isArray(r.correct_set) || Array.isArray(r.chosen);
         return (
           <div key={r.question_id || i} className="card" style={{
             padding: '16px 18px', marginBottom: 12,
@@ -50,8 +62,8 @@ export default function AnswerReview({ rows }) {
 
             <div style={{ display: 'grid', gap: 5 }}>
               {(r.choices || []).map((choice, ci) => {
-                const isKey = ci === r.correct;
-                const isMine = ci === r.chosen;
+                const isKey = keySet.includes(ci);
+                const isMine = mineSet.includes(ci);
                 return (
                   <div key={ci} style={{
                     fontSize: 13.5, padding: '7px 11px', borderRadius: 'var(--r-sm)',
@@ -64,7 +76,7 @@ export default function AnswerReview({ rows }) {
                   }}>
                     <strong style={{ flexShrink: 0 }}>{letterFor(ci)}.</strong>
                     <span style={{ flex: 1 }}>{choice}</span>
-                    {isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>CORRECT</span>}
+                    {isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>CORRECT{isMine && multi ? ' — YOU TICKED THIS' : ''}</span>}
                     {isMine && !isKey && <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700 }}>YOUR ANSWER</span>}
                   </div>
                 );
@@ -74,6 +86,17 @@ export default function AnswerReview({ rows }) {
             {unanswered && (
               <div style={{ fontSize: 12.5, color: 'var(--ink-4)', marginTop: 9, fontStyle: 'italic' }}>
                 You left this blank.
+              </div>
+            )}
+
+            {/* Why a paper can be marked wrong with three of four boxes right:
+                a multi-answer item is all or nothing. Said here rather than
+                left for the student to work out from the colours. */}
+            {multi && !unanswered && !r.is_correct && (
+              <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 9 }}>
+                This question needed every correct answer ticked and nothing
+                else — {keySet.map(letterFor).join(', ')}. You ticked{' '}
+                {mineSet.length ? mineSet.map(letterFor).join(', ') : 'nothing'}.
               </div>
             )}
           </div>

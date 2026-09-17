@@ -13,7 +13,7 @@
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
     "test:material": "node src/lib/__tests__/lessonMaterial.test.mjs",
-    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions",
+    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions && npm run test:answers && npm run test:multi-select",
     "test:review": "node sql/test/review.test.mjs",
     "test:preboards": "node sql/test/preboards_review.test.mjs",
     "test:sections-scope": "node src/lib/__tests__/sectionScope.test.mjs",
@@ -25,7 +25,9 @@
     "test:unlimited-choices": "node sql/test/unlimited_choices.test.mjs",
     "test:csv-template": "node src/lib/__tests__/csvTemplate.test.mjs",
     "test:exam-order": "node src/lib/__tests__/examOrder.test.mjs",
-    "test:shuffle-questions": "node sql/test/shuffle_questions.test.mjs"
+    "test:shuffle-questions": "node sql/test/shuffle_questions.test.mjs",
+    "test:answers": "node src/lib/__tests__/answers.test.mjs",
+    "test:multi-select": "node sql/test/multi_select.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",

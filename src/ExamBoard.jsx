@@ -4,6 +4,9 @@ import { prepareQuestions } from './lib/examOrder';
 import { fetchAssessmentById } from './lib/assessments';
 import Icon from './components/Icon';
 import AnswerReview from './components/AnswerReview';
+import {
+  isMultiSelect, isSelected, toggleIndex, hasAnswer, answeredCount, answersPayload,
+} from './lib/answers';
 
 export default function ExamBoard({ student, exam, examSet }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
@@ -119,7 +122,7 @@ export default function ExamBoard({ student, exam, examSet }) {
 
     const initLiveSession = async () => {
       const hasLocalAnswers =
-        Object.keys(initialState.answers || {}).length > 0 ||
+        answeredCount(initialState.answers) > 0 ||
         Object.keys(initialState.essayAnswers || {}).length > 0;
 
       const { data: rows } = await supabase.from('live_sessions')
@@ -150,7 +153,7 @@ export default function ExamBoard({ student, exam, examSet }) {
           // No result — was dismissed by instructor, restore as active
           await supabase.from('live_sessions').update({
             status: 'active',
-            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+            answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
             violation_count: tabSwitchCount,
             updated_at: new Date()
           }).eq('id', existing.id);
@@ -172,8 +175,8 @@ export default function ExamBoard({ student, exam, examSet }) {
             const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;
             if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
           }
-          const localCount = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
-          const serverCount = Object.keys(existing.answers_json || {}).length + Object.values(existing.essay_answers_json || {}).filter(t => t?.trim().length > 0).length;
+          const localCount = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+          const serverCount = answeredCount(existing.answers_json) + Object.values(existing.essay_answers_json || {}).filter(t => t?.trim().length > 0).length;
           // Use existing.answers_count as a floor so a page refresh never resets the count to 0
           // when answers_json is missing (column not migrated) or localStorage was cleared.
           const safeCount = Math.max(localCount, serverCount, existing.answers_count || 0);
@@ -194,7 +197,7 @@ export default function ExamBoard({ student, exam, examSet }) {
             student_name: student.full_name,
             status: 'active',
             violation_count: tabSwitchCount,
-            answers_count: Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length
+            answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length
           }])
           .select()
           .single();
@@ -282,7 +285,7 @@ export default function ExamBoard({ student, exam, examSet }) {
     if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     countPushDebounceRef.current = setTimeout(() => {
       countPushDebounceRef.current = null;
-      const liveCount = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+      const liveCount = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
       // Never write below the server-known count from session init — prevents a page refresh
       // on a new device from briefly resetting the count to 0 in the admin monitor.
       const safeCount = Math.max(liveCount, minAnswersCountRef.current);
@@ -397,10 +400,12 @@ export default function ExamBoard({ student, exam, examSet }) {
       // submit_assessment() marks in Postgres, routes the row to results or
       // review_attempts depending on whether retakes are on, and returns the
       // score. sql/003 revokes the key from anon once this is deployed.
-      const mcAnswers = {};
-      Object.entries(submittedAnswers).forEach(([qId, chosen]) => {
-        if (chosen !== undefined && chosen !== null) mcAnswers[String(qId)] = Number(chosen);
-      });
+      //
+      // A multi-answer item (sql/018) sends an ARRAY of indices and is marked
+      // all or nothing there; a single-answer one sends a plain index, exactly
+      // as it always has. answersPayload() takes the shape from the answer
+      // itself and drops anything left blank.
+      const mcAnswers = answersPayload(submittedAnswers);
 
       const { data: outcome, error: rpcError } = await supabase.rpc('submit_assessment', {
         p_student_id: student?.id,
@@ -797,6 +802,7 @@ export default function ExamBoard({ student, exam, examSet }) {
   }
 
   const currentQ = questions[currentQuestion - 1] || {};
+  const multiSelect = isMultiSelect(currentQ);
 
   return (
     <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--paper)' }} onContextMenu={e => e.preventDefault()}>
@@ -808,12 +814,12 @@ export default function ExamBoard({ student, exam, examSet }) {
             <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 28px', borderBottom: '3px solid var(--gold)' }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
               <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
-                {Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length} of {questions.length} questions answered
+                {answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length} of {questions.length} questions answered
               </p>
             </div>
             <div style={{ padding: '24px 28px' }}>
               {(() => {
-                const totalAnswered = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+                const totalAnswered = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
                 const unanswered = questions.length - totalAnswered;
                 return unanswered > 0 ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--warn)', fontWeight: 500 }}>
@@ -902,6 +908,11 @@ export default function ExamBoard({ student, exam, examSet }) {
                 Essay
               </span>
             )}
+            {multiSelect && (
+              <span style={{ background: '#EEF6EE', color: '#1B6E2F', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+                Select all that apply
+              </span>
+            )}
             {flaggedQuestions[currentQ?.id] && (
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#FFF6E5', border: '1px solid #F0CA80', color: '#A56B0A', padding: '3px 9px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>
                 <Icon name="bookmark" size={11} color="#E67E22" />
@@ -940,6 +951,13 @@ export default function ExamBoard({ student, exam, examSet }) {
             </div>
           )}
 
+          {multiSelect && (
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--ink-2)', background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '9px 13px', lineHeight: 1.5 }}>
+              <strong>Tick every correct answer.</strong> All of them must be
+              ticked, and nothing else, to earn the point for this question.
+            </p>
+          )}
+
           {currentQ?.question_type === 'essay' ? (
             <div>
               <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)' }}>Type your answer in the box below.</p>
@@ -964,17 +982,37 @@ export default function ExamBoard({ student, exam, examSet }) {
             </div>
           ) : (
             <div className="choices">
-              {(currentQ?.choice_order || []).map((originalIndex) => (
+              {/* A multi-answer item (sql/018) holds an ARRAY of indices and
+                  ticks rather than picks, so a second click on the same choice
+                  unticks it instead of doing nothing. A single-answer item
+                  keeps holding one index. */}
+              {(currentQ?.choice_order || []).map((originalIndex) => {
                 // The stored index, never the position on screen, so marking
                 // is unaffected by the order the choices are shown in.
-                <button
-                  key={originalIndex}
-                  className={`choice-btn ${answers[currentQ?.id] === originalIndex ? 'selected' : ''}`}
-                  onClick={() => setAnswers({ ...answers, [currentQ.id]: originalIndex })}
-                >
-                  {(currentQ.choice_list || [])[originalIndex]}
-                </button>
-              ))}
+                const picked = multiSelect
+                  ? isSelected(answers[currentQ?.id], originalIndex)
+                  : answers[currentQ?.id] === originalIndex;
+                return (
+                  <button
+                    key={originalIndex}
+                    className={`choice-btn ${picked ? 'selected' : ''} ${multiSelect ? 'tickable' : ''}`}
+                    aria-pressed={multiSelect ? picked : undefined}
+                    onClick={() => setAnswers(prev => ({
+                      ...prev,
+                      [currentQ.id]: multiSelect
+                        ? toggleIndex(prev[currentQ.id], originalIndex)
+                        : originalIndex,
+                    }))}
+                  >
+                    {multiSelect && (
+                      <span className="tick-box" aria-hidden="true">{picked ? '\u2713' : ''}</span>
+                    )}
+                    <span className={multiSelect ? 'tick-text' : undefined}>
+                      {(currentQ.choice_list || [])[originalIndex]}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -1001,7 +1039,7 @@ export default function ExamBoard({ student, exam, examSet }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <div className="eyebrow" style={{ fontSize: 10 }}>Navigator</div>
             <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
-              {Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length}/{questions.length}
+              {answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length}/{questions.length}
             </span>
           </div>
 
@@ -1009,7 +1047,7 @@ export default function ExamBoard({ student, exam, examSet }) {
             {questions.map((q, i) => {
               const isAnswered = q.question_type === 'essay'
                 ? (essayAnswers[q.id]?.trim().length > 0)
-                : (answers[q.id] !== undefined);
+                : hasAnswer(answers[q.id]);
               const isFlagged = !!flaggedQuestions[q.id];
               return (
                 <div
@@ -1034,7 +1072,7 @@ export default function ExamBoard({ student, exam, examSet }) {
 
           <div style={{ marginTop: 16, padding: 12, background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
             {(() => {
-              const totalAnswered = Object.keys(answers).length + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+              const totalAnswered = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
               const flaggedCount = Object.keys(flaggedQuestions).length;
               return (
                 <>

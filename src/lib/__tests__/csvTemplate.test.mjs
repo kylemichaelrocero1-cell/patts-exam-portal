@@ -49,8 +49,10 @@ const parseRow = (cols) => {
   while (t.length && !(t[t.length - 1] ?? '').trim()) t.pop();
   const raw = (t[t.length - 1]?.trim() || '').toUpperCase();
   const list = t.slice(1, t.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
-  const key = /^\d+$/.test(raw) ? Number(raw) : indexForLetter(raw);
-  return { qText, list, key, raw };
+  // Several answers are separated (sql/018); a single letter stays single.
+  const parts = raw.split(/[;|+/\s,]+/).filter(Boolean);
+  const keys = parts.map(part => (/^\d+$/.test(part) ? Number(part) : indexForLetter(part)));
+  return { qText, list, keys, key: keys[0], multi: keys.length > 1, raw };
 };
 
 const rows = lines.map(split);
@@ -66,14 +68,19 @@ check('it offers at least seven choice columns, so "add more" is visibly true',
 
 console.log('\n=== every example row imports as labelled ===');
 const parsed = rows.slice(1).map(parseRow).filter(r => !r.skip);
+const rowIsValid = (r) => r.list.length >= 2
+  && r.keys.length > 0
+  && r.keys.every(k => k !== null && k !== undefined && !Number.isNaN(k)
+                       && keyIsValid(k, r.list.length))
+  && new Set(r.keys).size === r.keys.length;
 const widths = new Set();
 for (const r of parsed) {
   const label = r.qText.split('—')[0].trim();
   if (r.essay) { check(`${label}: parses as an essay`, true); continue; }
-  const ok = r.list.length >= 2 && r.key !== null && keyIsValid(r.key, r.list.length);
+  const ok = rowIsValid(r);
   widths.add(r.list.length);
-  check(`${label}: ${r.list.length} choices, answer ${r.raw} -> "${r.list[r.key]}"`, ok,
-    ok ? '' : `list=${r.list.length} key=${r.key}`);
+  check(`${label}: ${r.list.length} choices, answer ${r.raw} -> "${r.keys.map(k => r.list[k]).join('", "')}"`, ok,
+    ok ? '' : `list=${r.list.length} keys=${r.keys}`);
 }
 
 console.log('\n=== it demonstrates the point ===');
@@ -86,7 +93,10 @@ check('there is an example with fewer than four, so the minimum is clear',
 check('at least one example keys the answer by number rather than a letter',
   parsed.some(r => !r.essay && /^\d+$/.test(r.raw)));
 check('at least one example keys an answer past D, which four columns could not hold',
-  parsed.some(r => !r.essay && r.key > 3));
+  parsed.some(r => !r.essay && r.keys.some(k => k > 3)));
+check('there is a multiple-answer example — a single key could not express it',
+  parsed.some(r => !r.essay && r.multi),
+  parsed.filter(r => !r.essay).map(r => r.raw).join(' | '));
 
 console.log('\n=== the rows are questions, not instructions ===');
 {
@@ -106,7 +116,7 @@ console.log('\n=== the rows are questions, not instructions ===');
 }
 
 console.log('\n=== nothing in the file would show up as an import error ===');
-const broken = parsed.filter(r => !r.essay && !(r.list.length >= 2 && keyIsValid(r.key, r.list.length)));
+const broken = parsed.filter(r => !r.essay && !rowIsValid(r));
 check('no row is an invalid question', broken.length === 0,
   broken.map(r => r.qText.slice(0, 40)).join(' | '));
 

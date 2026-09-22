@@ -5,6 +5,7 @@ import StudentShell from './StudentShell';
 import ExamBoard from './ExamBoard';
 import SectionSelector from './SectionSelector';
 import AdminDashboard from './AdminDashboard';
+import { clearAllGates } from './lib/examGateKeys';
 import './index.css';
 
 export default function App() {
@@ -80,6 +81,11 @@ export default function App() {
     await supabase.auth.signOut(); // No-op for students (not signed into Supabase Auth)
     localStorage.removeItem('local_session_token');
     localStorage.removeItem('patts_student_session');
+    // The password and briefing gates remember themselves in sessionStorage,
+    // which belongs to the TAB, not to the login. On a shared lab machine the
+    // next student inherits the tab — so a logout has to take the unlocks with
+    // it. The keys are student-scoped as well; this is the second lock.
+    clearAllGates();
     setStudent(null);
     setSelectedSection(null);
     setSelectedExam(null);

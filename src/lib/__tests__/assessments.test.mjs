@@ -10,7 +10,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import {
   makeAssessmentReader, isAvailableNow, availabilityState,
-  normaliseExamRow, isMissingTableError, formatWindow,
+  normaliseExamRow, isMissingTableError, isMissingFunctionError, formatWindow,
 } from '../assessmentsCore.js';
 
 let pass = 0, fail = 0;
@@ -175,6 +175,28 @@ check('no window -> empty string', formatWindow({}) === '');
 check('both bounds joined', formatWindow({ opens_at: iso(0), closes_at: iso(H) }).includes('—'));
 check('opens only', formatWindow({ opens_at: iso(0) }).startsWith('Opens'));
 check('closes only', formatWindow({ closes_at: iso(0) }).startsWith('Closes'));
+
+console.log('\n=== "NOT MIGRATED YET" vs "REFUSED" ===');
+// The gate in sql/020 falls back to the old unguarded read when the function
+// is absent. Mistaking a refusal for an absence would walk straight round the
+// gate, so this distinction is the whole safety of that fallback.
+check('PostgREST\'s missing-routine code',
+  isMissingFunctionError({ code: 'PGRST202', message: 'Could not find the function' }) === true);
+check('Postgres\' undefined_function',
+  isMissingFunctionError({ code: '42883', message: 'function foo(uuid) does not exist' }) === true);
+check('a schema-cache miss with no code',
+  isMissingFunctionError({ message: "Could not find the function public.get_exam_questions in the schema cache" }) === true);
+check('THE ONE THAT MATTERS: a locked paper is NOT a missing function',
+  isMissingFunctionError({ code: '42501', message: 'Enter the exam password first.' }) === false);
+check('nor is a wrong section',
+  isMissingFunctionError({ code: '42501', message: 'This assessment is not for your section.' }) === false);
+check('nor is an expired session',
+  isMissingFunctionError({ code: '28000', message: 'Your session has expired. Please log in again.' }) === false);
+check('nor is a closed paper',
+  isMissingFunctionError({ code: '42501', message: 'This assessment is not open.' }) === false);
+check('nor a plain network failure',
+  isMissingFunctionError({ message: 'Failed to fetch' }) === false);
+check('null does not throw', isMissingFunctionError(null) === false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

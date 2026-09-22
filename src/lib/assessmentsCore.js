@@ -33,6 +33,25 @@ export function isMissingTableError(error) {
   return /schema cache|does not exist|not find the table/i.test(error?.message || '');
 }
 
+/**
+ * "This database has not had that migration yet" — as opposed to "the
+ * function ran and said no".
+ *
+ * The distinction matters more than it looks. get_exam_questions() and
+ * unlock_assessment() (sql/020) are the gate; when they refuse, the caller
+ * must show the refusal, NOT quietly fall back to the old unguarded path —
+ * that would hand back the very hole 020 closes. Only a function that is not
+ * there at all earns the fallback, and only until 021 has run.
+ *
+ * PostgREST reports a missing routine as PGRST202; Postgres itself as 42883.
+ */
+export function isMissingFunctionError(error) {
+  if (!error) return false;
+  if (error.code === 'PGRST202' || error.code === '42883') return true;
+  return /not find the function|function .* does not exist|schema cache/i
+    .test(error.message || '');
+}
+
 export function normaliseExamRow(row) {
   return {
     ...row,

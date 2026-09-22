@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabase';
 import { prepareQuestions } from './lib/examOrder';
-import { fetchAssessmentById } from './lib/assessments';
+import { fetchAssessmentById, isMissingFunctionError } from './lib/assessments';
+import { fetchAnswerReview } from './lib/answerReview';
+import { clearPasswordGate } from './lib/examGateKeys';
 import Icon from './components/Icon';
 import AnswerReview from './components/AnswerReview';
 import {
@@ -13,7 +15,7 @@ import { sittingDecision, restartPatch } from './lib/retakes';
 // 'finished' row means. The claim and the marking are two round trips.
 const FINISH_SETTLE_MS = 4000;
 
-export default function ExamBoard({ student, exam, examSet }) {
+export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
   // instructor wants that signal — but are never locked for it. Locking a
   // revision paper the student can simply restart is pure friction, and it
@@ -485,18 +487,19 @@ export default function ExamBoard({ student, exam, examSet }) {
 
   // Pulls the marked paper back from the server. This is the only route to a
   // correct answer: get_answer_review() refuses unless the assessment has
-  // show_answers on AND this student has already submitted it.
+  // show_answers on AND this student has already submitted it — and, since
+  // sql/022, unless the caller can prove they ARE that student. The id alone
+  // used to be enough, which made a paper opened for review hand its key to
+  // anybody who passed a classmate's id.
   const loadAnswerReview = async () => {
     setIsLoadingReview(true);
-    const { data, error } = await supabase.rpc('get_answer_review', {
-      p_student_id: student?.id,
-      p_assessment_id: exam.id,
-      p_attempt_no: null,
-    });
+    const { data, error } = await fetchAnswerReview(student?.id, exam.id);
     setIsLoadingReview(false);
     if (error) {
       console.error('Could not load the answer review:', error.message);
-      alert('Could not load the answers. Please try again.');
+      alert(/session has expired/i.test(error.message || '')
+        ? '⚠️ Your session has expired. Please log in again.'
+        : 'Could not load the answers. Please try again.');
       return;
     }
     setReviewRows(data || []);
@@ -750,24 +753,77 @@ export default function ExamBoard({ student, exam, examSet }) {
   useEffect(() => {
     async function loadQuestions() {
       if (!exam?.id) return;
-      // Explicit columns, never select('*'): anon is granted every column of
-      // questions EXCEPT correct_answer (sql/003), and a wildcard asks for the
-      // withheld column too, so PostgREST refuses the whole request and no
-      // student can load the paper at all.
-      const { data, error } = await supabase.from('questions')
-        .select('id, exam_id, assessment_id, question_number, question_text, ' +
-                'question_type, category, choices, ' +
-                'choice_a, choice_b, choice_c, choice_d, choice_e, image_url, created_at')
-        .eq('exam_id', exam.id)
-        // question_number, not id. It only ever served as a stable base for the
-        // shuffle, and a uuid order is arbitrary — but once the shuffle can be
-        // switched off (sql/017) the base order is what students actually see.
-        .order('question_number', { ascending: true });
+
+      // The paper comes from the server, gated (sql/020). The password used to
+      // guard the Start button and nothing else — the questions themselves came
+      // from a table anon could read with USING (true), so the gate could be
+      // walked around by never clicking Start. get_exam_questions() checks who
+      // is asking, that the paper is theirs and open, and that they are through
+      // the password, before it hands over a single item.
+      const token = localStorage.getItem('local_session_token');
+      let data = null;
+      let error = null;
+
+      const rpc = await supabase.rpc('get_exam_questions', {
+        p_assessment_id: exam.id,
+        p_student_id: student?.id,
+        p_session_token: token,
+      });
+
+      if (!rpc.error) {
+        data = rpc.data;
+      } else if (isMissingFunctionError(rpc.error)) {
+        // This database has not had sql/020 yet. Fall back to the direct read
+        // so a deploy that lands before the migration cannot stop a class
+        // sitting an exam — and ONLY then. A refusal from the function is a
+        // refusal, never a reason to go round it.
+        // REMOVE THIS once 020 and 021 have both run everywhere.
+        //
+        // Explicit columns, never select('*'): anon is granted every column of
+        // questions EXCEPT correct_answer (sql/003), and a wildcard asks for the
+        // withheld column too, so PostgREST refuses the whole request and no
+        // student can load the paper at all.
+        const legacy = await supabase.from('questions')
+          .select('id, exam_id, assessment_id, question_number, question_text, ' +
+                  'question_type, category, choices, ' +
+                  'choice_a, choice_b, choice_c, choice_d, choice_e, image_url, created_at')
+          .eq('exam_id', exam.id)
+          // question_number, not id. It only ever served as a stable base for the
+          // shuffle, and a uuid order is arbitrary — but once the shuffle can be
+          // switched off (sql/017) the base order is what students actually see.
+          .order('question_number', { ascending: true });
+        data = legacy.data;
+        error = legacy.error;
+      } else {
+        error = rpc.error;
+      }
 
       if (error || !data || data.length === 0) {
         console.error("Error loading questions:", error);
-        alert("⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
+        // The gate's refusals are written to be read by a student — show the
+        // one that applies rather than a generic failure they cannot act on.
+        alert(error?.message && /password|section|not open|session|exists/i.test(error.message)
+          ? `⚠️ ${error.message}`
+          : "⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
+
+        // Turned away at the password gate, holding a tab that thinks it is
+        // already through. That happens the moment an instructor changes a
+        // paper's password: sql/020's trigger tears up every unlock, but the
+        // sessionStorage flag lives in the tab and survives it, so ExamList
+        // skips the modal and sends the student straight back here. Forget the
+        // flag and they are asked for the new password, which is the whole
+        // point of changing it. Without this they loop on a dead screen that a
+        // refresh cannot clear.
+        if (/password/i.test(error?.message || '')) {
+          clearPasswordGate(student?.id, exam.id);
+        }
+
+        // Never strand them on an exam shell with no questions in it. Nothing
+        // has been answered yet at mount, and a paper already under way is
+        // resumed from its live session, so going back costs nothing and is
+        // the only screen with a way forward on it.
         setIsLoading(false);
+        onFinish?.();
         return;
       }
 

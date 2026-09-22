@@ -2,9 +2,13 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import {
   selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
-  fetchAssessmentById,
+  fetchAssessmentById, isMissingFunctionError,
 } from './lib/assessments';
 import { isPaperFinished } from './lib/retakes';
+import {
+  passwordKey as gatePasswordKey,
+  readinessKey as gateReadinessKey,
+} from './lib/examGateKeys';
 import ExamReadinessModal from './components/ExamReadinessModal';
 
 export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
@@ -214,6 +218,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     }
   };
 
+  // Both gate keys are scoped to the student: a browser tab outlives a login,
+  // and what one student has cleared must not clear it for the next one.
+  const passwordKey  = (examId) => gatePasswordKey(student.id, examId);
+  const readinessKey = (examId) => gateReadinessKey(student.id, examId);
+
   // Everything that decides whether a student may start is here, so the
   // readiness gate in front of it stays a pure "have they read this yet".
   const beginStart = async (exam, setChoice) => {
@@ -240,9 +249,13 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         return;
       }
 
-      // Check sessionStorage to skip re-entry within the same browser session
-      const sessionKey = `exam_pass_ok_${exam.id}`;
-      if (sessionStorage.getItem(sessionKey)) {
+      // Skip re-entry within the same browser session — but only for the
+      // student who actually typed the password. The key used to be the exam
+      // id alone, so in a lab the next student to log in on that tab walked
+      // straight past a gate they had never been shown.
+      let unlocked = false;
+      try { unlocked = !!sessionStorage.getItem(passwordKey(exam.id)); } catch { /* private mode */ }
+      if (unlocked) {
         onStartExam(examData, setChoice);
         return;
       }
@@ -269,8 +282,6 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     }
   };
 
-  const readinessKey = (examId) => `exam_ready_ok_${examId}`;
-
   const handleStartClick = (exam, setChoice) => {
     // Resuming is not a new sitting: the clock is already running and the
     // briefing would only cost the student time they cannot get back.
@@ -295,16 +306,37 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     setPasswordError('');
 
     try {
-      // Password verified server-side — the actual password never reaches the client
-      const { data: isValid, error } = await supabase.rpc('verify_exam_password', {
-        p_exam_id: pendingExam.id,
+      // Password verified server-side — the actual password never reaches the
+      // client. unlock_assessment() also RECORDS the unlock against this
+      // student (sql/020), which is what get_exam_questions() then requires
+      // before it will hand over the paper. Without that record the gate is
+      // only a screen: the questions were readable straight from the table.
+      let isValid;
+      const unlock = await supabase.rpc('unlock_assessment', {
+        p_assessment_id: pendingExam.id,
         p_password: enteredPassword,
+        p_student_id: student.id,
+        p_session_token: localStorage.getItem('local_session_token'),
       });
 
-      if (error) throw error;
+      if (!unlock.error) {
+        isValid = unlock.data;
+      } else if (isMissingFunctionError(unlock.error)) {
+        // Pre-020 database: check the password the old way so a deploy ahead
+        // of the migration cannot lock a class out of an exam.
+        // REMOVE THIS once 020 has run everywhere.
+        const legacy = await supabase.rpc('verify_exam_password', {
+          p_exam_id: pendingExam.id,
+          p_password: enteredPassword,
+        });
+        if (legacy.error) throw legacy.error;
+        isValid = legacy.data;
+      } else {
+        throw unlock.error;
+      }
 
       if (isValid) {
-        sessionStorage.setItem(`exam_pass_ok_${pendingExam.id}`, '1');
+        try { sessionStorage.setItem(passwordKey(pendingExam.id), '1'); } catch { /* private mode */ }
         onStartExam(pendingExam, pendingExam._chosenSet);
         setPendingExam(null);
       } else {

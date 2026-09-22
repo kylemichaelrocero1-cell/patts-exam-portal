@@ -7,6 +7,7 @@ import {
 } from './lib/assessments';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
+import { fetchAnswerReview } from './lib/answerReview';
 
 // A student's landing page: what needs doing, what has been done, how they did.
 // Everything here is derived from data the other tabs already load — this is a
@@ -34,6 +35,9 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
   // The marked paper, once the student asks for it: { title, rows }.
   const [review, setReview] = useState(null);
   const [reviewBusy, setReviewBusy] = useState(null);   // exam_id being fetched
+  // The table opens on the most recent handful; a student who wants the whole
+  // semester asks for it. Nothing is dropped, only folded.
+  const [showAllResults, setShowAllResults] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,16 +139,14 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
   // button after the instructor closes review again fails here, not silently.
   const openReview = async (examId, title) => {
     setReviewBusy(examId);
-    const { data: rows, error: rpcError } = await supabase.rpc('get_answer_review', {
-      p_student_id: student.id,
-      p_assessment_id: examId,
-      p_attempt_no: null,
-    });
+    const { data: rows, error: rpcError } = await fetchAnswerReview(student.id, examId);
     setReviewBusy(null);
     if (rpcError) {
       alert(/not available/i.test(rpcError.message)
         ? 'Your instructor has not opened the answers for this one.'
-        : 'Could not load the answers. Please try again.');
+        : /session has expired/i.test(rpcError.message)
+          ? 'Your session has expired. Please log in again.'
+          : 'Could not load the answers. Please try again.');
       return;
     }
     setReview({ title, rows: rows || [] });
@@ -165,9 +167,16 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     ? Math.round(graded.reduce((a, r) => a + (r.score / r.total_items) * 100, 0) / graded.length)
     : null;
 
+  // A student's own record of their own work is permanent. Closing a paper or
+  // putting it in the archive is an instructor's housekeeping — it takes the
+  // paper out of the Exams tab, where only takeable papers belong, and it must
+  // never take away the score. Nothing here filters on is_open or archived_at,
+  // and `behind` deliberately reads the papers underneath the results rather
+  // than the open ones, so a title survives its paper being put away.
+  const RECENT = 8;
+  const shown = showAllResults ? results : results.slice(0, RECENT);
   // The Answers column earns its width only if something in view is actually
   // reviewable — otherwise it is a row of dashes on a phone.
-  const shown = results.slice(0, 8);
   const anyReviewable = shown.some(r => reviewable.has(r.exam_id));
 
   return (
@@ -235,9 +244,12 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
       {/* Recent scores */}
       {results.length > 0 && (
         <>
-          <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 10px' }}>
-            Recent results
+          <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 4px' }}>
+            {showAllResults ? `All results (${results.length})` : 'Recent results'}
           </h2>
+          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '0 0 10px' }}>
+            Your scores stay here after a paper is closed or archived.
+          </p>
           <div className="card" style={{ overflow: 'hidden', marginBottom: 30 }}>
             <div className="table-scroll">
               <table>
@@ -291,6 +303,17 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                 </tbody>
               </table>
             </div>
+            {results.length > RECENT && (
+              <button
+                className="btn ghost sm"
+                onClick={() => setShowAllResults(v => !v)}
+                style={{ width: '100%', borderRadius: 0, borderLeft: 0, borderRight: 0, borderBottom: 0, borderTop: '1px solid var(--line)' }}
+              >
+                {showAllResults
+                  ? 'Show recent only'
+                  : `Show all ${results.length} results`}
+              </button>
+            )}
           </div>
         </>
       )}

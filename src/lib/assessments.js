@@ -22,6 +22,7 @@ export const INSTRUCTOR_COLUMNS = {
 export const assessmentsTableAvailable = () => reader.available();
 
 export {
+  isMissingFunctionError,
   isAvailableNow,
   availabilityState,
   formatWindow,

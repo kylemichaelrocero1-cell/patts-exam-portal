@@ -692,3 +692,154 @@ input:checked + .slider::before { transform: translateX(26px); }
 
 /* KaTeX display equations can overflow on phones — let them scroll */
 .lesson-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+
+/* =====================================================================
+   Worked solutions (WorkedSolution.jsx / MathField.jsx)
+
+   A stack of maths lines the student types, each with a tick or a cross
+   beside it. The status colour lives on the <li> so the number, the field
+   border and the mark all shift together — one glance tells a student which
+   line went wrong, which is the only thing they can act on mid-problem.
+   ===================================================================== */
+
+.worked-solution { margin-top: 14px; }
+
+.ws-given {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 14px;
+  background: var(--info-bg);
+  border: 1px solid var(--info-bd);
+  border-radius: var(--r-sm);
+  font-size: 17px;
+}
+.ws-given-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--info);
+}
+
+.ws-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+
+.ws-line {
+  display: grid;
+  grid-template-columns: 26px 1fr 28px 28px;
+  align-items: center; gap: 8px;
+}
+.ws-step-no {
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-4);
+  text-align: right;
+}
+
+.ws-field { min-width: 0; }
+
+/* MathLive's <math-field> is a custom element, so it is styled through the
+   host div rather than a class of ours. */
+.math-field-host math-field {
+  display: block; width: 100%;
+  padding: 10px 12px;
+  font-size: 19px;
+  background: var(--paper);
+  border: 1.5px solid var(--line);
+  border-radius: var(--r-sm);
+  transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+}
+.math-field-host math-field:focus-within {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px var(--navy-50);
+  outline: none;
+}
+.math-field-host math-field::part(virtual-keyboard-toggle) { display: none; }
+.math-field-host math-field::part(menu-toggle) { display: none; }
+
+.math-field-placeholder {
+  display: block; padding: 12px; font-size: 14px; color: var(--ink-4); font-style: italic;
+}
+
+.ws-ok   .math-field-host math-field { border-color: var(--ok-bd); }
+.ws-broken  .math-field-host math-field,
+.ws-invalid .math-field-host math-field { border-color: var(--danger-bd); }
+
+.ws-mark {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  font-size: 14px; font-weight: 700; line-height: 1;
+}
+.ws-mark-ok   { background: var(--ok-bg);     color: var(--ok); }
+.ws-mark-bad  { background: var(--danger-bg); color: var(--danger); }
+.ws-mark-busy { color: var(--ink-5); }
+
+.ws-remove {
+  width: 24px; height: 24px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid transparent; border-radius: var(--r-sm);
+  color: var(--ink-4); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.ws-remove:hover { border-color: var(--danger-bd); color: var(--danger); background: var(--danger-bg); }
+
+.ws-actions {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 12px 0 0 34px;
+}
+.ws-add {
+  padding: 7px 14px;
+  background: var(--navy-tint); border: 1px dashed var(--navy-200);
+  border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 600; color: var(--navy); cursor: pointer;
+}
+.ws-add:hover { background: var(--navy-50); border-style: solid; }
+.ws-count { font-size: 12px; color: var(--ink-4); }
+
+/* The symbol strip. Wraps rather than scrolls, so nothing is hidden off the
+   right-hand edge on a phone where a student cannot discover it. */
+.ws-palette {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 14px 0 0 34px; padding: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+}
+.ws-sym {
+  min-width: 38px; min-height: 34px; padding: 4px 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: 6px; cursor: pointer; font-size: 15px;
+}
+.ws-sym:hover { border-color: var(--navy); background: var(--navy-tint); }
+
+.ws-hint {
+  margin: 12px 0 0 34px;
+  font-size: 12px; line-height: 1.5; color: var(--ink-4); max-width: 60ch;
+}
+
+/* The instructor's side: the rubric editor, and a marked script. */
+.ws-rubric-step {
+  display: grid; grid-template-columns: 1fr 90px 1fr 32px;
+  gap: 8px; align-items: center; margin-bottom: 8px;
+}
+.ws-rubric-head {
+  display: grid; grid-template-columns: 1fr 90px 1fr 32px;
+  gap: 8px; margin-bottom: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.ws-marked {
+  padding: 14px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.ws-marked-score {
+  display: inline-flex; align-items: baseline; gap: 4px;
+  font-family: var(--font-display); font-weight: 700;
+}
+.ws-marked-reason { margin-top: 8px; font-size: 13px; color: var(--ink-3); line-height: 1.5; }
+.ws-pending {
+  font-size: 12px; font-weight: 600; color: var(--warn);
+  background: var(--warn-bg); border: 1px solid var(--warn-bd);
+  padding: 3px 9px; border-radius: 999px;
+}
+
+@media (max-width: 700px) {
+  .ws-line { grid-template-columns: 20px 1fr 24px 24px; gap: 5px; }
+  .ws-actions, .ws-palette, .ws-hint { margin-left: 0; }
+  .math-field-host math-field { font-size: 17px; padding: 9px 10px; }
+  .ws-rubric-step, .ws-rubric-head { grid-template-columns: 1fr; }
+  .ws-rubric-head { display: none; }
+}

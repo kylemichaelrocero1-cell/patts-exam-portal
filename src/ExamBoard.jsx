@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { supabase } from './supabase';
 import { prepareQuestions } from './lib/examOrder';
 import { fetchAssessmentById, isMissingFunctionError } from './lib/assessments';
@@ -10,6 +10,25 @@ import {
   isMultiSelect, isSelected, toggleIndex, hasAnswer, answeredCount, answersPayload,
 } from './lib/answers';
 import { sittingDecision, restartPatch } from './lib/retakes';
+import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
+
+// The maths editor and the step checker are megabytes between them, and most
+// papers have no maths item at all. Split hard, so a student sitting a paper of
+// plain multiple choice on a phone downloads none of it. workedShape.js above
+// is the deliberate exception: it is a handful of lines with no maths in it,
+// and the palette needs it on every render to know which items are worked.
+const WorkedSolution = lazy(() => import('./components/WorkedSolution.jsx'));
+
+// How many items a student has actually answered, across all three kinds that
+// can be answered. Defined once because it is read in eight places — the
+// header, the palette, the submit modal and three separate pushers — and a
+// count that disagreed with itself between any two of them would look, to a
+// student, exactly like lost work.
+function countAnswered(mc, essays, work) {
+  return answeredCount(mc)
+    + Object.values(essays || {}).filter(t => t?.trim().length > 0).length
+    + Object.values(work || {}).filter(hasWork).length;
+}
 
 // How long to let an instructor's force submit finish before deciding what a
 // 'finished' row means. The claim and the marking are two round trips.
@@ -36,13 +55,17 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     } catch {
       localStorage.removeItem(storageKey);
     }
-    const newProgress = { answers: {}, essayAnswers: {}, tabSwitchCount: 0, violationLogs: [], examStatus: 'active', endTime: Date.now() + (startingSeconds * 1000) };
+    const newProgress = { answers: {}, essayAnswers: {}, workAnswers: {}, tabSwitchCount: 0, violationLogs: [], examStatus: 'active', endTime: Date.now() + (startingSeconds * 1000) };
     localStorage.setItem(storageKey, JSON.stringify(newProgress));
     return newProgress;
   });
 
   const [answers, setAnswers] = useState(initialState.answers);
   const [essayAnswers, setEssayAnswers] = useState(initialState.essayAnswers || {});
+  // Worked solutions (sql/024): { "<question id>": { lines: [...] } }. Kept
+  // apart from `answers` because the shape is nothing like a choice index,
+  // and apart from essays because these get marked.
+  const [workAnswers, setWorkAnswers] = useState(initialState.workAnswers || {});
   const [flaggedQuestions, setFlaggedQuestions] = useState(initialState.flaggedQuestions || {});
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
   // Bug fix: restore violation logs from localStorage so they survive page refreshes
@@ -106,6 +129,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // Snapshot of answers captured when submit modal opens — prevents last-second tampering
   const answersSnapshotRef = useRef(null);
   const essaySnapshotRef = useRef(null);
+  const workSnapshotRef = useRef(null);
   // Debounce handles — each pusher has its own ref so they never cancel each other
   const livePushDebounceRef = useRef(null);
   const violationPushDebounceRef = useRef(null);
@@ -222,9 +246,10 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             setViolationLogs([]);
             setAnswers({});
             setEssayAnswers({});
+            setWorkAnswers({});
             setFlaggedQuestions({});
             try { localStorage.removeItem(storageKey); } catch { /* ignore */ }
-            existing = { ...existing, answers_json: {}, essay_answers_json: {} };
+            existing = { ...existing, answers_json: {}, essay_answers_json: {}, work_answers_json: {} };
             setExamStatus('active');
             // The baseline stays as it is: it is what was on file before this
             // sitting, which is exactly what a later force submit will move.
@@ -234,7 +259,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             // back exactly as it was, clock included.
             await supabase.from('live_sessions').update({
               status: 'active',
-              answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length,
+              answers_count: countAnswered(answers, essayAnswers, workAnswers),
               violation_count: tabSwitchCount,
               updated_at: new Date()
             }).eq('id', existing.id);
@@ -257,8 +282,8 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;
             if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
           }
-          const localCount = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
-          const serverCount = answeredCount(existing.answers_json) + Object.values(existing.essay_answers_json || {}).filter(t => t?.trim().length > 0).length;
+          const localCount = countAnswered(answers, essayAnswers, workAnswers);
+          const serverCount = countAnswered(existing.answers_json, existing.essay_answers_json, existing.work_answers_json);
           // Use existing.answers_count as a floor so a page refresh never resets the count to 0
           // when answers_json is missing (column not migrated) or localStorage was cleared.
           const safeCount = Math.max(localCount, serverCount, existing.answers_count || 0);
@@ -279,7 +304,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             student_name: student.full_name,
             status: 'active',
             violation_count: tabSwitchCount,
-            answers_count: answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length
+            answers_count: countAnswered(answers, essayAnswers, workAnswers)
           }])
           .select()
           .single();
@@ -308,6 +333,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         }
         if (existing.essay_answers_json && Object.keys(existing.essay_answers_json).length > 0) {
           setEssayAnswers(existing.essay_answers_json);
+        }
+        if (existing.work_answers_json && Object.keys(existing.work_answers_json).length > 0) {
+          setWorkAnswers(existing.work_answers_json);
         }
       }
 
@@ -408,7 +436,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     countPushDebounceRef.current = setTimeout(() => {
       countPushDebounceRef.current = null;
-      const liveCount = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+      const liveCount = countAnswered(answers, essayAnswers, workAnswers);
       // Never write below the server-known count from session init — prevents a page refresh
       // on a new device from briefly resetting the count to 0 in the admin monitor.
       const safeCount = Math.max(liveCount, minAnswersCountRef.current);
@@ -424,7 +452,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     return () => {
       if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     };
-  }, [answers, essayAnswers, liveSessionId]);
+  }, [answers, essayAnswers, workAnswers, liveSessionId]);
 
   // --- JSON PROGRESS PUSHER (5s debounce) — writes full answers for cross-device resume.
   // Requires answers_json, essay_answers_json, exam_set columns in live_sessions.
@@ -436,6 +464,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       supabase.from('live_sessions').update({
         answers_json: answers,
         essay_answers_json: essayAnswers,
+        work_answers_json: workAnswers,
         exam_set: examSet,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
@@ -445,7 +474,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     return () => {
       if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     };
-  }, [answers, essayAnswers, liveSessionId]);
+  }, [answers, essayAnswers, workAnswers, liveSessionId]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {
@@ -469,9 +498,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // --- AUTO-SAVER ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting || endedByInstructor) return;
-    const progressData = { answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current, examSet };
+    const progressData = { answers, essayAnswers, workAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, endTime: endTimeRef.current, examSet };
     localStorage.setItem(storageKey, JSON.stringify(progressData));
-  }, [answers, essayAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting, endedByInstructor]);
+  }, [answers, essayAnswers, workAnswers, flaggedQuestions, tabSwitchCount, violationLogs, examStatus, storageKey, scoreDisplay, isSubmitting, endedByInstructor]);
 
   // --- TIMER & CLOCK ---
   useEffect(() => {
@@ -517,6 +546,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // Use snapshot captured at modal-open time; fall back to live state for auto-submit
       const submittedAnswers = answersSnapshotRef.current ?? answers;
       const submittedEssayAnswers = essaySnapshotRef.current ?? essayAnswers;
+      const submittedWork = workSnapshotRef.current ?? workAnswers;
 
       // Marking happens on the server. This used to fetch every
       // correct_answer to mark in the browser, which is why the key was
@@ -561,13 +591,49 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       Object.entries(submittedEssayAnswers).forEach(([qId, text]) => {
         if (text?.trim()) essayPayload[String(qId)] = { type: 'essay', text: text.trim() };
       });
-      if (Object.keys(essayPayload).length > 0) {
-        const { data: existing } = await supabase.from('results')
-          .select('id, answers_json').eq('student_id', student?.id).eq('exam_id', exam.id).limit(1);
+
+      // Worked solutions (sql/024) are not marked server-side either, and for
+      // a sharper reason: deciding that 5(1)x^{1-1} is 5 needs a computer
+      // algebra system, and Postgres has none. The LINES are stored here; the
+      // MARKS are computed later, in the instructor's browser, which holds the
+      // rubric legitimately. `marks: null` is how "not marked yet" is spelt,
+      // and it is deliberately not 0 — a student who has not been marked has
+      // not scored nothing.
+      Object.entries(submittedWork).forEach(([qId, value]) => {
+        const lines = (Array.isArray(value?.lines) ? value.lines : [])
+          .map(l => String(l ?? '').trim()).filter(Boolean);
+        if (lines.length > 0) {
+          essayPayload[String(qId)] = { type: 'worked', lines, marks: null };
+        }
+      });
+
+      // How many marks are waiting on an instructor. Written even when the
+      // student left every worked item blank, because it is a property of the
+      // PAPER, not of the answer — without it the summary screen cannot tell
+      // "no worked items" from "worked items nobody has marked yet", and a
+      // student would see a total that silently grew later.
+      const workTotal = workMarksAvailable(questions);
+
+      if (Object.keys(essayPayload).length > 0 || workTotal > 0) {
+        // submit_assessment() routes a graded sitting to `results` and a
+        // practice one to `review_attempts` (sql/002), so this has to follow
+        // it. Patching `results` unconditionally — which is what this did
+        // before worked items existed — silently matches no row on a
+        // retakeable paper, and the working would be thrown away between the
+        // student pressing Submit and the instructor opening the script.
+        const attempt = outcome?.attempt_no ?? 1;
+        const table = isPractice ? 'review_attempts' : 'results';
+        const filter = q => (isPractice
+          ? q.eq('student_id', student?.id).eq('assessment_id', exam.id).eq('attempt_no', attempt)
+          : q.eq('student_id', student?.id).eq('exam_id', exam.id));
+
+        const { data: existing } = await filter(
+          supabase.from(table).select('id, answers_json')).limit(1);
         if (existing?.[0]) {
-          await supabase.from('results')
-            .update({ answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } })
-            .eq('id', existing[0].id);
+          const patch = { answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } };
+          // work_marks is deliberately left NULL: nothing has been marked yet.
+          if (workTotal > 0) patch.work_total = workTotal;
+          await supabase.from(table).update(patch).eq('id', existing[0].id);
         }
       }
 
@@ -590,7 +656,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       setIsSubmitting(false);
       setShowSubmitModal(false);
     }
-  }, [answers, essayAnswers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
+  }, [answers, essayAnswers, workAnswers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
   // answersSnapshotRef / essaySnapshotRef intentionally excluded — refs are stable
 
   // --- SAFE AUTO-SUBMIT TRIGGER ---
@@ -1028,6 +1094,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
 
   const currentQ = questions[currentQuestion - 1] || {};
   const multiSelect = isMultiSelect(currentQ);
+  const worked = isWorkedSolution(currentQ);
 
   return (
     <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--paper)' }} onContextMenu={e => e.preventDefault()}>
@@ -1039,12 +1106,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 28px', borderBottom: '3px solid var(--gold)' }}>
               <h2 style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
               <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
-                {answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length} of {questions.length} questions answered
+                {countAnswered(answers, essayAnswers, workAnswers)} of {questions.length} questions answered
               </p>
             </div>
             <div style={{ padding: '24px 28px' }}>
               {(() => {
-                const totalAnswered = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+                const totalAnswered = countAnswered(answers, essayAnswers, workAnswers);
                 const unanswered = questions.length - totalAnswered;
                 return unanswered > 0 ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--warn)', fontWeight: 500 }}>
@@ -1133,6 +1200,11 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 Essay
               </span>
             )}
+            {worked && (
+              <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+                Show your working · {currentQ?.marks || 1} mark{(currentQ?.marks || 1) === 1 ? '' : 's'}
+              </span>
+            )}
             {multiSelect && (
               <span style={{ background: '#EEF6EE', color: '#1B6E2F', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
                 Select all that apply
@@ -1183,7 +1255,15 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             </p>
           )}
 
-          {currentQ?.question_type === 'essay' ? (
+          {worked ? (
+            <Suspense fallback={<div style={{ padding: 20, fontSize: 13, color: 'var(--ink-4)' }}>Loading the maths editor…</div>}>
+              <WorkedSolution
+                question={currentQ}
+                value={workAnswers[currentQ.id]}
+                onChange={v => setWorkAnswers(prev => ({ ...prev, [currentQ.id]: v }))}
+              />
+            </Suspense>
+          ) : currentQ?.question_type === 'essay' ? (
             <div>
               <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)' }}>Type your answer in the box below.</p>
               <textarea
@@ -1264,15 +1344,17 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <div className="eyebrow" style={{ fontSize: 10 }}>Navigator</div>
             <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
-              {answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length}/{questions.length}
+              {countAnswered(answers, essayAnswers, workAnswers)}/{questions.length}
             </span>
           </div>
 
           <div className="grid-container">
             {questions.map((q, i) => {
-              const isAnswered = q.question_type === 'essay'
-                ? (essayAnswers[q.id]?.trim().length > 0)
-                : hasAnswer(answers[q.id]);
+              const isAnswered = isWorkedSolution(q)
+                ? hasWork(workAnswers[q.id])
+                : q.question_type === 'essay'
+                  ? (essayAnswers[q.id]?.trim().length > 0)
+                  : hasAnswer(answers[q.id]);
               const isFlagged = !!flaggedQuestions[q.id];
               return (
                 <div
@@ -1297,7 +1379,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
 
           <div style={{ marginTop: 16, padding: 12, background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
             {(() => {
-              const totalAnswered = answeredCount(answers) + Object.values(essayAnswers).filter(t => t?.trim().length > 0).length;
+              const totalAnswered = countAnswered(answers, essayAnswers, workAnswers);
               const flaggedCount = Object.keys(flaggedQuestions).length;
               return (
                 <>
@@ -1344,7 +1426,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           <button
             className="btn"
             style={{ marginTop: 14, width: '100%', background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none', boxShadow: 'var(--s-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-            onClick={() => { answersSnapshotRef.current = { ...answers }; essaySnapshotRef.current = { ...essayAnswers }; setShowSubmitModal(true); }}
+            onClick={() => { answersSnapshotRef.current = { ...answers }; essaySnapshotRef.current = { ...essayAnswers }; workSnapshotRef.current = { ...workAnswers }; setShowSubmitModal(true); }}
           >
             <Icon name="check-circle" size={16} />
             Submit Final Exam

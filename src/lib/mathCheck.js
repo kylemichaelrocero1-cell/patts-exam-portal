@@ -289,6 +289,28 @@ function derivativeOf(lhsBox) {
   return j === null ? null : engine.box(j);
 }
 
+/**
+ * The integrand of an INDEFINITE integral, or null for anything else.
+ *
+ * \int 2x\,dx parses to
+ *   ["Integrate", ["Function", ["Block", 2x], "x"], ["Limits","x","Nothing","Nothing"]]
+ * and the two Nothings are what make it indefinite. A definite integral is a
+ * number, not a claim about a function, so it is left to ordinary evaluation.
+ */
+export function indefiniteIntegrand(box) {
+  const j = box?.json;
+  if (!Array.isArray(j) || j[0] !== 'Integrate') return null;
+  const limits = j[2];
+  if (Array.isArray(limits) && limits[0] === 'Limits'
+      && !(limits[2] === 'Nothing' && limits[3] === 'Nothing')) {
+    return null;   // definite: it has bounds
+  }
+  let body = j[1];
+  if (Array.isArray(body) && body[0] === 'Function') body = body[1];
+  if (Array.isArray(body) && body[0] === 'Block') body = body[1];
+  return body === undefined ? null : engine.box(body);
+}
+
 /** d/dv of an expression, evaluated. Null when the engine cannot take it. */
 export function differentiate(box, variable = 'x') {
   try {
@@ -310,10 +332,15 @@ export function differentiate(box, variable = 'x') {
  *                an engine that cannot decide must not penalise a student
  *
  * The rules, in the order they are tried:
+ *   integrate    — the line above held an indefinite integral and this one
+ *                  does not, so this one is checked by differentiating it
  *   restate      — same line again, or the same equation rearranged
  *   simplify     — same left-hand side, right-hand side equivalent
  *   differentiate— left-hand side went from y to y', right-hand side is d/dx
  *   evaluate     — a bare expression equivalent to the one above
+ *
+ * integrate is tried FIRST because an integral cannot be sampled; every rule
+ * after it rests on being able to put numbers into both sides.
  */
 export function checkStep(prev, cur, opts = {}) {
   const variable = opts.variable || 'x';
@@ -324,6 +351,32 @@ export function checkStep(prev, cur, opts = {}) {
   if (!c.valid) return { status: 'invalid', message: 'This line is not readable as maths.' };
   // With nothing above it, a first line can only be judged on being readable.
   if (!p || p.empty || !p.valid) return { status: 'ok', rule: 'first' };
+
+  // Integrating. Checked by DIFFERENTIATING the student's line and comparing
+  // that to the integrand, which is how it would be marked by hand — and it
+  // disposes of the constant of integration for nothing, because the C in
+  // x^2 + C differentiates away. Comparing antiderivatives directly would
+  // instead have to special-case a term that is deliberately unknowable.
+  //
+  // Tried before ordinary equivalence because an integral cannot be sampled:
+  // substituting a number into \int f dx yields nothing to compare, so the
+  // general test would shrug and every integration step would read 'unsure'.
+  {
+    const integrand = indefiniteIntegrand(p.rhs);
+    const stillIntegral = indefiniteIntegrand(c.rhs);
+    const subjectHolds = !c.isEquation || !p.isEquation || sameSubject(c.lhs, p.lhs);
+    if (integrand && !stillIntegral && subjectHolds) {
+      const d = differentiate(c.rhs, variable);
+      if (!d) return { status: 'unsure', rule: 'integrate' };
+      const verdict = equivalent(d, integrand);
+      if (verdict === 'equal') return { status: 'ok', rule: 'integrate' };
+      if (verdict === 'different') {
+        return { status: 'broken', rule: 'integrate',
+          message: 'Differentiating this line does not give what is inside the integral.' };
+      }
+      return { status: 'unsure', rule: 'integrate' };
+    }
+  }
 
   // A derivative announced on the left: y -> y', or y -> dy/dx.
   if (c.isEquation && p.isEquation) {

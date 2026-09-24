@@ -14,7 +14,7 @@ import { ComputeEngine } from '@cortex-js/compute-engine';
 import {
   useEngine, parseLine, equivalent, latexEquivalent, freeVars,
   sameEquation, constantRatio, differentiate, checkStep, checkWork,
-  complexity, isFinalForm, sameSubject,
+  complexity, isFinalForm, sameSubject, indefiniteIntegrand,
 } from '../mathCheck.js';
 import {
   markWork, milestonesOf, totalMarks, isWorkedSolution, linesOf, hasWork,
@@ -93,6 +93,31 @@ check('an unreadable line is invalid, not broken',
   step('y=5x', '\\frac{1}{').status === 'invalid');
 check('a valid rearrangement between lines is allowed',
   step('2x+4=10', 'x=3').status === 'ok');
+
+console.log('\n=== integrating, and the constant that takes care of itself ===');
+check('an indefinite integral yields its integrand',
+  equivalent(indefiniteIntegrand(E('\\int 2x\\,dx')), E('2x')) === 'equal');
+check('a DEFINITE integral is a number, not a claim about a function',
+  indefiniteIntegrand(E('\\int_0^1 x^2\\,dx')) === null);
+check('a plain expression is not an integral', indefiniteIntegrand(E('2x')) === null);
+check('int 2x dx then x^2 + C follows',
+  step('y=\\int 2x\\,dx', 'y=x^2+C').status === 'ok'
+  && step('y=\\int 2x\\,dx', 'y=x^2+C').rule === 'integrate',
+  JSON.stringify(step('y=\\int 2x\\,dx', 'y=x^2+C')));
+check('the constant of integration is optional — it differentiates away either way',
+  step('y=\\int 2x\\,dx', 'y=x^2').status === 'ok');
+check('and it may be called anything',
+  step('y=\\int 2x\\,dx', 'y=x^2+K').status === 'ok',
+  JSON.stringify(step('y=\\int 2x\\,dx', 'y=x^2+K')));
+check('a wrong antiderivative is caught',
+  step('y=\\int 2x\\,dx', 'y=2x^2+C').status === 'broken',
+  JSON.stringify(step('y=\\int 2x\\,dx', 'y=2x^2+C')));
+check('sin integrates to -cos, not cos',
+  step('y=\\int \\sin(x)\\,dx', 'y=-\\cos(x)+C').status === 'ok'
+  && step('y=\\int \\sin(x)\\,dx', 'y=\\cos(x)+C').status === 'broken');
+check('it works without an equals sign too',
+  step('\\int 2x\\,dx', 'x^2+C').status === 'ok',
+  JSON.stringify(step('\\int 2x\\,dx', 'x^2+C')));
 
 console.log('\n=== a whole stack of working ===');
 const good = checkWork(['y=5x', "y'=5(1)x^{1-1}", "y'=5"], { variable: 'x' });

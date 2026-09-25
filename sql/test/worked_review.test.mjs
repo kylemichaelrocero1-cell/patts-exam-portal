@@ -118,5 +118,50 @@ console.log('\n=== the gate still holds ===');
     !n.ok && /submit this assessment/i.test(n.message), n.message);
 }
 
+console.log('\n=== the form the CLIENT calls (4 arguments, sql/022) ===');
+// There are two get_answer_review()s and the client calls the guarded one.
+// 028 updated only the other, so the fix landed everywhere except where it
+// was used: thirty cards with no problem and no answer on them.
+await x(fs.readFileSync(P + '/sql/022_answer_review_needs_identity.sql', 'utf8'));
+{
+  const r = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3) AS r`, [STU, PAPER, TOK]);
+  const w = (r.ok ? r.rows[0].r : []).filter(i => i.question_type === 'worked_solution');
+  ck('before 029 the guarded form returns worked items in the OLD shape',
+    w.length === 2 && w.every(i => !i.work_given && !i.correct_latex),
+    JSON.stringify(w.map(i => Object.keys(i))));
+}
+await x(fs.readFileSync(P + '/sql/029_guarded_review_shows_worked_items.sql', 'utf8'));
+await x(fs.readFileSync(P + '/sql/029_guarded_review_shows_worked_items.sql', 'utf8'));
+ck('029 applies, twice', true);
+{
+  const r = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3) AS r`, [STU, PAPER, TOK]);
+  ck('the guarded form now returns every item', r.ok && r.rows[0].r.length === 3, r.message);
+  const items = r.rows[0].r;
+  const w1 = items.find(i => i.question_number === 1);
+  ck('with the problem', w1.work_given === 'y=5x', JSON.stringify(w1.work_given));
+  ck('what the student wrote', w1.chosen === "y'=5");
+  ck('what it earned', Number(w1.earned) === 2 && w1.is_correct === true);
+  ck('and the answer', w1.correct_latex === "y'=5");
+  ck('the accept list is still withheld', !JSON.stringify(items).includes('5x^0'));
+}
+{
+  // The guard this form exists for must survive the change.
+  const forged = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3)`, [STU, PAPER, 'wrong-token']);
+  ck('a forged session is still refused',
+    !forged.ok && /session has expired/i.test(forged.message), forged.message);
+  await x(`UPDATE public.assessments SET show_answers=false WHERE id='${PAPER}'`);
+  const off = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3)`, [STU, PAPER, TOK]);
+  ck('and answers-off still reveals nothing', !off.ok && /not available/i.test(off.message));
+  await x(`UPDATE public.assessments SET show_answers=true WHERE id='${PAPER}'`);
+}
+{
+  // A classmate's id with your own token must not hand over their paper.
+  await x(`INSERT INTO public.users (id, full_name, section, session_token)
+           VALUES ('33333333-3333-3333-3333-333333333333','Other','MATH 117','t3')`);
+  const other = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3)`, [STU, PAPER, 't3']);
+  ck("passing a classmate's id with your own token gets you nothing of theirs",
+    !other.ok, other.message);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -43,25 +43,23 @@ export default function WorkedMarking({
       try {
         const { ready } = await import('../lib/mathCheck.js');
         await ready();
-        const { markWork, totalMarks: rubricTotal } = await import('../lib/workedSolution.js');
+        const { markAnswer, totalMarks: rubricTotal } = await import('../lib/workedSolution.js');
         const out = {};
         for (const q of worked) {
-          const stored = storedAnswers?.[q.id];
-          const lines = linesOf(stored);
+          const lines = linesOf(storedAnswers?.[q.id]);
           const rubric = {
             ...(q.work_rubric || {}),
             marks: Number(q.marks) || rubricTotal(q.work_rubric),
             variable: q.work_variable || 'x',
           };
-          // The problem is prepended so the student's first step is judged
-          // against it, exactly as it was while they were writing.
-          const all = q.work_given ? [q.work_given, ...lines] : lines;
-          const result = markWork(all.filter(Boolean), rubric);
-          // The given line is not the student's work, so its verdict is dropped
-          // before the steps are shown back.
+          // All or nothing on the answer. The student is given one field and no
+          // working to show, so there is no chain to judge and none is judged —
+          // markWork() would dock a right answer for not following from the
+          // problem as a line of algebra.
           out[q.id] = {
-            ...result,
-            steps: q.work_given ? (result.steps || []).slice(1) : result.steps,
+            ...markAnswer(lines, rubric, {
+              given: q.work_given, variable: q.work_variable || 'x',
+            }),
             lines,
           };
         }
@@ -151,22 +149,15 @@ export default function WorkedMarking({
                 Nothing was written.
               </p>
             ) : (
-              <ol className="ws-lines" style={{ marginBottom: 10 }}>
-                {lines.map((latex, i) => {
-                  const st = r?.steps?.[i]?.status;
-                  return (
-                    <li key={i} className={`ws-line ws-${st || 'pending'}`}
-                        style={{ gridTemplateColumns: '26px 1fr 28px' }}>
-                      <span className="ws-step-no">{i + 1}</span>
-                      <span style={{ fontSize: 18 }}><MathStatic latex={latex} /></span>
-                      <span className={`ws-mark ${st === 'ok' ? 'ws-mark-ok' : (st === 'broken' || st === 'invalid') ? 'ws-mark-bad' : ''}`}
-                            title={r?.steps?.[i]?.message || ''}>
-                        {st === 'ok' ? '✓' : (st === 'broken' || st === 'invalid') ? '✗' : ''}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ol>
+              <div className={`ws-answer-shown ${r ? (r.correct ? 'ws-ok' : 'ws-broken') : ''}`}>
+                <span className="ws-given-label">Answered</span>
+                <span style={{ fontSize: 19 }}><MathStatic latex={lines[lines.length - 1]} /></span>
+                {r && (
+                  <span className={`ws-mark ${r.correct ? 'ws-mark-ok' : 'ws-mark-bad'}`}>
+                    {r.correct ? '✓' : '✗'}
+                  </span>
+                )}
+              </div>
             )}
 
             {r && (
@@ -190,16 +181,17 @@ export default function WorkedMarking({
                     </button>
                   )}
                 </div>
-                <div className="ws-marked-reason">{r.reason}</div>
-                {(r.milestones || []).length > 0 && (
-                  <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-3)' }}>
-                    {r.milestones.map((m, i) => (
-                      <li key={i} style={{ color: m.reached ? 'var(--ok)' : 'var(--ink-4)' }}>
-                        {m.reached ? '✓' : '—'} {m.label || `Step ${i + 1}`} ({m.marks})
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="ws-marked-reason">
+                  {r.reason}
+                  {/* A near miss is the case most worth an instructor's eye:
+                      the maths is right and the presentation is not, which is
+                      a judgement call the checker should not make alone. */}
+                  {r.nearMiss && (
+                    <strong style={{ display: 'block', marginTop: 4, color: 'var(--warn)' }}>
+                      Worth a look — this is equal to the answer, just not in the form asked for.
+                    </strong>
+                  )}
+                </div>
               </>
             )}
           </div>

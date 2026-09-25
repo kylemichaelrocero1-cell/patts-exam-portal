@@ -32,7 +32,8 @@
 //     no student's browser ever computes the mark it is graded on.
 // That split is why the rubric column is revoked from anon in sql/024.
 
-import { checkWork, latexEquivalent, isFinalForm } from './mathCheck.js';
+import { checkWork, latexEquivalent, isFinalForm, parseLine,
+         indefiniteIntegrand, checkStep } from './mathCheck.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -126,4 +127,83 @@ export function markWork(lines, rubric, opts = {}) {
 // of awarded marks from drifting on display.
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Mark a worked item ALL OR NOTHING on its final answer.
+ *
+ * This is what an answer-only item wants, and it is deliberately not markWork()
+ * with one milestone. markWork also validates the chain, so a student who
+ * writes a bare `5` where the key says y' = 5 would be judged on whether `5`
+ * follows from `y = 5x` — it does not, as a line of algebra — and lose a mark
+ * to a penalty despite having given the right answer. With no working to
+ * show, there is no chain to judge, so there should be none.
+ *
+ * The test is isFinalForm(), not plain equivalence, so the answer has to be
+ * about the right thing AND written out: for "solve 2x + 4 = 10", the line
+ * 2x = 6 is an equivalent equation but is not an answer, and 5(1)x^{1-1} is
+ * the right number but is not a finished one.
+ *
+ * Any line the student wrote may carry the answer. They are given one field,
+ * but stored work is a list and a paper answered before that was true must
+ * still mark correctly.
+ */
+export function markAnswer(lines, rubric, opts = {}) {
+  const total = totalMarks(rubric);
+  const milestones = milestonesOf(rubric);
+  const key = milestones.length ? milestones[milestones.length - 1].latex : null;
+  const work = (lines || []).map(l => String(l ?? '').trim()).filter(Boolean);
+
+  if (work.length === 0) {
+    return { marks: 0, total, correct: false, blank: true, answer: '',
+             reason: 'Nothing was written.' };
+  }
+  const answer = work[work.length - 1];
+  if (!key) {
+    return { marks: 0, total, correct: false, blank: false, answer,
+             reason: 'This question has no answer key, so it cannot be marked automatically.' };
+  }
+
+  // An INTEGRAL cannot be marked by comparing it to the key, because the key
+  // carries a constant of integration and the student's may be called anything
+  // or left off entirely — C, K and nothing at all are all correct, and plain
+  // equivalence reads C and K as two different unknowns that disagree. So when
+  // the problem is an indefinite integral it is marked the way checkStep does
+  // it: differentiate the student's answer and see whether that is what was
+  // inside the integral. The constant differentiates away and the question
+  // disappears with it.
+  const given = String(opts.given ?? rubric?.given ?? '').trim();
+  const fromIntegral = given && isIndefiniteIntegral(given);
+
+  const isRight = line => (fromIntegral
+    // An answer that is STILL an integral has not been evaluated, whatever
+    // else is true of it, so it never counts however equivalent it looks.
+    ? !isIndefiniteIntegral(line)
+      && checkStep(given, line, { variable: opts.variable || rubric?.variable || 'x' }).status === 'ok'
+    : isFinalForm(line, key));
+
+  const correct = work.some(isRight);
+  return {
+    marks: correct ? total : 0,
+    total, correct, blank: false, answer,
+    reason: correct
+      ? 'Correct answer.'
+      : (equivalentToKey(work, key)
+          ? 'Equal to the answer but not simplified, or not in the form asked for.'
+          : 'Not the right answer.'),
+    // Kept so the instructor can see WHY a near miss was refused rather than
+    // having to work it out from the number.
+    nearMiss: !correct && equivalentToKey(work, key),
+    ...(opts.variable ? { variable: opts.variable } : {}),
+  };
+}
+
+function equivalentToKey(work, key) {
+  return work.some(line => latexEquivalent(line, key) === 'equal');
+}
+
+/** Does this line still hold an unevaluated indefinite integral? */
+function isIndefiniteIntegral(latex) {
+  const p = parseLine(latex);
+  return !!(p.valid && indefiniteIntegrand(p.rhs));
 }

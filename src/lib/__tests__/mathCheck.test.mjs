@@ -17,7 +17,7 @@ import {
   complexity, isFinalForm, sameSubject, indefiniteIntegrand,
 } from '../mathCheck.js';
 import {
-  markWork, milestonesOf, totalMarks, isWorkedSolution, linesOf, hasWork,
+  markWork, markAnswer, milestonesOf, totalMarks, isWorkedSolution, linesOf, hasWork,
 } from '../workedSolution.js';
 
 useEngine(new ComputeEngine());
@@ -170,6 +170,49 @@ check('the mark always carries a reason',
 check('equivalent typing earns the milestone',
   markWork(['y=5x', '\\frac{dy}{dx}=5\\cdot 1\\cdot x^{0}'], rubric).marks >= 1,
   JSON.stringify(markWork(['y=5x', '\\frac{dy}{dx}=5\\cdot 1\\cdot x^{0}'], rubric)));
+
+console.log('\n=== answer only, all or nothing ===');
+{
+  const r = { variable: 'x', marks: 2, steps: [{ latex: "y'=5", marks: 2, label: 'Final answer' }] };
+  check('the right answer takes every mark', markAnswer(["y'=5"], r).marks === 2);
+  check('a wrong answer takes none — there is no partial credit here',
+    markAnswer(["y'=5x"], r).marks === 0);
+  check('nothing written takes none, and says so',
+    markAnswer([], r).marks === 0 && markAnswer([], r).blank);
+  check('a bare 5 is accepted — the answer is given, only the label is missing',
+    markAnswer(['5'], r).marks === 2,
+    JSON.stringify(markAnswer(['5'], r)));
+  check('and it is NOT docked for failing to follow from the problem, which is what markWork would do',
+    markAnswer(['5'], r).marks === 2 && markWork(['y=5x', '5'], r).marks < 2,
+    `markAnswer=${markAnswer(['5'], r).marks} markWork=${markWork(['y=5x', '5'], r).marks}`);
+  check('an unsimplified but equal answer is refused, and flagged as a near miss',
+    markAnswer(["y'=5(1)x^{1-1}"], r).marks === 0
+    && markAnswer(["y'=5(1)x^{1-1}"], r).nearMiss === true,
+    JSON.stringify(markAnswer(["y'=5(1)x^{1-1}"], r)));
+  check('the reason distinguishes a near miss from a plain wrong answer',
+    /not simplified|form asked/i.test(markAnswer(["y'=5(1)x^{1-1}"], r).reason)
+    && /not the right answer/i.test(markAnswer(["y'=99"], r).reason));
+}
+{
+  const solve = { variable: 'x', marks: 3, steps: [{ latex: 'x=3', marks: 3, label: 'Final answer' }] };
+  check('solving: x=3 is the answer', markAnswer(['x=3'], solve).marks === 3);
+  check('solving: 2x=6 is NOT, however equivalent',
+    markAnswer(['2x=6'], solve).marks === 0);
+}
+{
+  const integral = { variable: 'x', marks: 3, steps: [{ latex: 'y=x^2+C', marks: 3 }] };
+  const gi = { given: 'y=\\int 2x\\,dx' };
+  check('an integral takes any constant', markAnswer(['y=x^2+K'], integral, gi).marks === 3,
+    JSON.stringify(markAnswer(['y=x^2+K'], integral, gi)));
+  check('and none at all', markAnswer(['y=x^2'], integral, gi).marks === 3);
+  check('and the key\'s own C', markAnswer(['y=x^2+C'], integral, gi).marks === 3);
+  check('but not a wrong antiderivative', markAnswer(['y=2x^2+C'], integral, gi).marks === 0);
+  check('and copying the question back is not an answer',
+    markAnswer(['y=\\int 2x\\,dx'], integral, gi).marks === 0,
+    JSON.stringify(markAnswer(['y=\\int 2x\\,dx'], integral, gi)));
+}
+check('an item with no key cannot be marked, and says so rather than scoring 0 silently',
+  /no answer key/i.test(markAnswer(['x'], { marks: 2, steps: [] }).reason));
 
 console.log('\n=== a finished answer, not merely an equal one ===');
 check('5 is simpler than 5(1)x^{1-1}', complexity(E('5')) < complexity(E('5(1)x^{1-1}')));

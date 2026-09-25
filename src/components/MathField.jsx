@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+// KaTeX renders an expression TWICE — once as MathML for screen readers and
+// once as styled HTML — and it is this stylesheet that hides the MathML copy.
+// Without it every rendered expression appears doubled ("y = 5xy = 5x") and
+// each palette button inflates to full width, which is exactly what happened
+// on the exam board: LessonContent.jsx imported the CSS, but that is a
+// different lazy chunk and the exam board never loads it.
+import 'katex/dist/katex.min.css';
 
 // A single line of maths, typed the way Google Docs or Symbolab let you type
 // it: 1/2 opens a fraction, ^ raises an exponent, \sqrt builds a radical, and

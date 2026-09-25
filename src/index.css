@@ -843,3 +843,47 @@ input:checked + .slider::before { transform: translateX(26px); }
   .ws-rubric-step, .ws-rubric-head { grid-template-columns: 1fr; }
   .ws-rubric-head { display: none; }
 }
+
+/* Answer-only worked items. One field, no step stack.
+
+   The palette buttons carry hard size limits rather than letting their content
+   decide. KaTeX's stylesheet failing to load once turned every one of these
+   into a full-width bar and the toolbar into a column twenty rows long — a
+   button should stay button-sized even when what is inside it does not
+   render as expected. */
+.ws-answer-label {
+  display: block; margin-bottom: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.ws-answer .math-field-host math-field {
+  font-size: 22px;
+  padding: 14px 16px;
+  min-height: 58px;
+}
+.ws-palette { max-height: 132px; overflow-y: auto; }
+.ws-sym {
+  width: 44px; height: 38px; max-width: 44px; max-height: 38px;
+  padding: 0; overflow: hidden; flex: 0 0 auto;
+  font-size: 14px; line-height: 1;
+}
+.ws-sym .math-static { display: inline-block; max-width: 100%; overflow: hidden; }
+/* A doubled expression is always a missing katex.min.css. Belt and braces:
+   the MathML copy is hidden here too, so the failure cannot recur silently. */
+.math-static .katex-mathml,
+.ws-given .katex-mathml { display: none; }
+.ws-hint code {
+  padding: 1px 5px; margin: 0 2px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px;
+}
+
+/* One answer, shown back to the instructor with its verdict. */
+.ws-answer-shown {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 10px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--paper);
+}
+.ws-answer-shown.ws-ok     { border-color: var(--ok-bd);     background: var(--ok-bg); }
+.ws-answer-shown.ws-broken { border-color: var(--danger-bd); background: var(--danger-bg); }

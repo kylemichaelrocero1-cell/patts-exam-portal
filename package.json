@@ -13,7 +13,7 @@
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
     "test:material": "node src/lib/__tests__/lessonMaterial.test.mjs",
-    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions && npm run test:answers && npm run test:multi-select && npm run test:exam-password && npm run test:exam-gate && npm run test:retakes && npm run test:proctoring && npm run test:math && npm run test:worked && npm run test:worked-shape && npm run test:points && npm run test:question-csv && npm run test:session-errors && npm run test:worked-saved && npm run test:score-db && npm run test:worked-review && npm run test:csv-scored && npm run test:palette",
+    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions && npm run test:answers && npm run test:multi-select && npm run test:exam-password && npm run test:exam-gate && npm run test:retakes && npm run test:proctoring && npm run test:math && npm run test:worked && npm run test:worked-shape && npm run test:points && npm run test:question-csv && npm run test:session-errors && npm run test:worked-saved && npm run test:score-db && npm run test:worked-review && npm run test:csv-scored && npm run test:palette && npm run test:primes",
     "test:review": "node sql/test/review.test.mjs",
     "test:preboards": "node sql/test/preboards_review.test.mjs",
     "test:sections-scope": "node src/lib/__tests__/sectionScope.test.mjs",
@@ -42,7 +42,8 @@
     "test:score-db": "node sql/test/score_worked_in_db.test.mjs",
     "test:worked-review": "node sql/test/worked_review.test.mjs",
     "test:csv-scored": "node sql/test/csv_to_scored.test.mjs",
-    "test:palette": "node src/lib/__tests__/mathPalette.test.mjs"
+    "test:palette": "node src/lib/__tests__/mathPalette.test.mjs",
+    "test:primes": "node sql/test/prime_normalisation.test.mjs"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.133.0",

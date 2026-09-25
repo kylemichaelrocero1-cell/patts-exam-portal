@@ -30,15 +30,25 @@ export const MATH_PALETTE = [
   { label: '\\infty', insert: '\\infty', title: 'Infinity' },
 ];
 
+// The field a symbol should go into. On a desktop that is whatever has focus,
+// but on a phone the field can lose focus to the button being pressed before
+// the handler runs, so the last focused field is remembered as a fallback.
+let lastField = null;
+
+/** Called by MathField when one of its fields takes focus. */
+export function rememberField(field) {
+  lastField = field;
+}
+
 /**
- * Insert LaTeX into whichever <math-field> has focus. False when none has, so
- * a caller can stay quiet rather than guessing which field was meant.
+ * Insert LaTeX into the maths field the student is working in. False when
+ * there is none, so a caller can stay quiet rather than guessing.
  */
 export function insertIntoFocusedField(latex) {
-  const el = document.activeElement;
-  if (el && el.tagName === 'MATH-FIELD' && typeof el.insert === 'function') {
-    el.insert(latex, { focus: true });
-    return true;
-  }
-  return false;
+  const active = document.activeElement;
+  const target = (active && active.tagName === 'MATH-FIELD') ? active : lastField;
+  // A remembered field that has since been removed from the page is no use.
+  if (!target || typeof target.insert !== 'function' || !target.isConnected) return false;
+  target.insert(latex, { focus: true });
+  return true;
 }

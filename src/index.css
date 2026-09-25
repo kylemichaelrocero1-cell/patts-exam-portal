@@ -747,8 +747,20 @@ input:checked + .slider::before { transform: translateX(26px); }
   box-shadow: 0 0 0 3px var(--navy-50);
   outline: none;
 }
-.math-field-host math-field::part(virtual-keyboard-toggle) { display: none; }
+/* The menu is clutter for a student — it only offers things like "export as
+   MathML". The KEYBOARD TOGGLE is not: on a phone it is the one control that
+   summons the maths keyboard back after it has been dismissed, so it is hidden
+   only where there is a real keyboard to type on. Hiding it everywhere left a
+   student on a phone with no way to get the keyboard back at all. */
 .math-field-host math-field::part(menu-toggle) { display: none; }
+@media (pointer: fine) {
+  .math-field-host math-field::part(virtual-keyboard-toggle) { display: none; }
+}
+@media (pointer: coarse) {
+  .math-field-host math-field::part(virtual-keyboard-toggle) {
+    display: flex; opacity: 1; color: var(--navy);
+  }
+}
 
 .math-field-placeholder {
   display: block; padding: 12px; font-size: 14px; color: var(--ink-4); font-style: italic;

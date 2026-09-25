@@ -74,10 +74,11 @@ export default function WorkedSolution({
               className="ws-sym"
               title={sym.title}
               aria-label={sym.title}
-              // The field loses focus the instant a button takes it, so the
-              // press is intercepted before that happens and the caret stays
-              // where the student left it.
-              onMouseDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
+              // pointerdown, not mousedown: it covers touch and mouse with
+              // ONE handler, so a phone cannot fire both and insert the symbol
+              // twice. preventDefault stops the button taking focus, which is
+              // what keeps the caret where the student left it.
+              onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
             >
               <MathStatic latex={sym.label} ariaLabel={sym.title} />
             </button>

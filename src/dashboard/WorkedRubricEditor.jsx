@@ -115,7 +115,7 @@ export default function WorkedRubricEditor({ value, onChange, marks: marksProp }
         {MATH_PALETTE.map(sym => (
           <button
             key={sym.label} type="button" className="ws-sym" title={sym.title}
-            onMouseDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
+            onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
           >{sym.title}</button>
         ))}
       </div>

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 // on the exam board: LessonContent.jsx imported the CSS, but that is a
 // different lazy chunk and the exam board never loads it.
 import 'katex/dist/katex.min.css';
+import { rememberField } from '../lib/mathPalette.js';
 
 // A single line of maths, typed the way Google Docs or Symbolab let you type
 // it: 1/2 opens a fraction, ^ raises an exponent, \sqrt builds a radical, and
@@ -80,7 +81,12 @@ export default function MathField({
       // The student is writing maths, not prose: no menu offering to export
       // MathML, and no autocorrect turning `sin` into text.
       try { field.menuItems = []; } catch { /* older build, no menu to hide */ }
-      field.mathVirtualKeyboardPolicy = 'manual';
+      // 'auto', not 'manual'. MathLive raises its own keyboard when a field
+      // is focused on a touch device AND knows not to dismiss it while its own
+      // keys are being pressed. Driving it by hand from focusin/focusout — as
+      // this did — dismissed it on the FIRST keypress, because pressing a key
+      // on the virtual keyboard moves focus off the field and fired focusout.
+      field.mathVirtualKeyboardPolicy = 'auto';
       field.smartMode = false;
       field.value = value || '';
       if (readOnly) field.readOnly = true;
@@ -103,15 +109,20 @@ export default function MathField({
         }
       });
 
-      // Tapping the field on a tablet raises the maths keyboard; a physical
-      // keyboard never needs it, so it is not shown on focus by default.
+      // Which field the symbol palette should insert into. Remembered on
+      // focus rather than read from document.activeElement at press time,
+      // because on a touch screen the field can lose focus to the button
+      // before the handler runs and the symbol would go nowhere.
       field.addEventListener('focusin', () => {
-        if (matchMedia('(pointer: coarse)').matches && !readOnly) {
-          window.mathVirtualKeyboard?.show();
+        rememberField(field);
+        // The maths keyboard slides up over the bottom third of a phone, and
+        // a field near the fold ends up underneath it. Nudged into view once
+        // the keyboard has finished animating.
+        if (matchMedia('(pointer: coarse)').matches) {
+          setTimeout(() => {
+            field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }, 350);
         }
-      });
-      field.addEventListener('focusout', () => {
-        window.mathVirtualKeyboard?.hide();
       });
 
       hostRef.current.appendChild(field);

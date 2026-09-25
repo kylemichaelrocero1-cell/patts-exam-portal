@@ -55,6 +55,88 @@ export function insertIntoFocusedField(latex) {
 
 
 /**
+ * Read the two arguments of a \frac starting at `i` (the index of the
+ * backslash). Returns null if this is not a well-formed \frac.
+ *
+ * A brace matcher rather than a regular expression, because the numerator of
+ * \frac{x^{2}}{y} contains braces of its own and a regex that stops at the
+ * first closing brace cuts it in half.
+ */
+function readFrac(src, i) {
+  if (!src.startsWith('\\frac', i)) return null;
+  let j = i + 5;
+  const arg = () => {
+    while (src[j] === ' ') j++;
+    if (src[j] !== '{') return null;
+    let depth = 0, start = ++j;
+    for (; j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}') { if (depth === 0) return src.slice(start, j++); depth--; }
+    }
+    return null;
+  };
+  const num = arg(); if (num === null) return null;
+  const den = arg(); if (den === null) return null;
+  return { num, den, end: j };
+}
+
+// Does this need brackets round it before a slash goes next to it? A sum or a
+// difference does; 2x does not. Only the TOP level counts — the minus inside
+// x^{-1} binds tighter than any slash could.
+function needsBrackets(t) {
+  let depth = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '{' || c === '(') depth++;
+    else if (c === '}' || c === ')') depth--;
+    else if (depth === 0 && (c === '+' || (c === '-' && i > 0))) return true;
+  }
+  return false;
+}
+
+/**
+ * The same expression with \frac written as a slash: \frac{x}{y} becomes x/y,
+ * and \frac{x+1}{y} becomes (x+1)/y.
+ *
+ * Both spellings are natural to type and neither is wrong, but they are
+ * different STRINGS — and the database matches answers as strings, because it
+ * has no algebra (sql/027). Rather than make normalisation guess where the
+ * brackets belong, which cannot be done safely (1/(x+1) and 1/x+1 differ), the
+ * other form is simply offered as an accepted answer.
+ */
+export function fracToSlash(latex) {
+  const src = String(latex || '');
+  let out = '', i = 0, changed = false;
+  while (i < src.length) {
+    const f = readFrac(src, i);
+    if (f) {
+      const num = fracToSlash(f.num), den = fracToSlash(f.den);
+      out += `${needsBrackets(num) ? `(${num})` : num}/${needsBrackets(den) || /[*/]/.test(den) ? `(${den})` : den}`;
+      i = f.end;
+      changed = true;
+    } else { out += src[i++]; }
+  }
+  return changed ? out : src;
+}
+
+/** Split on a character that appears at bracket depth zero, or [] if it does not. */
+function topLevelSplit(t, ch) {
+  let depth = 0;
+  for (let i = 1; i < t.length; i++) {
+    const c = t[i];
+    if (c === '{' || c === '(' || c === '[') depth++;
+    else if (c === '}' || c === ')' || c === ']') depth--;
+    else if (depth === 0 && c === ch) {
+      const a = t.slice(0, i).trim(), b = t.slice(i + 1).trim();
+      // Only a clean two-term split; three terms are left alone.
+      if (a && b && !topLevelSplit(b, ch).length) return [a, b];
+      return [];
+    }
+  }
+  return [];
+}
+
+/**
  * Plausible ways a student might write the same answer.
  *
  * These are STRING variants, generated from the answer itself, and they exist
@@ -88,6 +170,14 @@ export function suggestVariants(latex) {
   const pow = rhs.match(/^([a-z])\^\{-1\}$/i);
   if (pow) { add(`\\frac{1}{${pow[1]}}`); add(lhs ? `${lhs}=\\frac{1}{${pow[1]}}` : ''); }
 
+  // The same answer with every \\frac written as a slash. Just as natural to
+  // type, and a different STRING — which is what the database compares.
+  const slashed = fracToSlash(rhs);
+  if (slashed !== rhs) {
+    add(slashed);
+    if (lhs) add(`${lhs}=${slashed}`);
+  }
+
   // A fraction of integers, and its decimal.
   const frac = rhs.match(/^\\frac\{(-?\d+)\}\{(-?\d+)\}$/);
   if (frac) {
@@ -95,10 +185,15 @@ export function suggestVariants(latex) {
     if (Number.isFinite(v)) add(lhs ? `${lhs}=${v}` : String(v));
   }
 
-  // Terms the other way round, for a two-term sum.
-  const sum = rhs.match(/^(.+?)\+(.+)$/);
-  if (sum && !/[+]/.test(sum[1])) {
-    add(lhs ? `${lhs}=${sum[2]}+${sum[1]}` : `${sum[2]}+${sum[1]}`);
+  // Terms the other way round, for a two-term sum. Split at the TOP level
+  // only: the + inside \frac{1}{(w+1)^2} is part of a denominator, and
+  // splitting there produced the string "1)^2}+\frac{1}{(w" — nonsense that
+  // would have gone straight into an accept list.
+  const parts = topLevelSplit(rhs, '+');
+  if (parts.length === 2) {
+    const swapped = `${parts[1]}+${parts[0]}`;
+    add(swapped);
+    if (lhs) add(`${lhs}=${swapped}`);
   }
 
   return [...out];

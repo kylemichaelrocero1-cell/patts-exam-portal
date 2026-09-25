@@ -887,3 +887,41 @@ input:checked + .slider::before { transform: translateX(26px); }
 }
 .ws-answer-shown.ws-ok     { border-color: var(--ok-bd);     background: var(--ok-bg); }
 .ws-answer-shown.ws-broken { border-color: var(--danger-bd); background: var(--danger-bg); }
+
+/* The maths field, and the states it can be in.
+
+   The palette buttons need an explicit colour: the global `button` rule sets
+   `color: var(--white)`, which on a white button face rendered every symbol
+   invisible. A component that overrides a global background has to override
+   its foreground too. */
+.ws-sym, .ws-sym .math-static, .ws-sym .katex { color: var(--ink-1); }
+.ws-sym:hover, .ws-sym:hover .math-static, .ws-sym:hover .katex { color: var(--navy); }
+
+.math-field-wrap { position: relative; }
+/* The placeholder is a SIBLING of the host, never a child — React must never
+   be asked to remove a node the editor has already replaced. It sits over the
+   empty host and disappears the moment the field is appended. */
+.math-field-wrap .math-field-placeholder {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  padding: 0 16px; pointer-events: none;
+}
+.math-field-host[data-ready="no"] {
+  min-height: 58px;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.math-field-fallback .input { font-size: 18px; padding: 13px 15px; font-family: var(--font-mono); }
+.math-field-error {
+  margin: 8px 0 0; padding: 9px 12px;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--warn); background: var(--warn-bg);
+  border: 1px solid var(--warn-bd); border-radius: var(--r-sm);
+}
+.math-field-error code {
+  padding: 1px 5px; margin: 0 2px;
+  background: var(--paper); border: 1px solid var(--warn-bd);
+  border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px;
+}

@@ -535,65 +535,6 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     setReviewRows(data || []);
   };
 
-  /**
-   * Mark this student's worked answers on their own device, for the score
-   * shown the moment they hand the paper in.
-   *
-   * NOT THE MARK OF RECORD, and never written back. Postgres has no computer
-   * algebra, so it cannot mark these; the authoritative mark is still the
-   * instructor's, made in their dashboard from the full rubric and saved by
-   * record_work_marks() (sql/024), which no student session can call. This is
-   * feedback — the thing a practice paper exists for.
-   *
-   * The keys come from get_worked_keys() (sql/026), which hands over the final
-   * ANSWERS only, only for a paper whose instructor has turned answers on, and
-   * only once this student has submitted. A paper still being sat releases
-   * nothing, so this cannot be used to look answers up mid-exam.
-   */
-  const markWorkedLocally = useCallback(async (workPayload, picked, workTotal) => {
-    try {
-      const { data: keys, error } = await supabase.rpc('get_worked_keys', {
-        p_student_id: student?.id,
-        p_assessment_id: exam.id,
-        p_session_token: localStorage.getItem('local_session_token'),
-      });
-      // A refusal is entirely normal — it just means the instructor has not
-      // turned answers on for this paper. The score stays pending.
-      if (error || !Array.isArray(keys) || keys.length === 0) return;
-
-      const { ready } = await import('./lib/mathCheck.js');
-      await ready();
-      const { markAnswer } = await import('./lib/workedSolution.js');
-
-      let earned = 0;
-      const perItem = {};
-      for (const k of keys) {
-        const lines = workPayload[String(k.question_id)]?.lines || [];
-        const marks = Number(k.marks) || 1;
-        const r = markAnswer(lines, {
-          marks,
-          steps: [{ latex: k.answer, marks, label: 'Final answer' }],
-          variable: k.work_variable || 'x',
-        }, { given: k.work_given, variable: k.work_variable || 'x' });
-        earned += r.marks;
-        perItem[String(k.question_id)] = { correct: r.correct, marks: r.marks, of: marks };
-      }
-
-      setScoreDisplay({
-        score: picked.score + earned,
-        total: picked.total + workTotal,
-        workEarned: earned,
-        workTotal,
-        provisional: true,
-        perItem,
-      });
-    } catch (err) {
-      // The engine failed to load, or something else went wrong. The paper is
-      // submitted and safe either way; the score simply stays pending.
-      console.error('Could not work out a provisional score:', err);
-    }
-  }, [student, exam]);
-
   // --- SUBMIT HANDLER (declared before the auto-submit effect that depends on it) ---
   const executeSubmission = useCallback(async () => {
     if (isSubmittingRef.current || isSubmitting) return;
@@ -675,8 +616,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         if (lines.length > 0) workPayload[String(qId)] = { lines };
       });
 
+      // One call saves the working AND marks it, in the database, against a
+      // rubric this browser has never seen. The number that comes back is
+      // already stored — it is read here, not decided here (sql/027).
+      let workOutcome = null;
       if (workTotal > 0) {
-        const { error: saveError } = await supabase.rpc('save_worked_answers', {
+        const { data, error: saveError } = await supabase.rpc('save_worked_answers', {
           p_student_id: student?.id,
           p_assessment_id: exam.id,
           p_session_token: localStorage.getItem('local_session_token'),
@@ -685,6 +630,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         // Loud, not silent: the answers are still in localStorage and in the
         // live session, so a student who sees this has not lost their work.
         if (saveError) console.error('Could not save worked answers:', saveError.message);
+        else workOutcome = data;
       }
 
       // Essays still go through a direct patch, which only lands on a
@@ -727,8 +673,14 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // which only happens when the instructor has turned answers on. When
       // they have not, the score is left as pending rather than invented.
       if (workTotal > 0) {
-        setScoreDisplay({ ...picked, workPending: workTotal });
-        markWorkedLocally(workPayload, picked, workTotal);
+        // The server has already marked it. When the call failed the marks are
+        // shown as pending rather than invented — an instructor can still
+        // score the script from the dashboard.
+        const earned = Number(workOutcome?.work_marks);
+        const available = Number(workOutcome?.work_total) || workTotal;
+        setScoreDisplay(Number.isFinite(earned)
+          ? { score: picked.score + earned, total: picked.total + available }
+          : { ...picked, workPending: workTotal });
       } else {
         setScoreDisplay(picked);
       }
@@ -1091,7 +1043,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 // the answers have been fetched and marked on this device. A
                 // percentage of a half-counted paper would be wrong, so while
                 // marks are still pending there is no percentage at all.
-                const pending = scoreDisplay.workPending > 0 && !scoreDisplay.provisional;
+                const pending = scoreDisplay.workPending > 0;
                 const pct = (!pending && scoreDisplay.total > 0)
                   ? Math.round((scoreDisplay.score / scoreDisplay.total) * 100) : null;
                 const tone = pct === null ? 'var(--ink-2)'
@@ -1112,14 +1064,10 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                     )}
                     {pending && (
                       <div style={{ fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, marginTop: 4 }}>
-                        Working it out…
+                        Your instructor will mark this
                       </div>
                     )}
-                    {scoreDisplay.provisional && (
-                      <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
-                        Worked out on your device. Your instructor&rsquo;s marking is final.
-                      </div>
-                    )}
+
                   </div>
                 );
               })()}

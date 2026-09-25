@@ -52,3 +52,54 @@ export function insertIntoFocusedField(latex) {
   target.insert(latex, { focus: true });
   return true;
 }
+
+
+/**
+ * Plausible ways a student might write the same answer.
+ *
+ * These are STRING variants, generated from the answer itself, and they exist
+ * because marking now happens in the database (sql/027), where there is no
+ * algebra — only matching against a list of accepted forms. The maths engine
+ * does understand algebra, so it is used HERE, once, when the question is
+ * written, instead of on every paper that is ever marked.
+ *
+ * Only offered as suggestions. The instructor ticks what they will take,
+ * because whether x^{-1} is an acceptable answer to "differentiate ln x" is a
+ * teaching judgement and not a fact about arithmetic.
+ */
+export function suggestVariants(latex) {
+  const src = String(latex || '').trim();
+  if (!src) return [];
+  const out = new Set();
+  const add = v => { const t = String(v || '').trim(); if (t && t !== src) out.add(t); };
+
+  // With and without a subject on the left. The database already treats these
+  // as one answer, but showing both makes the rule visible.
+  const eq = src.indexOf('=');
+  const rhs = eq >= 0 ? src.slice(eq + 1).trim() : src;
+  const lhs = eq >= 0 ? src.slice(0, eq).trim() : '';
+  if (eq >= 0) add(rhs);
+  if (lhs === "y'") { add(`\\frac{dy}{dx}=${rhs}`); add(`f'(x)=${rhs}`); }
+  if (lhs === '\\frac{dy}{dx}') { add(`y'=${rhs}`); add(rhs); }
+
+  // 1/x and x^{-1}; \frac{a}{b}x^n and a/b as a coefficient.
+  const inv = rhs.match(/^\\frac\{1\}\{([a-z])\}$/i);
+  if (inv) { add(`${inv[1]}^{-1}`); add(lhs ? `${lhs}=${inv[1]}^{-1}` : `${inv[1]}^{-1}`); }
+  const pow = rhs.match(/^([a-z])\^\{-1\}$/i);
+  if (pow) { add(`\\frac{1}{${pow[1]}}`); add(lhs ? `${lhs}=\\frac{1}{${pow[1]}}` : ''); }
+
+  // A fraction of integers, and its decimal.
+  const frac = rhs.match(/^\\frac\{(-?\d+)\}\{(-?\d+)\}$/);
+  if (frac) {
+    const v = Number(frac[1]) / Number(frac[2]);
+    if (Number.isFinite(v)) add(lhs ? `${lhs}=${v}` : String(v));
+  }
+
+  // Terms the other way round, for a two-term sum.
+  const sum = rhs.match(/^(.+?)\+(.+)$/);
+  if (sum && !/[+]/.test(sum[1])) {
+    add(lhs ? `${lhs}=${sum[2]}+${sum[1]}` : `${sum[2]}+${sum[1]}`);
+  }
+
+  return [...out];
+}

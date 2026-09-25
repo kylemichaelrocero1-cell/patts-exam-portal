@@ -191,7 +191,8 @@ const [targetSection, setTargetSection] = useState('');
     // A worked item (sql/024). `work` is the rubric as the editor holds it;
     // it is written to questions.work_rubric, and to the three public columns
     // beside it, only when the type says worked_solution.
-    work: { given: '', variable: 'x', marks: 3, steps: [{ latex: '', marks: 1, label: '' }] },
+    work: { given: '', variable: 'x', marks: 3,
+            steps: [{ latex: '', marks: 1, label: '' }], accept: [] },
   };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
@@ -1162,6 +1163,11 @@ const [targetSection, setTargetSection] = useState('');
             marks: Number(st.marks) || 0,
             label: String(st.label || '').trim(),
           })),
+        // Other spellings of the answer that the database will accept
+        // (sql/027). Normalisation covers the cosmetic ones; this is for
+        // anything needing algebra.
+        accept: (qForm.work?.accept || [])
+          .map(v => String(v || '').trim()).filter(Boolean),
         penaltyPerBrokenStep: 1,
       } : null,
     };
@@ -1217,6 +1223,7 @@ const [targetSection, setTargetSection] = useState('');
         steps: Array.isArray(q.work_rubric?.steps) && q.work_rubric.steps.length
           ? q.work_rubric.steps
           : [{ latex: '', marks: 1, label: '' }],
+        accept: Array.isArray(q.work_rubric?.accept) ? q.work_rubric.accept : [],
       },
     });
     setQImageFile(null);

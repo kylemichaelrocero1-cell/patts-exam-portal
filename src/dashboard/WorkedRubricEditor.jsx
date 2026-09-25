@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import MathField from '../components/MathField.jsx';
-import { MATH_PALETTE, insertIntoFocusedField } from '../lib/mathPalette.js';
+import { useEffect, useMemo, useState } from 'react';
+import MathField, { MathStatic } from '../components/MathField.jsx';
+import { MATH_PALETTE, insertIntoFocusedField, suggestVariants } from '../lib/mathPalette.js';
 
 // Authoring a worked item: the problem, the variable, what the item is worth,
 // and the instructor's own working with marks against each line.
@@ -120,6 +120,12 @@ export default function WorkedRubricEditor({ value, onChange, marks: marksProp }
         ))}
       </div>
 
+      <AcceptedAnswers
+        answer={steps.length ? steps[steps.length - 1].latex : ''}
+        accept={Array.isArray(value?.accept) ? value.accept : []}
+        onChange={accept => set({ accept })}
+      />
+
       <RubricSelfCheck rubric={{ ...value, marks, steps }} />
     </div>
   );
@@ -195,3 +201,71 @@ const NOTE = {
   background: 'var(--info-bg)', border: '1px solid var(--info-bd)',
   borderRadius: 'var(--r-sm)', color: 'var(--ink-2)',
 };
+
+/**
+ * The other ways this answer may be written.
+ *
+ * Marking happens in the database (sql/027), and the database has no algebra —
+ * it matches what a student wrote against a list. Normalisation already covers
+ * spelling: spaces, \left, \cdot, braces, a subject on the left, and numbers
+ * compared as numbers. This list is for everything that needs actual algebra,
+ * where x^{-1} and 1/x are the same number and different strings.
+ *
+ * The suggestions come from the same engine that used to do the marking. It
+ * runs once here, when the question is written, rather than on every paper —
+ * and the instructor ticks what they will take, because whether to accept an
+ * unsimplified form is a teaching decision, not an arithmetic one.
+ */
+function AcceptedAnswers({ answer, accept, onChange }) {
+  const suggestions = useMemo(
+    () => suggestVariants(answer).filter(v => !accept.includes(v)),
+    [answer, accept]);
+
+  if (!answer) return null;
+  return (
+    <div style={{ marginTop: 16, padding: '13px 15px', background: 'var(--surface-2)',
+                  border: '1px solid var(--line)', borderRadius: 'var(--r-sm)' }}>
+      <span style={LABEL}>Also accept</span>
+      <p style={{ margin: '0 0 10px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--ink-3)' }}>
+        Spacing, <code>\left</code>, <code>\cdot</code>, braces, a <code>y&rsquo;=</code> on the
+        front and numbers like <code>0.5</code> against <code>\frac{'{1}{2}'}</code> are matched
+        already. Add anything that needs real algebra — <code>x^{'{-1}'}</code> where the answer
+        says <code>1/x</code>.
+      </p>
+
+      {accept.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          {accept.map((v, i) => (
+            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+                                   padding: '4px 8px', background: 'var(--ok-bg)',
+                                   border: '1px solid var(--ok-bd)', borderRadius: 999, fontSize: 13 }}>
+              <MathStatic latex={v} />
+              <button type="button" onClick={() => onChange(accept.filter((_, k) => k !== i))}
+                      title="Stop accepting this"
+                      style={{ width: 16, height: 16, padding: 0, background: 'none',
+                               border: 'none', color: 'var(--ink-4)', fontSize: 15, lineHeight: 1 }}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Suggestions:</span>
+          {suggestions.map(v => (
+            <button key={v} type="button" className="btn ghost sm"
+                    style={{ width: 'auto', padding: '4px 10px' }}
+                    onClick={() => onChange([...accept, v])}>
+              + <MathStatic latex={v} />
+            </button>
+          ))}
+        </div>
+      )}
+      {accept.length === 0 && suggestions.length === 0 && (
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-4)' }}>
+          Nothing else to suggest for this answer.
+        </p>
+      )}
+    </div>
+  );
+}

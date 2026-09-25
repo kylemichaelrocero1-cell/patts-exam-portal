@@ -1,5 +1,11 @@
+import { lazy, Suspense } from 'react';
 import { letterFor } from '../lib/choices';
 import { indexSet } from '../lib/answers';
+
+// Rendering LaTeX pulls in KaTeX, which a paper of plain multiple choice has
+// no use for. Split, so only a review containing maths fetches it.
+const MathStatic = lazy(() => import('./MathField.jsx')
+  .then(m => ({ default: m.MathStatic })));
 
 // The marked paper as the student sees it: one card per question, their answer
 // against the key.
@@ -19,8 +25,16 @@ import { indexSet } from '../lib/answers';
 
 export default function AnswerReview({ rows }) {
   const right = rows.filter(r => r.is_correct).length;
-  const isBlank = (r) => indexSet(r.chosen) === null;
+  // A worked item's answer is a string of maths, not a set of indices, so
+  // "blank" means an empty string rather than an empty set.
+  const isWorked = (r) => r.question_type === 'worked_solution';
+  const isBlank = (r) => (isWorked(r)
+    ? !String(r.chosen || '').trim()
+    : indexSet(r.chosen) === null);
   const blank = rows.filter(isBlank).length;
+  const marksEarned = rows.reduce((t, r) => t + (Number(r.earned) || 0), 0);
+  const marksTotal = rows.reduce((t, r) => t + (Number(r.marks) || 0), 0);
+  const weighted = rows.some(r => Number(r.marks) > 1);
 
   return (
     <div style={{ marginBottom: 34, textAlign: 'left' }}>
@@ -29,10 +43,64 @@ export default function AnswerReview({ rows }) {
         <span style={{ fontSize: 13, color: 'var(--ok)', fontWeight: 700 }}>{right} correct</span>
         <span style={{ fontSize: 13, color: 'var(--bad)', fontWeight: 700 }}>{rows.length - right - blank} wrong</span>
         {blank > 0 && <span style={{ fontSize: 13, color: 'var(--ink-4)', fontWeight: 700 }}>{blank} blank</span>}
+        {weighted && marksTotal > 0 && (
+          <span style={{ fontSize: 13, color: 'var(--ink-2)', fontWeight: 700, marginLeft: 'auto' }}>
+            {marksEarned} / {marksTotal} marks
+          </span>
+        )}
       </div>
 
       {rows.map((r, i) => {
         const unanswered = isBlank(r);
+
+        // A worked item has no choices to lay out — just what the student
+        // wrote against the answer.
+        if (isWorked(r)) {
+          return (
+            <div key={r.question_id || i} className="card" style={{
+              padding: '16px 18px', marginBottom: 12,
+              borderLeft: `4px solid ${r.is_correct ? 'var(--ok)' : unanswered ? 'var(--ink-4)' : 'var(--bad)'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                <strong style={{ color: 'var(--ink-1)', fontSize: 14 }}>
+                  {r.question_number}. {r.question_text}
+                </strong>
+                <span style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 700,
+                               color: r.is_correct ? 'var(--ok)' : 'var(--bad)' }}>
+                  {Number(r.earned) || 0} / {Number(r.marks) || 1}
+                </span>
+              </div>
+              <Suspense fallback={null}>
+                {r.work_given && (
+                  <div className="ws-given" style={{ marginBottom: 10 }}>
+                    <span className="ws-given-label">Given</span>
+                    <MathStatic latex={r.work_given} />
+                  </div>
+                )}
+                <div className={`ws-answer-shown ${r.is_correct ? 'ws-ok' : 'ws-broken'}`}>
+                  <span className="ws-given-label">You wrote</span>
+                  {unanswered
+                    ? <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>nothing</em>
+                    : <span style={{ fontSize: 18 }}><MathStatic latex={r.chosen} /></span>}
+                  <span className={`ws-mark ${r.is_correct ? 'ws-mark-ok' : 'ws-mark-bad'}`}>
+                    {r.is_correct ? '✓' : '✗'}
+                  </span>
+                </div>
+                {/* The answer is shown whether they got it right or not —
+                    confirming a correct answer is worth as much as correcting
+                    a wrong one, and this screen only opens when the
+                    instructor has allowed answers. */}
+                {r.correct_latex && (
+                  <div className="ws-answer-shown ws-ok" style={{ marginTop: 8 }}>
+                    <span className="ws-given-label">Answer</span>
+                    <span style={{ fontSize: 18 }}><MathStatic latex={r.correct_latex} /></span>
+                  </div>
+                )}
+              </Suspense>
+            </div>
+          );
+        }
+
         const keySet = indexSet(r.correct_set) ?? indexSet(r.correct) ?? [];
         const mineSet = indexSet(r.chosen) ?? [];
         // question_type is authoritative; the array checks are the fallback

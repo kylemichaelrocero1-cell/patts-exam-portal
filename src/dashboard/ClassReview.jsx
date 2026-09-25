@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { combinedScore } from '../lib/workedShape';
 
 // One section at a time, answering the questions an instructor actually asks:
 // who hasn't submitted, who is struggling, and how did the class do on each
@@ -14,9 +15,16 @@ import Icon from '../components/Icon';
 
 const PASS = 75;
 
-function pct(score, total) {
-  return total > 0 ? (score / total) * 100 : null;
+// A score is not always a count of right answers. An item may be worth more
+// than one point (sql/025), and a worked item is marked in its own columns
+// (sql/024) — so a paper made entirely of worked items has a picked-item
+// score of 0 out of 0, and reading THAT is why a whole class showed 0/0 here
+// while their marks sat in the row beside it. combinedScore() is the one
+// place that knows which numbers to use.
+function scoreOf(row) {
+  return row ? combinedScore(row) : null;
 }
+
 
 function toneFor(p) {
   if (p === null) return 'var(--ink-4)';
@@ -93,7 +101,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
   const rows = useMemo(() => roster.map(s => {
     const mine = byStudent.get(s.student_id ?? s.id) || new Map();
     const taken = items.filter(i => mine.has(i.id));
-    const pcts = taken.map(i => pct(mine.get(i.id).score, mine.get(i.id).total_items)).filter(p => p !== null);
+    const pcts = taken.map(i => scoreOf(mine.get(i.id))?.pct).filter(p => p !== null && p !== undefined);
     const avg = pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null;
     return {
       id: s.student_id ?? s.id,
@@ -198,7 +206,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                 </td></tr>
               ) : items.map(it => {
                 const rs = rows.map(r => r.results.get(it.id)).filter(Boolean);
-                const ps = rs.map(r => pct(r.score, r.total_items)).filter(p => p !== null);
+                const ps = rs.map(r => scoreOf(r)?.pct).filter(p => p !== null && p !== undefined);
                 const a = ps.length ? ps.reduce((x, y) => x + y, 0) / ps.length : null;
                 const pr = ps.length ? (ps.filter(p => p >= PASS).length / ps.length) * 100 : null;
                 return (
@@ -257,10 +265,11 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                   <td style={{ fontWeight: 600, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 1 }}>{r.name}</td>
                   {items.map(it => {
                     const res = r.results.get(it.id);
-                    const p = res ? pct(res.score, res.total_items) : null;
+                    const m = scoreOf(res);
+                    const p = m ? m.pct : null;
                     return (
                       <td key={it.id} style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: toneFor(p) }}>
-                        {res ? (p === null ? `${res.score}/${res.total_items}` : `${Math.round(p)}%`) : '—'}
+                        {res ? (p === null ? `${m.score}/${m.total}` : `${Math.round(p)}%`) : '—'}
                         {res && res.attempts > 1 && (
                           <span title={`Latest of ${res.attempts} attempts`} style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 3 }}>
                             ×{res.attempts}

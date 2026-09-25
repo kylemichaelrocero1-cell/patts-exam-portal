@@ -58,7 +58,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           // Practice retakes are not in results, so without this a student who
           // had sat five mock exams saw "0 submitted" and an empty list.
           supabase.from('review_attempts')
-            .select('assessment_id, attempt_no, score, total_items, points_earned, points_total, submitted_at')
+            .select('assessment_id, attempt_no, score, total_items, points_earned, points_total, work_marks, work_total, submitted_at')
             .eq('student_id', student.id),
         ]);
         if (cancelled) return;
@@ -85,6 +85,11 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
             total_items: a.total_items,
             points_earned: a.points_earned,
             points_total: a.points_total,
+            // Without these a practice paper made entirely of worked items
+            // reported 0 of 0: its picked-item score IS zero out of zero, and
+            // everything it is actually worth lives in the worked columns.
+            work_marks: a.work_marks,
+            work_total: a.work_total,
             submitted_at: a.submitted_at,
             attempts: rawAttempts.filter(x => x.assessment_id === a.assessment_id).length,
             is_practice: true,

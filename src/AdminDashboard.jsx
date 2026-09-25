@@ -1741,7 +1741,7 @@ async function fetchDashboardData() {
       // and an attempt row has no home there. Class Review folds them in.
       const attemptsData = allExamIds.length > 0
         ? await fetchAllRows(() => supabase.from('review_attempts')
-            .select('student_id, assessment_id, attempt_no, score, total_items, time_taken_seconds, submitted_at')
+            .select('student_id, assessment_id, attempt_no, score, total_items, points_earned, points_total, work_marks, work_total, time_taken_seconds, submitted_at')
             .in('assessment_id', allExamIds))
             .catch(err => { console.error('Could not load practice attempts:', err); return []; })
         : [];

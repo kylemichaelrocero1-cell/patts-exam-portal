@@ -439,9 +439,23 @@ export function checkWork(lines, opts = {}) {
  * Needed because equivalence is blind to form, and a final answer is not.
  * 5(1)x^{1-1} and 5 are the same number, so no equivalence test will ever
  * separate them — but only one of them is an answer a student has finished
- * simplifying. Size is the crude, reliable way to tell: seven nodes against
+ * simplifying. Size is the crude, reliable way to tell: five nodes against
  * one. It is never used to judge a step, only to decide whether working has
  * actually been carried through to the end.
+ *
+ * THE LIMIT OF THIS, WHICH MATTERS WHEN WRITING A RUBRIC. Compute Engine
+ * canonicalises as it parses, and that quietly folds away some of the very
+ * difference being measured:
+ *
+ *   5(1)x^{1-1}  ->  ["Multiply",5,["Power","x",0]]   5 nodes, distinguishable
+ *   3(2)x^{2-1}  ->  ["Multiply",6,"x"]               3 nodes, IDENTICAL to 6x
+ *
+ * x^0 survives; x^1 collapses, and the numeric coefficients multiply out with
+ * it. So an intermediate step is only separable from its simplified form when
+ * it leaves something like x^0 behind. A rubric that gives marks for
+ * "3(2)x^{2-1}" as a step distinct from "6x" is asking for a difference that
+ * no longer exists by the time either string is parsed, and the step mark will
+ * be awarded for the answer alone. Such an item wants a single-step rubric.
  */
 export function complexity(box) {
   let n = 0;
@@ -454,14 +468,27 @@ export function complexity(box) {
 }
 
 /**
- * Is `line` an acceptable FINAL answer for `key` — equal to it, and written
- * no less plainly? The slack lets a student say 2.5 where the key says 5/2,
- * or keep a unit, without letting 5(1)x^{1-1} pass as a finished answer.
+ * Is `line` an acceptable FINAL answer for `key` — equal to it, about the same
+ * thing, and written no less plainly? The slack lets a student say 2.5 where
+ * the key says 5/2, or keep a unit, without letting 5(1)x^{1-1} pass as a
+ * finished answer.
+ *
+ * THE SUBJECT HAS TO MATCH. Solving 2x + 4 = 10, the line 2x = 6 is a perfectly
+ * valid step and IS an equivalent equation — checkStep accepts it, and should.
+ * But it is not the answer, because the answer to "solve for x" has to say what
+ * x is. Without this check the constant-multiple rule in sameEquation() made
+ * 2x = 6 and x = 3 interchangeable and a student scored full marks for stopping
+ * one line early.
+ *
+ * A bare expression is still allowed against an equation key, so writing just
+ * `5` where the key says y' = 5 counts. That leniency is deliberate: the
+ * student gave the answer, and only the label is missing.
  */
 export function isFinalForm(line, key) {
-  if (latexEquivalent(line, key) !== 'equal') return false;
   const pl = parseLine(line), pk = parseLine(key);
   if (!pl.valid || !pk.valid) return false;
+  if (pl.isEquation && pk.isEquation && !sameSubject(pl.lhs, pk.lhs)) return false;
+  if (latexEquivalent(line, key) !== 'equal') return false;
   const a = complexity(pl.rhs), b = complexity(pk.rhs);
   return a <= b + 2;
 }

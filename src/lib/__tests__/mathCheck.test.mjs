@@ -179,6 +179,21 @@ check("y'=5(1)x^{1-1} is equal to the answer but is not the answer written out",
   && !isFinalForm("y'=5(1)x^{1-1}", "y'=5"));
 check('a little slack: 2.5 passes where the key says 5/2',
   isFinalForm('x=2.5', 'x=\\frac{5}{2}'));
+check('2x=6 is a valid STEP towards x=3',
+  step('2x+4=10', '2x=6').status === 'ok');
+check('but it is NOT the answer — solving for x has to say what x is',
+  !isFinalForm('2x=6', 'x=3'),
+  'isFinalForm(2x=6, x=3) must be false');
+check('though the two are still equivalent equations, which is why this needed a rule',
+  latexEquivalent('2x=6', 'x=3') === 'equal');
+check('x=3 is the answer', isFinalForm('x=3', 'x=3'));
+check('a bare 5 counts as the answer where the key says y\'=5 — only the label is missing',
+  isFinalForm('5', "y'=5"));
+check('canonicalisation folds x^1 away, so 3(2)x^{2-1} IS 6x by the time it parses',
+  complexity(E('3(2)x^{2-1}')) === complexity(E('6x')),
+  `${complexity(E('3(2)x^{2-1}'))} vs ${complexity(E('6x'))}`);
+check('but x^0 survives, so 5(1)x^{1-1} stays distinguishable from 5',
+  complexity(E('5(1)x^{1-1}')) > complexity(E('5')));
 check('Leibniz and Lagrange name the same subject',
   sameSubject(parseLine("y'=5").lhs, parseLine('\\frac{dy}{dx}=5').lhs));
 

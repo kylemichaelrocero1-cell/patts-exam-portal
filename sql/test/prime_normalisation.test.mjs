@@ -77,5 +77,27 @@ ck('sin is still not cos', !(await match('y^{\\prime}=\\sin(x)', 'y^{\\prime}=\\
 ck('a number is still compared as a number', await match('2', '2.0'));
 ck('and a fraction against its decimal', await match('\\frac{1}{4}', '0.25'));
 
+console.log('\n=== 031: any function name can be a subject ===');
+await x(fs.readFileSync(P + '/sql/031_any_function_name_is_a_subject.sql', 'utf8'));
+await x(fs.readFileSync(P + '/sql/031_any_function_name_is_a_subject.sql', 'utf8'));
+ck('031 applies, twice', true);
+for (const [labelled, bare] of [
+  ["p^{\\prime}(u)=-6(2u+1)^{-4}", '-6(2u+1)^{-4}'],
+  ["g'(x)=\\frac{x}{\\sqrt{x^2+1}}", '\\frac{x}{\\sqrt{x^2+1}}'],
+  ["r''(z)=3z^2", '3z^2'],
+  ["d'(t)=15(3t-2)^4", '15(3t-2)^4'],
+  ["s^{\\prime}(t)=\\frac{3t+2}{2\\sqrt{t+1}}", '\\frac{3t+2}{2\\sqrt{t+1}}'],
+  ["q'(w)=1", '1'],
+  ['m(v)=0', '0'],
+]) ck(`${labelled}  =  ${bare}`, await match(labelled, bare));
+
+console.log('\n=== but a coefficient is not a label ===');
+ck('2x=6 is still not x=3', !(await match('2x=6', 'x=3')));
+ck('2x=6 is still not 6', !(await match('2x=6', '6')));
+ck('3y^2=12 is not 12', !(await match('3y^2=12', '12')));
+ck('a real difference is still a difference',
+  !(await match("g'(x)=2x", "g'(x)=x")));
+ck('and the primes still work', await match('y^{\\prime}=6x', "y'=6x"));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -948,3 +948,78 @@ input:checked + .slider::before { transform: translateX(26px); }
 button.card,
 button.card * { color: inherit; }
 button.card { color: var(--ink-1); background: var(--surface); }
+
+/* Authoring a maths question (WorkedRubricEditor).
+
+   Compact on purpose. The previous version stacked a step table, a paragraph
+   of rules and a palette of word-labelled buttons down the page — the buttons
+   were capped at 44px and their labels ("Greater than or equal") spilled out
+   of them. They show the SYMBOL now, like the student's palette does. */
+.wr { margin-bottom: 16px; }
+.wr-row { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+.wr-field { display: block; margin-bottom: 12px; }
+.wr-label {
+  display: block; margin-bottom: 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-4);
+}
+.wr-palette {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  padding: 8px; margin-bottom: 12px;
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+}
+.wr-sym {
+  width: 40px; height: 34px; padding: 0; flex: 0 0 auto; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
+  color: var(--ink-1); font-size: 14px; cursor: pointer;
+}
+.wr-sym:hover { border-color: var(--navy); background: var(--navy-tint); color: var(--navy); }
+.wr-sym .math-static, .wr-sym .katex { color: inherit; }
+
+.wr-accept {
+  padding: 11px 13px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+}
+.wr-note { margin: 0 0 8px; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.wr-note code, .wr-warn code {
+  padding: 0 4px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: 3px; font-family: var(--font-mono); font-size: 11px;
+}
+.wr-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.wr-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; width: auto;
+  background: var(--ok-bg); border: 1px solid var(--ok-bd); border-radius: 999px;
+  color: var(--ink-1); font-size: 13px; font-weight: 500;
+}
+.wr-chip.bad { background: var(--danger-bg); border-color: var(--danger-bd); }
+.wr-chip.add { background: var(--paper); border: 1px dashed var(--line); cursor: pointer; }
+.wr-chip.add:hover { border-color: var(--navy); border-style: solid; }
+.wr-chip > button {
+  width: 14px; height: 14px; padding: 0; background: none; border: none;
+  color: var(--ink-4); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.wr-chip .katex, .wr-chip .math-static { color: inherit; }
+.wr-warn {
+  margin: 8px 0 0; padding: 8px 11px;
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--warn); background: var(--warn-bg);
+  border: 1px solid var(--warn-bd); border-radius: var(--r-sm);
+}
+@media (max-width: 700px) { .wr-row { grid-template-columns: 1fr; } }
+
+/* The problem and the answer, in the instructor's question list. Without
+   these a maths paper reads as thirty rows of "Evaluate the limit." */
+.q-maths {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+  margin: 2px 0 8px; padding: 8px 11px;
+  background: var(--surface-2); border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm); font-size: 15px;
+}
+.q-maths-part { display: inline-flex; align-items: center; gap: 7px; }
+.q-maths-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-4);
+}

@@ -26,6 +26,10 @@ const ClassReview = lazy(() => import('./dashboard/ClassReview'));
 // maths editor and computer algebra. Split out hard, so an instructor who
 // never writes a worked item never downloads any of it.
 const WorkedRubricEditor = lazy(() => import('./dashboard/WorkedRubricEditor'));
+// Rendering stored LaTeX in the question list. Lazy with the rest of the
+// maths chunk, so a paper of plain multiple choice never fetches KaTeX.
+const MathStatic = lazy(() => import('./components/MathField.jsx')
+  .then(m => ({ default: m.MathStatic })));
 const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
@@ -4243,6 +4247,34 @@ const deleteResult = async (studentId, examId) => {
                               />
                               {isMultiSelect(q) && <span className="px-pill ok" style={{ marginLeft: 10 }}>Multiple answers</span>}
                             </p>
+                            {/* "Evaluate the limit." names no limit. For a
+                                maths item the PROBLEM is the question, so it
+                                is shown here with the answer beside it —
+                                otherwise a list of thirty reads as thirty
+                                copies of the same sentence. */}
+                            {q.question_type === 'worked_solution' && (
+                              <Suspense fallback={null}>
+                                <div className="q-maths">
+                                  {q.work_given && (
+                                    <span className="q-maths-part">
+                                      <span className="q-maths-tag">Problem</span>
+                                      <MathStatic latex={q.work_given} />
+                                    </span>
+                                  )}
+                                  {q.work_rubric?.steps?.[q.work_rubric.steps.length - 1]?.latex && (
+                                    <span className="q-maths-part">
+                                      <span className="q-maths-tag">Answer</span>
+                                      <MathStatic latex={q.work_rubric.steps[q.work_rubric.steps.length - 1].latex} />
+                                    </span>
+                                  )}
+                                  {(q.work_rubric?.accept?.length > 0) && (
+                                    <span className="q-maths-tag" style={{ color: 'var(--ink-4)' }}>
+                                      +{q.work_rubric.accept.length} accepted
+                                    </span>
+                                  )}
+                                </div>
+                              </Suspense>
+                            )}
                             {q.image_url && (
                               <img
                                 src={q.image_url}

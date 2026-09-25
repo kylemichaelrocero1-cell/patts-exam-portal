@@ -87,8 +87,9 @@ export default function WorkedSolution({
       )}
 
       <p className="ws-hint">
-        Give the simplified answer. This question is worth {marks} mark{marks === 1 ? '' : 's'},
-        awarded in full for the right answer. Type <code>/</code> for a fraction,
+        Give the simplified answer. This question is worth{' '}
+        <strong>{marks} point{marks === 1 ? '' : 's'}</strong>, added to your final
+        score in full for a correct answer. Type <code>/</code> for a fraction,
         <code>^</code> for a power, and <code>'</code> for a prime.
       </p>
     </div>

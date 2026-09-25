@@ -937,3 +937,14 @@ input:checked + .slider::before { transform: translateX(26px); }
   background: var(--paper); border: 1px solid var(--warn-bd);
   border-radius: 4px; font-family: var(--font-mono); font-size: 11.5px;
 }
+
+/* A card that is also a button.
+
+   The global `button` rule paints text white, which is right for the navy
+   buttons and wrong for anything on a pale surface. It has now caught the
+   symbol palette and the "needs your attention" rows on the Summary tab —
+   both rendered white on white and looked empty. Set once here so the next
+   card-shaped button does not have to rediscover it. */
+button.card,
+button.card * { color: inherit; }
+button.card { color: var(--ink-1); background: var(--surface); }

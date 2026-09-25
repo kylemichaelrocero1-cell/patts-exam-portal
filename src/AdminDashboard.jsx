@@ -1205,6 +1205,28 @@ const [targetSection, setTargetSection] = useState('');
     loadQuestionList(qExamId);
   };
 
+  // Points can be changed from the list without opening the whole editor —
+  // reweighting a paper is usually a pass over every item, and opening,
+  // scrolling and saving a form thirty times to change one number each is
+  // not a reasonable way to spend an evening.
+  const [savingPointsFor, setSavingPointsFor] = useState(null);
+  const saveQuestionPoints = async (q, pts) => {
+    const marks = Math.max(1, Math.min(100, Math.round(Number(pts) || 1)));
+    if (marks === (Number(q.marks) || 1)) return;
+    setSavingPointsFor(q.id);
+    const { error } = await supabase.from('questions').update({ marks }).eq('id', q.id);
+    setSavingPointsFor(null);
+    if (error) { alert('Could not change the points: ' + error.message); return; }
+    // Patched in place rather than refetched, so the list does not jump and
+    // a run of edits stays responsive.
+    setQList(prev => prev.map(x => (x.id === q.id ? { ...x, marks } : x)));
+    setExamQuestionsCache(prev => {
+      const list = prev[qExamId];
+      if (!list) return prev;
+      return { ...prev, [qExamId]: list.map(x => (x.id === q.id ? { ...x, marks } : x)) };
+    });
+  };
+
   const startEditQuestion = (q) => {
     setEditingQ(q);
     setQForm({
@@ -4214,7 +4236,11 @@ const deleteResult = async (studentId, examId) => {
                               {q.question_text}
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
                               {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>Maths</span>}
-                              {Number(q.marks) > 1 && <span className="px-pill" style={{ marginLeft: 10 }}>{q.marks} pts</span>}
+                              <InlinePoints
+                                value={Number(q.marks) || 1}
+                                busy={savingPointsFor === q.id}
+                                onSave={pts => saveQuestionPoints(q, pts)}
+                              />
                               {isMultiSelect(q) && <span className="px-pill ok" style={{ marginLeft: 10 }}>Multiple answers</span>}
                             </p>
                             {q.image_url && (
@@ -5107,5 +5133,62 @@ const deleteResult = async (studentId, examId) => {
       })()}
 
     </div>
+  );
+}
+/**
+ * The points an item is worth, editable where it is read.
+ *
+ * Shown for every item, not only the weighted ones. A pill that appears the
+ * moment a question stops being worth one point is a pill nobody knows they
+ * can click, and reweighting a paper means touching most of its items.
+ *
+ * Commits on blur and on Enter; Escape puts the old number back. The value is
+ * clamped on save rather than while typing, so clearing the box to type a new
+ * number does not snap it to 1 under the cursor.
+ */
+function InlinePoints({ value, onSave, busy }) {
+  const [editing, setEditing] = useState(false);
+  // The box shows the saved number whenever it is not being typed in, so a
+  // value changed elsewhere is picked up without an effect writing state on
+  // every render.
+  const [draft, setDraft] = useState(null);
+  const text = editing && draft !== null ? draft : String(value);
+  const setText = setDraft;
+
+  const commit = () => {
+    const n = Math.max(1, Math.min(100, Math.round(Number(text) || 1)));
+    setEditing(false);
+    setDraft(null);
+    if (n !== value) onSave(n);
+  };
+
+  return (
+    <span
+      title="Points for this question — click to change"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 10, verticalAlign: 'middle' }}
+    >
+      <input
+        type="number" min={1} max={100}
+        value={text}
+        disabled={busy}
+        onFocus={() => { setEditing(true); setDraft(String(value)); }}
+        onChange={e => setText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+          if (e.key === 'Escape') { setDraft(null); setEditing(false); e.currentTarget.blur(); }
+        }}
+        style={{
+          width: 52, padding: '2px 6px', textAlign: 'center',
+          fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700,
+          color: 'var(--ink-1)', background: 'var(--surface)',
+          border: `1px solid ${editing ? 'var(--navy)' : 'var(--line)'}`,
+          borderRadius: 'var(--r-sm)', opacity: busy ? 0.5 : 1,
+        }}
+      />
+      <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
+        {busy ? 'saving…' : `pt${value === 1 ? '' : 's'}`}
+      </span>
+    </span>
   );
 }

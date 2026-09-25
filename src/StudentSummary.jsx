@@ -242,8 +242,13 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                 }}>
                   {KIND_LABEL[a.kind] || 'Exam'}
                 </span>
-                <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.title}
+                {/* The colour is explicit because this whole card is a
+                    <button>, and the global button rule paints text white for
+                    the navy buttons everywhere else — so the paper's name was
+                    being drawn in white on a white card and the row looked
+                    like an unnamed EXAM. */}
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.title || 'Untitled'}
                 </span>
                 <span style={{ fontSize: 12, color: scheduled ? 'var(--ink-4)' : 'var(--ok)', fontWeight: 600, flexShrink: 0 }}>
                   {scheduled ? formatWindow(a) : 'Open now'}

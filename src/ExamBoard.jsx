@@ -1256,16 +1256,17 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 Essay
               </span>
             )}
-            {worked && (
-              <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
-                Show your working · {currentQ?.marks || 1} mark{(currentQ?.marks || 1) === 1 ? '' : 's'}
-              </span>
-            )}
-            {/* Only when it is worth more than one. Saying "1 point" on every
-                question of an unweighted paper is noise. */}
-            {!worked && Number(currentQ?.marks) > 1 && (
-              <span style={{ background: 'var(--gold-100)', color: 'var(--gold-700)', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
-                {currentQ.marks} points
+            {/* What the item is worth, and that it counts. "Show your working"
+                was left over from the step-by-step pad and is no longer what
+                the screen asks for — there is one answer field. */}
+            {(worked || Number(currentQ?.marks) > 1) && (
+              <span style={{
+                background: worked ? '#EBF4FF' : 'var(--gold-100)',
+                color: worked ? '#1565C0' : 'var(--gold-700)',
+                padding: '3px 10px', borderRadius: 'var(--r-full)',
+                fontSize: 11.5, fontWeight: 700, flexShrink: 0,
+              }}>
+                {currentQ.marks || 1} point{(currentQ.marks || 1) === 1 ? '' : 's'} · counts toward your score
               </span>
             )}
             {multiSelect && (

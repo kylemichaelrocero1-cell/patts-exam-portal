@@ -211,6 +211,34 @@ console.log('\n=== answer only, all or nothing ===');
     markAnswer(['y=\\int 2x\\,dx'], integral, gi).marks === 0,
     JSON.stringify(markAnswer(['y=\\int 2x\\,dx'], integral, gi)));
 }
+{
+  // dy/dx = f and y = int f dx are the SAME exercise to a student, and were
+  // not the same to the marker: only the integral form differentiated the
+  // answer back, so a differential equation answered with a different
+  // constant letter scored zero while the identical integral scored full.
+  const de = { variable: 'x', marks: 3, steps: [{ latex: 'y=x^2+C', marks: 3 }] };
+  const gd = { given: '\\frac{dy}{dx}=2x' };
+  check('a differential equation takes the key\'s own constant',
+    markAnswer(['y=x^2+C'], de, gd).marks === 3);
+  check('and another letter for it, exactly as the integral form does',
+    markAnswer(['y=x^2+K'], de, gd).marks === 3,
+    JSON.stringify(markAnswer(['y=x^2+K'], de, gd)));
+  check('and none at all', markAnswer(['y=x^2'], de, gd).marks === 3);
+  check('a wrong antiderivative is still refused',
+    markAnswer(['y=2x^2+C'], de, gd).marks === 0);
+  check('copying the equation back is not an answer',
+    markAnswer(['\\frac{dy}{dx}=2x'], de, gd).marks === 0,
+    JSON.stringify(markAnswer(['\\frac{dy}{dx}=2x'], de, gd)));
+  check('nor is failing to integrate at all',
+    markAnswer(['y=2x'], de, gd).marks === 0);
+  check('the two shapes agree, which is the whole point',
+    markAnswer(['y=x^2+K'], de, gd).marks
+      === markAnswer(['y=x^2+K'], de, { given: 'y=\\int 2x\\,dx' }).marks);
+}
+check('a plain question still marks on the key, not by differentiating',
+  markAnswer(["y'=2x"], { marks: 1, steps: [{ latex: "y'=2x", marks: 1 }] },
+             { given: 'y=x^2' }).marks === 1);
+
 check('an item with no key cannot be marked, and says so rather than scoring 0 silently',
   /no answer key/i.test(markAnswer(['x'], { marks: 2, steps: [] }).reason));
 

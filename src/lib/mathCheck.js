@@ -311,6 +311,40 @@ export function indefiniteIntegrand(box) {
   return body === undefined ? null : engine.box(body);
 }
 
+/**
+ * Is this line's left-hand side a derivative — y', dy/dx, (d/dx)y? Returns the
+ * thing being differentiated, or null.
+ */
+export function derivativeSubjectOf(box) {
+  const j = derivativeJson(box?.json);
+  return j === null ? null : engine.box(j);
+}
+
+/**
+ * What must be differentiated back, if this problem asks for an
+ * antiderivative. Two shapes mean the same thing to a student:
+ *
+ *   y = \int f dx       an integral
+ *   dy/dx = f           a differential equation
+ *
+ * Both are answered by finding F with F' = f, and both therefore have to be
+ * MARKED that way — by differentiating what the student wrote rather than
+ * comparing it to the key. Anything else and the constant of integration
+ * sinks it: the key says +C, the student writes +K, and a numeric comparison
+ * reads those as two unrelated unknowns that disagree. This function is what
+ * lets both shapes take the same route; treating only the integral that way
+ * was an inconsistency students would have met as "my answer is right and it
+ * says wrong".
+ */
+export function antiderivativeTarget(latex) {
+  const p = parseLine(latex);
+  if (!p.valid) return null;
+  const integrand = indefiniteIntegrand(p.rhs);
+  if (integrand) return integrand;
+  if (p.isEquation && derivativeSubjectOf(p.lhs)) return p.rhs;
+  return null;
+}
+
 /** d/dv of an expression, evaluated. Null when the engine cannot take it. */
 export function differentiate(box, variable = 'x') {
   try {

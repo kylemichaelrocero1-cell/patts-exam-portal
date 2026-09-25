@@ -32,8 +32,9 @@
 //     no student's browser ever computes the mark it is graded on.
 // That split is why the rubric column is revoked from anon in sql/024.
 
-import { checkWork, latexEquivalent, isFinalForm, parseLine,
-         indefiniteIntegrand, checkStep } from './mathCheck.js';
+import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent,
+         indefiniteIntegrand, antiderivativeTarget, derivativeSubjectOf,
+         differentiate } from './mathCheck.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -164,23 +165,33 @@ export function markAnswer(lines, rubric, opts = {}) {
              reason: 'This question has no answer key, so it cannot be marked automatically.' };
   }
 
-  // An INTEGRAL cannot be marked by comparing it to the key, because the key
-  // carries a constant of integration and the student's may be called anything
-  // or left off entirely — C, K and nothing at all are all correct, and plain
-  // equivalence reads C and K as two different unknowns that disagree. So when
-  // the problem is an indefinite integral it is marked the way checkStep does
-  // it: differentiate the student's answer and see whether that is what was
-  // inside the integral. The constant differentiates away and the question
-  // disappears with it.
+  // A problem that asks for an ANTIDERIVATIVE cannot be marked by comparing
+  // the answer to the key, because the key carries a constant of integration
+  // and the student's may be called anything or left off entirely — C, K and
+  // nothing at all are all correct, while a numeric comparison reads C and K
+  // as two unrelated unknowns that disagree. Such an answer is marked by
+  // differentiating it instead: the constant differentiates away and the
+  // question disappears with it.
+  //
+  // BOTH shapes count, and they must, because a student meets them as the same
+  // exercise: y = \int f dx, and dy/dx = f. Handling only the integral meant a
+  // differential equation answered y = x^2 + K scored zero while the identical
+  // integral answered y = x^2 + K scored full.
   const given = String(opts.given ?? rubric?.given ?? '').trim();
-  const fromIntegral = given && isIndefiniteIntegral(given);
+  const variable = opts.variable || rubric?.variable || 'x';
+  const target = given ? antiderivativeTarget(given) : null;
 
-  const isRight = line => (fromIntegral
-    // An answer that is STILL an integral has not been evaluated, whatever
-    // else is true of it, so it never counts however equivalent it looks.
-    ? !isIndefiniteIntegral(line)
-      && checkStep(given, line, { variable: opts.variable || rubric?.variable || 'x' }).status === 'ok'
-    : isFinalForm(line, key));
+  const isRight = line => {
+    if (!target) return isFinalForm(line, key);
+    const p = parseLine(line);
+    if (!p.valid) return false;
+    // An answer still holding the integral, or still written as a derivative,
+    // has not been evaluated — however equivalent to the question it is.
+    if (indefiniteIntegrand(p.rhs)) return false;
+    if (p.isEquation && derivativeSubjectOf(p.lhs)) return false;
+    const d = differentiate(p.rhs, variable);
+    return !!d && equivalent(d, target) === 'equal';
+  };
 
   const correct = work.some(isRight);
   return {
@@ -202,8 +213,4 @@ function equivalentToKey(work, key) {
   return work.some(line => latexEquivalent(line, key) === 'equal');
 }
 
-/** Does this line still hold an unevaluated indefinite integral? */
-function isIndefiniteIntegral(latex) {
-  const p = parseLine(latex);
-  return !!(p.valid && indefiniteIntegrand(p.rhs));
-}
+

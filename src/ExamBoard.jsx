@@ -535,6 +535,65 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     setReviewRows(data || []);
   };
 
+  /**
+   * Mark this student's worked answers on their own device, for the score
+   * shown the moment they hand the paper in.
+   *
+   * NOT THE MARK OF RECORD, and never written back. Postgres has no computer
+   * algebra, so it cannot mark these; the authoritative mark is still the
+   * instructor's, made in their dashboard from the full rubric and saved by
+   * record_work_marks() (sql/024), which no student session can call. This is
+   * feedback — the thing a practice paper exists for.
+   *
+   * The keys come from get_worked_keys() (sql/026), which hands over the final
+   * ANSWERS only, only for a paper whose instructor has turned answers on, and
+   * only once this student has submitted. A paper still being sat releases
+   * nothing, so this cannot be used to look answers up mid-exam.
+   */
+  const markWorkedLocally = useCallback(async (workPayload, picked, workTotal) => {
+    try {
+      const { data: keys, error } = await supabase.rpc('get_worked_keys', {
+        p_student_id: student?.id,
+        p_assessment_id: exam.id,
+        p_session_token: localStorage.getItem('local_session_token'),
+      });
+      // A refusal is entirely normal — it just means the instructor has not
+      // turned answers on for this paper. The score stays pending.
+      if (error || !Array.isArray(keys) || keys.length === 0) return;
+
+      const { ready } = await import('./lib/mathCheck.js');
+      await ready();
+      const { markAnswer } = await import('./lib/workedSolution.js');
+
+      let earned = 0;
+      const perItem = {};
+      for (const k of keys) {
+        const lines = workPayload[String(k.question_id)]?.lines || [];
+        const marks = Number(k.marks) || 1;
+        const r = markAnswer(lines, {
+          marks,
+          steps: [{ latex: k.answer, marks, label: 'Final answer' }],
+          variable: k.work_variable || 'x',
+        }, { given: k.work_given, variable: k.work_variable || 'x' });
+        earned += r.marks;
+        perItem[String(k.question_id)] = { correct: r.correct, marks: r.marks, of: marks };
+      }
+
+      setScoreDisplay({
+        score: picked.score + earned,
+        total: picked.total + workTotal,
+        workEarned: earned,
+        workTotal,
+        provisional: true,
+        perItem,
+      });
+    } catch (err) {
+      // The engine failed to load, or something else went wrong. The paper is
+      // submitted and safe either way; the score simply stays pending.
+      console.error('Could not work out a provisional score:', err);
+    }
+  }, [student, exam]);
+
   // --- SUBMIT HANDLER (declared before the auto-submit effect that depends on it) ---
   const executeSubmission = useCallback(async () => {
     if (isSubmittingRef.current || isSubmitting) return;
@@ -592,49 +651,55 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       Object.entries(submittedEssayAnswers).forEach(([qId, text]) => {
         if (text?.trim()) essayPayload[String(qId)] = { type: 'essay', text: text.trim() };
       });
+      // NOTE: essays still go through the direct patch below and are subject
+      // to the same silent loss described there. They are stored in
+      // live_sessions.essay_answers_json regardless, which is where the
+      // dashboard's repair path reads them from, so nothing is lost outright
+      // — but this wants the same treatment as worked answers.
 
-      // Worked solutions (sql/024) are not marked server-side either, and for
-      // a sharper reason: deciding that 5(1)x^{1-1} is 5 needs a computer
-      // algebra system, and Postgres has none. The LINES are stored here; the
-      // MARKS are computed later, in the instructor's browser, which holds the
-      // rubric legitimately. `marks: null` is how "not marked yet" is spelt,
-      // and it is deliberately not 0 — a student who has not been marked has
-      // not scored nothing.
+      // WORKING IS SAVED BY A FUNCTION, NOT BY PATCHING THE ROW.
+      //
+      // This used to do supabase.from('results').update({...}) straight from
+      // the browser. A student's session has no UPDATE policy on that table,
+      // so the statement matched zero rows — which is not an error — and
+      // PostgREST reported success. Ten real submissions scored 0/0 with
+      // every answer thrown away before anyone noticed, and essays had been
+      // disappearing the same way for far longer. save_worked_answers()
+      // (sql/026) proves the session and writes on the student's behalf,
+      // returns what it saved, and its failures are actual failures.
+      const workTotal = workMarksAvailable(questions);
+      const workPayload = {};
       Object.entries(submittedWork).forEach(([qId, value]) => {
         const lines = (Array.isArray(value?.lines) ? value.lines : [])
           .map(l => String(l ?? '').trim()).filter(Boolean);
-        if (lines.length > 0) {
-          essayPayload[String(qId)] = { type: 'worked', lines, marks: null };
-        }
+        if (lines.length > 0) workPayload[String(qId)] = { lines };
       });
 
-      // How many marks are waiting on an instructor. Written even when the
-      // student left every worked item blank, because it is a property of the
-      // PAPER, not of the answer — without it the summary screen cannot tell
-      // "no worked items" from "worked items nobody has marked yet", and a
-      // student would see a total that silently grew later.
-      const workTotal = workMarksAvailable(questions);
+      if (workTotal > 0) {
+        const { error: saveError } = await supabase.rpc('save_worked_answers', {
+          p_student_id: student?.id,
+          p_assessment_id: exam.id,
+          p_session_token: localStorage.getItem('local_session_token'),
+          p_work: workPayload,
+        });
+        // Loud, not silent: the answers are still in localStorage and in the
+        // live session, so a student who sees this has not lost their work.
+        if (saveError) console.error('Could not save worked answers:', saveError.message);
+      }
 
-      if (Object.keys(essayPayload).length > 0 || workTotal > 0) {
-        // submit_assessment() routes a graded sitting to `results` and a
-        // practice one to `review_attempts` (sql/002), so this has to follow
-        // it. Patching `results` unconditionally — which is what this did
-        // before worked items existed — silently matches no row on a
-        // retakeable paper, and the working would be thrown away between the
-        // student pressing Submit and the instructor opening the script.
-        const attempt = outcome?.attempt_no ?? 1;
-        const table = isPractice ? 'review_attempts' : 'results';
-        const filter = q => (isPractice
-          ? q.eq('student_id', student?.id).eq('assessment_id', exam.id).eq('attempt_no', attempt)
-          : q.eq('student_id', student?.id).eq('exam_id', exam.id));
-
-        const { data: existing } = await filter(
-          supabase.from(table).select('id, answers_json')).limit(1);
+      // Essays still go through a direct patch, which only lands on a
+      // non-practice paper. Their real home is live_sessions.essay_answers_json,
+      // which the dashboard reads, so nothing is lost outright — but this
+      // wants its own function the way worked answers now have one.
+      if (Object.keys(essayPayload).length > 0 && !isPractice) {
+        const { data: existing } = await supabase.from('results')
+          .select('id, answers_json')
+          .eq('student_id', student?.id).eq('exam_id', exam.id).limit(1);
         if (existing?.[0]) {
-          const patch = { answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } };
-          // work_marks is deliberately left NULL: nothing has been marked yet.
-          if (workTotal > 0) patch.work_total = workTotal;
-          await supabase.from(table).update(patch).eq('id', existing[0].id);
+          const { error: essayError } = await supabase.from('results')
+            .update({ answers_json: { ...(existing[0].answers_json || {}), ...essayPayload } })
+            .eq('id', existing[0].id);
+          if (essayError) console.error('Could not attach essay answers:', essayError.message);
         }
       }
 
@@ -651,9 +716,22 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // weighted pair is the score — and the two are equal on an unweighted
       // paper, so this reads the same as it always did there.
       const weighted = outcome?.points_total !== null && outcome?.points_total !== undefined;
-      setScoreDisplay(weighted
+      const picked = weighted
         ? { score: Number(outcome.points_earned) || 0, total: Number(outcome.points_total) || 0 }
-        : { score: correctCount, total: mcTotal || questions.length });
+        : { score: correctCount, total: mcTotal || questions.length };
+
+      // A paper of worked items has no picked items at all, so `picked` is 0
+      // out of 0 and showing it would tell a student who answered everything
+      // that they scored nothing. Their answers are marked here instead, from
+      // the keys the paper releases once it has been handed in (sql/026) —
+      // which only happens when the instructor has turned answers on. When
+      // they have not, the score is left as pending rather than invented.
+      if (workTotal > 0) {
+        setScoreDisplay({ ...picked, workPending: workTotal });
+        markWorkedLocally(workPayload, picked, workTotal);
+      } else {
+        setScoreDisplay(picked);
+      }
 
     } catch (err) {
       alert("There was an error saving your exam. Please contact your instructor.");
@@ -1009,7 +1087,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                   the mark — the student is about to see every question anyway.
                   On a real exam it stays hidden, as before. */}
               {canReviewAnswers && scoreDisplay && (() => {
-                const pct = scoreDisplay.total > 0
+                // A worked paper's score arrives a moment after submit, once
+                // the answers have been fetched and marked on this device. A
+                // percentage of a half-counted paper would be wrong, so while
+                // marks are still pending there is no percentage at all.
+                const pending = scoreDisplay.workPending > 0 && !scoreDisplay.provisional;
+                const pct = (!pending && scoreDisplay.total > 0)
                   ? Math.round((scoreDisplay.score / scoreDisplay.total) * 100) : null;
                 const tone = pct === null ? 'var(--ink-2)'
                   : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
@@ -1019,10 +1102,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                       Your score{attemptNo > 1 ? ` · attempt ${attemptNo}` : ''}
                     </div>
                     <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 40, color: tone, lineHeight: 1.1, marginTop: 6 }}>
-                      {scoreDisplay.score}<span style={{ color: 'var(--ink-4)', fontSize: 26 }}>/{scoreDisplay.total}</span>
+                      {pending ? '—' : scoreDisplay.score}
+                      <span style={{ color: 'var(--ink-4)', fontSize: 26 }}>
+                        /{pending ? scoreDisplay.workPending + scoreDisplay.total : scoreDisplay.total}
+                      </span>
                     </div>
                     {pct !== null && (
                       <div style={{ fontSize: 15, fontWeight: 700, color: tone, marginTop: 2 }}>{pct}%</div>
+                    )}
+                    {pending && (
+                      <div style={{ fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, marginTop: 4 }}>
+                        Working it out…
+                      </div>
+                    )}
+                    {scoreDisplay.provisional && (
+                      <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 6, lineHeight: 1.5 }}>
+                        Worked out on your device. Your instructor&rsquo;s marking is final.
+                      </div>
                     )}
                   </div>
                 );

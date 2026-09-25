@@ -11,6 +11,7 @@ import {
 } from './lib/answers';
 import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
+import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -874,9 +875,14 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         console.error("Error loading questions:", error);
         // The gate's refusals are written to be read by a student — show the
         // one that applies rather than a generic failure they cannot act on.
-        alert(error?.message && /password|section|not open|session|exists/i.test(error.message)
-          ? `⚠️ ${error.message}`
-          : "⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
+        alert(isSessionExpiredError(error)
+          // Worth spelling out: the student has done nothing wrong and the
+          // server is fine. There is one session_token per student, so logging
+          // in anywhere else invalidated this device.
+          ? `⚠️ ${gateErrorMessage(error)}`
+          : error?.message && /password|section|not open|exists/i.test(error.message)
+            ? `⚠️ ${error.message}`
+            : "⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
 
         // Turned away at the password gate, holding a tab that thinks it is
         // already through. That happens the moment an instructor changes a

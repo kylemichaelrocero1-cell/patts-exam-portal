@@ -133,9 +133,24 @@ export default function Login({ onLogin }) {
       }
 
       const student = data[0];
+
+      // The token is the student's proof of identity at every gate
+      // (student_from_token, sql/020), and it only works if BOTH halves agree:
+      // the copy in this browser and the copy on their row. Writing
+      // localStorage first and never checking the update meant a failed write
+      // left the two out of step — the student looked logged in, then hit
+      // "your session has expired" at the exam password and had no way to
+      // understand why. So the row is written FIRST, and a failure stops the
+      // login instead of producing a session that cannot open anything.
       const newToken = crypto.randomUUID();
+      const { error: tokenError } = await supabase.from('users')
+        .update({ session_token: newToken }).eq('id', student.id);
+      if (tokenError) {
+        console.error('Could not start a session for this student:', tokenError);
+        setErrorMsg('Could not start your session. Please try again in a moment.');
+        return;
+      }
       localStorage.setItem('local_session_token', newToken);
-      await supabase.from('users').update({ session_token: newToken }).eq('id', student.id);
       clearRateLimit();
       onLogin(student);
     } catch (err) {

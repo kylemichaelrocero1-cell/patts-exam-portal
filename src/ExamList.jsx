@@ -4,6 +4,7 @@ import {
   selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
   fetchAssessmentById, isMissingFunctionError,
 } from './lib/assessments';
+import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors';
 import { isPaperFinished } from './lib/retakes';
 import {
   passwordKey as gatePasswordKey,
@@ -24,6 +25,8 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   const [pendingExam, setPendingExam] = useState(null);
   const [enteredPassword, setEnteredPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  // Shows the "Log in again" button, which is the only thing that fixes it.
+  const [passwordExpired, setPasswordExpired] = useState(false);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   // Pre-sitting briefing: { exam, setChoice }. Shown once per paper per browser
@@ -311,6 +314,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       // student (sql/020), which is what get_exam_questions() then requires
       // before it will hand over the paper. Without that record the gate is
       // only a screen: the questions were readable straight from the table.
+      setPasswordExpired(false);
       let isValid;
       const unlock = await supabase.rpc('unlock_assessment', {
         p_assessment_id: pendingExam.id,
@@ -345,7 +349,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       }
     } catch (err) {
       console.error('Password verification failed:', err);
-      setPasswordError('Could not verify password. Check your connection and try again.');
+      // The commonest failure here is NOT a bad connection: it is a session
+      // token that no longer matches, because the student logged in somewhere
+      // else and there is only one token column per student (sql/020). Telling
+      // them to check their internet sends them round a loop they cannot exit
+      // — they retype a password that was right all along. So the cause is
+      // named, and a way out is offered beside it.
+      setPasswordError(gateErrorMessage(err));
+      setPasswordExpired(isSessionExpiredError(err));
     } finally {
       setIsVerifyingPassword(false);
     }
@@ -398,7 +409,18 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                 style={{ textAlign: 'center', fontSize: '20px', letterSpacing: '4px', padding: '14px', borderColor: passwordError ? 'var(--danger)' : 'var(--border)' }}
               />
               {passwordError && (
-                <p style={{ color: 'var(--danger)', fontWeight: 600, margin: '10px 0 0', fontSize: '13px', textAlign: 'center' }}>{passwordError}</p>
+                <p style={{ color: 'var(--danger)', fontWeight: 600, margin: '10px 0 0', fontSize: '13px', textAlign: 'center', lineHeight: 1.5 }}>{passwordError}</p>
+              )}
+              {/* Retyping the password cannot fix a stale token, so the only
+                  useful button is the one that logs them back in. */}
+              {passwordExpired && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  style={{ width: '100%', marginTop: 12, background: 'var(--navy)', color: 'white', border: 'none', fontWeight: 700 }}
+                >
+                  Log in again
+                </button>
               )}
               <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
                 <button type="button" onClick={() => setPendingExam(null)} disabled={isVerifyingPassword}

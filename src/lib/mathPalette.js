@@ -80,6 +80,22 @@ function readFrac(src, i) {
   return { num, den, end: j };
 }
 
+/**
+ * Is this a single indivisible thing, so a slash beside it cannot mis-bind?
+ * 2, x, x^2, \sqrt{x+1} and (w+1)^2 are; 2\sqrt{x+1} is not, because
+ * a/2\sqrt{x+1} reads as (a/2)·\sqrt{x+1} and means something else.
+ */
+function isAtom(t) {
+  const s = String(t).trim();
+  // A base is ONE variable or ONE number. Not 3y — that is a product, and
+  // a/3y^2 binds as (a/3)·y^2, so it has to be bracketed like any other.
+  const base = '(?:[A-Za-z]|[0-9]+(?:\\.[0-9]+)?)';
+  const power = '(?:\\^\\{?-?[A-Za-z0-9.]+\\}?)?';
+  return new RegExp(`^${base}${power}$`).test(s)                    // x, 12, x^2, x^{-1}
+    || /^\\[a-zA-Z]+\{[^{}]*\}$/.test(s)                           // \sqrt{x+1}
+    || /^\([^()]*\)(\^\{?-?[A-Za-z0-9.]+\}?)?$/.test(s);          // (w+1), (w+1)^2
+}
+
 // Does this need brackets round it before a slash goes next to it? A sum or a
 // difference does; 2x does not. Only the TOP level counts — the minus inside
 // x^{-1} binds tighter than any slash could.
@@ -111,7 +127,13 @@ export function fracToSlash(latex) {
     const f = readFrac(src, i);
     if (f) {
       const num = fracToSlash(f.num), den = fracToSlash(f.den);
-      out += `${needsBrackets(num) ? `(${num})` : num}/${needsBrackets(den) || /[*/]/.test(den) ? `(${den})` : den}`;
+      // The DENOMINATOR is bracketed unless it is a single atom. 2\sqrt{x+1}
+      // looks harmless and is not: a/2\sqrt{x+1} binds as (a/2)·\sqrt{x+1},
+      // so writing it bare would generate an "accepted answer" that says
+      // something different from the answer.
+      const n2 = needsBrackets(num) ? `(${num})` : num;
+      const d2 = isAtom(den) ? den : `(${den})`;
+      out += `${n2}/${d2}`;
       i = f.end;
       changed = true;
     } else { out += src[i++]; }

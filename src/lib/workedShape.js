@@ -57,8 +57,22 @@ export function hasWork(value) {
  * of a partly-marked paper is a number nobody should act on.
  */
 export function combinedScore(row) {
-  const mcScore = Number(row?.score) || 0;
-  const mcTotal = Number(row?.total_items) || 0;
+  // An item may be worth more than one point (sql/025), so the picked-item
+  // half of the score has two possible sources and they mean different things:
+  //
+  //   points_earned / points_total — the WEIGHTED sum, written from 025 on
+  //   score / total_items          — a COUNT of items, on every row ever
+  //
+  // Points win when they are there. They are absent on every row written
+  // before 025, and falling back to the count is exactly right for those:
+  // every item was worth one then, so the two numbers were the same, and a
+  // paper from last term keeps reading as the 40/50 it always was instead of
+  // being silently restated. NOT the same as points_total being zero, which is
+  // a real paper with no picked items on it at all.
+  const weighted = row?.points_total !== null && row?.points_total !== undefined
+    && row?.points_total !== '';
+  const mcScore = Number(weighted ? row.points_earned : row?.score) || 0;
+  const mcTotal = Number(weighted ? row.points_total : row?.total_items) || 0;
   const workTotal = Number(row?.work_total) || 0;
   // null and undefined mean "not marked"; 0 means "marked, earned nothing".
   const rawMarks = row?.work_marks;

@@ -1,19 +1,22 @@
-// The Download Template button hands instructors a file that is also the
-// documentation — each row demonstrates one shape. So the template has to
+// The Download Template buttons hand instructors a file that is also the
+// documentation — each row demonstrates one shape. So the templates have to
 // actually import, and keep importing as the parser changes.
 //
-// This reads the template straight out of AdminDashboard.jsx and puts it
-// through the same rule parseQuestionCSV applies, so the two cannot drift.
-// It already earned its keep: the first version shipped a "delete these rows"
-// line that was itself an invalid question and would have shown up as an
-// import error the first time anyone used it.
+// This reads both templates straight out of AdminDashboard.jsx and puts them
+// through the REAL parser. It used to reproduce the parser's rule here instead,
+// which was the drift it was written to prevent; now there is one
+// implementation and this only supplies the input.
+//
+// It has already earned its keep twice: the first version shipped a "delete
+// these rows" line that was itself an invalid question, and the second lost
+// two helper functions when the parser was extracted.
 //
 //   npm run test:csv-template
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { indexForLetter, keyIsValid } from '../choices.js';
+import { parseQuestionCSV, readHeader, splitRow } from '../questionCsv.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 let pass = 0, fail = 0;
@@ -22,103 +25,86 @@ const check = (name, ok, detail = '') => {
   else { fail++; console.log(`  FAIL  ${name}${detail ? ' — ' + detail : ''}`); }
 };
 
-// ── the template, as the button writes it ───────────────────────────────
 const src = fs.readFileSync(path.join(REPO, 'src/AdminDashboard.jsx'), 'utf8');
-const start = src.indexOf('const downloadCSVTemplate');
-check('the template is still where this test looks for it', start !== -1);
-const block = src.slice(start, src.indexOf("].join('\\n');", start));
-const lines = [...block.matchAll(/^ {6}'(.*)',$/gm)].map(m => m[1].replace(/\\'/g, "'"));
-check('it has a header and at least five worked examples', lines.length >= 6, `${lines.length} rows`);
 
-// ── parseQuestionCSV's splitter and rule, reproduced ────────────────────
-const split = (row) => {
-  const cells = []; let cell = '', inQ = false;
-  for (const ch of row) {
-    if (ch === '"') inQ = !inQ;
-    else if (ch === ',' && !inQ) { cells.push(cell.trim()); cell = ''; }
-    else cell += ch;
-  }
-  cells.push(cell.trim());
-  return cells;
-};
-const parseRow = (cols) => {
-  const qText = cols[0]?.trim();
-  if (!qText) return { skip: true };
-  if (!(cols[1]?.trim())) return { essay: true, qText };
-  const t = [...cols];
-  while (t.length && !(t[t.length - 1] ?? '').trim()) t.pop();
-  const raw = (t[t.length - 1]?.trim() || '').toUpperCase();
-  const list = t.slice(1, t.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
-  // Several answers are separated (sql/018); a single letter stays single.
-  const parts = raw.split(/[;|+/\s,]+/).filter(Boolean);
-  const keys = parts.map(part => (/^\d+$/.test(part) ? Number(part) : indexForLetter(part)));
-  return { qText, list, keys, key: keys[0], multi: keys.length > 1, raw };
-};
-
-const rows = lines.map(split);
-
-console.log('=== the header ===');
-check('the first column is question_text',
-  rows[0][0].toLowerCase().replace(/\s/g, '_') === 'question_text', rows[0][0]);
-check('the last column is correct_answer',
-  rows[0][rows[0].length - 1].toLowerCase().replace(/\s/g, '_') === 'correct_answer',
-  rows[0][rows[0].length - 1]);
-check('it offers at least seven choice columns, so "add more" is visibly true',
-  rows[0].length - 2 >= 7, `${rows[0].length - 2} choice columns`);
-
-console.log('\n=== every example row imports as labelled ===');
-const parsed = rows.slice(1).map(parseRow).filter(r => !r.skip);
-const rowIsValid = (r) => r.list.length >= 2
-  && r.keys.length > 0
-  && r.keys.every(k => k !== null && k !== undefined && !Number.isNaN(k)
-                       && keyIsValid(k, r.list.length))
-  && new Set(r.keys).size === r.keys.length;
-const widths = new Set();
-for (const r of parsed) {
-  const label = r.qText.split('—')[0].trim();
-  if (r.essay) { check(`${label}: parses as an essay`, true); continue; }
-  const ok = rowIsValid(r);
-  widths.add(r.list.length);
-  check(`${label}: ${r.list.length} choices, answer ${r.raw} -> "${r.keys.map(k => r.list[k]).join('", "')}"`, ok,
-    ok ? '' : `list=${r.list.length} keys=${r.keys}`);
+/** The CSV a download button writes, recovered from its source. */
+function templateFrom(fnName) {
+  const start = src.indexOf(`const ${fnName} = `);
+  if (start === -1) return null;
+  const block = src.slice(start, src.indexOf("].join('\\n');", start));
+  return [...block.matchAll(/^ {6}'(.*)',$/gm)]
+    .map(m => m[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\'))
+    .join('\n');
 }
 
-console.log('\n=== it demonstrates the point ===');
-check('there is an essay example', parsed.some(r => r.essay));
-check('there is a four-choice example', widths.has(4));
-check('there is an example with MORE than five choices — the whole point of 016',
-  [...widths].some(w => w > 5), `widths: ${[...widths].sort().join(', ')}`);
-check('there is an example with fewer than four, so the minimum is clear',
-  [...widths].some(w => w < 4), `widths: ${[...widths].sort().join(', ')}`);
-check('at least one example keys the answer by number rather than a letter',
-  parsed.some(r => !r.essay && /^\d+$/.test(r.raw)));
-check('at least one example keys an answer past D, which four columns could not hold',
-  parsed.some(r => !r.essay && r.keys.some(k => k > 3)));
-check('there is a multiple-answer example — a single key could not express it',
-  parsed.some(r => !r.essay && r.multi),
-  parsed.filter(r => !r.essay).map(r => r.raw).join(' | '));
-
-console.log('\n=== the rows are questions, not instructions ===');
+console.log('=== the plain template (positional) ===');
+const plain = templateFrom('downloadCSVTemplate');
+check('it is still where this test looks for it', plain !== null);
 {
-  // Anything in question_text is a question. A row that explained the format
-  // would either be imported as one or be read as part of the paper, so the
-  // explaining belongs on screen next to the button, not in the file.
-  const shouty = parsed.filter(r => /^[A-Z][A-Z ]{3,}\b/.test(r.qText));
-  check('no row shouts a format label in its question text', shouty.length === 0,
-    shouty.map(r => r.qText.slice(0, 40)).join(' | '));
-  const preachy = parsed.filter(r =>
-    /\b(column|leave|delete|template|instead of a letter|as many)\b/i.test(r.qText));
-  check('no row talks about the CSV format at all', preachy.length === 0,
-    preachy.map(r => r.qText.slice(0, 40)).join(' | '));
-  check('every row reads as a real question or task',
-    parsed.every(r => /[?.]$/.test(r.qText.trim())),
-    parsed.filter(r => !/[?.]$/.test(r.qText.trim())).map(r => r.qText.slice(0, 30)).join(' | '));
+  const r = parseQuestionCSV(plain);
+  check('it imports with no errors at all', r.errors.length === 0, JSON.stringify(r.errors));
+  check('and yields six questions', r.questions.length === 6, `${r.questions.length}`);
+
+  const header = splitRow(plain.split('\n')[0]);
+  check('the first column is question_text',
+    header[0].toLowerCase() === 'question_text', header[0]);
+  check('the last column is correct_answer',
+    header[header.length - 1].toLowerCase() === 'correct_answer', header[header.length - 1]);
+  check('it offers at least seven choice columns, so "add more" is visibly true',
+    header.length - 2 >= 7, `${header.length - 2} choice columns`);
+  check('it stays POSITIONAL — naming question_text must not switch modes',
+    readHeader(header) === null);
+
+  const types = r.questions.map(q => q.question_type);
+  check('it demonstrates a single-answer item', types.includes('multiple_choice'));
+  check('a multiple-answer item', types.includes('multi_select'));
+  check('and an essay', types.includes('essay'));
+  check('every item in it is worth one point, as a positional file always is',
+    r.questions.every(q => q.marks === 1), JSON.stringify(r.questions.map(q => q.marks)));
+
+  const widths = new Set(r.questions.filter(q => q.choices.length).map(q => q.choices.length));
+  check('it shows several different choice counts', widths.size >= 3, [...widths].join(', '));
+  check('the multiple-answer row really names three answers',
+    r.questions.some(q => q.correct_answers?.length === 3),
+    JSON.stringify(r.questions.map(q => q.correct_answers)));
+  check('no row explains the format — a row of prose would import as a question',
+    r.questions.every(q => !/^\s*(delete|remove|note|example|instruction)/i.test(q.question_text)),
+    JSON.stringify(r.questions.map(q => q.question_text.slice(0, 30))));
 }
 
-console.log('\n=== nothing in the file would show up as an import error ===');
-const broken = parsed.filter(r => !r.essay && !rowIsValid(r));
-check('no row is an invalid question', broken.length === 0,
-  broken.map(r => r.qText.slice(0, 40)).join(' | '));
+console.log('\n=== the weighted template (named) ===');
+const weighted = templateFrom('downloadWeightedCSVTemplate');
+check('it exists', weighted !== null);
+{
+  const r = parseQuestionCSV(weighted);
+  check('it imports with no errors at all', r.errors.length === 0, JSON.stringify(r.errors));
+  check('and yields five questions', r.questions.length === 5, `${r.questions.length}`);
+  check('it is parsed in NAMED mode', readHeader(splitRow(weighted.split('\n')[0])) !== null);
 
-console.log(`\n${fail ? 'FAILED' : 'OK'} — ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+  const types = r.questions.map(q => q.question_type);
+  check('it demonstrates all four types',
+    ['multiple_choice', 'multi_select', 'worked_solution', 'essay'].every(t => types.includes(t)),
+    types.join(', '));
+  check('not every item is worth one point — that is the whole reason it exists',
+    r.questions.some(q => q.marks > 1), JSON.stringify(r.questions.map(q => q.marks)));
+  check('no item is worth less than one', r.questions.every(q => q.marks >= 1));
+
+  const maths = r.questions.filter(q => q.question_type === 'worked_solution');
+  check('it shows two maths questions — a derivative and an integral', maths.length === 2);
+  check('each carries the problem it starts from',
+    maths.every(q => q.work_given && q.work_given.length > 0),
+    JSON.stringify(maths.map(q => q.work_given)));
+  check('each carries a one-step rubric holding the simplified answer',
+    maths.every(q => q.work_rubric?.steps?.length === 1 && q.work_rubric.steps[0].latex),
+    JSON.stringify(maths.map(q => q.work_rubric)));
+  check('and each is all-or-nothing, as a CSV maths item is',
+    maths.every(q => q.work_rubric.penaltyPerBrokenStep === q.marks));
+  check('the integral example survived the escaping — it still has a backslash',
+    maths.some(q => q.work_given.includes('\\int')),
+    JSON.stringify(maths.map(q => q.work_given)));
+  check('no row explains the format here either',
+    r.questions.every(q => !/^\s*(delete|remove|note|example|instruction)/i.test(q.question_text)));
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);

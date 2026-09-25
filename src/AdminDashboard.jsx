@@ -89,8 +89,10 @@ function QuestionCsvFormat({ dense = false }) {
           <li>Naming <code style={mono}>points</code>, <code style={mono}>type</code> or <code style={mono}>given</code> in the header row is what switches the file to named columns. Order then stops mattering, and anything you do not name counts as a choice.</li>
           <li><code style={mono}>points</code> — a whole number. Leave it blank for 1. An item worth 5 counts five times what a 1-point item does.</li>
           <li><code style={mono}>type</code> — <code style={mono}>mc</code>, <code style={mono}>multi</code>, <code style={mono}>essay</code> or <code style={mono}>math</code>. Leave it out and it is worked out from the row.</li>
-          <li><strong>For a maths question:</strong> <code style={mono}>given</code> is the problem the student starts from, and <code style={mono}>answer</code> is the simplified result. The student types their working line by line and each line is checked against the one above it.</li>
-          <li>A maths question imported this way is <strong>all or nothing</strong> — full points for the right answer with sound working, none otherwise. For part marks on individual steps, add the question here in the editor instead.</li>
+          <li><strong>For a maths question:</strong> <code style={mono}>given</code> is the problem the student starts from, and <code style={mono}>answer</code> is the simplified result. The student types one answer with the maths keyboard, and it is marked in the database the moment they submit.</li>
+          <li><code style={mono}>accept</code> — other ways you will take the same answer, separated by semicolons: <code style={mono}>y'=x^{'{-1}'};1/x</code>. Write <code style={mono}>\;</code> if you need a LaTeX thin space; the split ignores it.</li>
+          <li><strong>You rarely need <code style={mono}>accept</code>.</strong> Spacing, <code style={mono}>\left</code>, <code style={mono}>\cdot</code>, braces, a <code style={mono}>y'=</code> or <code style={mono}>dy/dx=</code> on the front, and numbers like <code style={mono}>2</code> against <code style={mono}>2.0</code> or <code style={mono}>0.5</code> against <code style={mono}>\frac{'{1}{2}'}</code> all match on their own. Use it only where telling two answers apart takes real algebra — <code style={mono}>x^{'{-1}'}</code> against <code style={mono}>\frac{'{1}{x}'}</code>.</li>
+          <li>A maths question imported this way is <strong>all or nothing</strong>: the full points for an accepted answer, none otherwise. For part marks on individual steps, add the question here in the editor instead.</li>
         </ul>
       </div>
       <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '8px 10px', overflowX: 'auto' }}>
@@ -1255,18 +1257,20 @@ const [targetSection, setTargetSection] = useState('');
     URL.revokeObjectURL(url);
   };
 
-  // The weighted template: a named header, so points and a maths question have
-  // somewhere to live. Offered alongside the plain one rather than replacing
-  // it, because a file with no header is still the shortest way to type fifty
-  // multiple-choice items.
+  // The weighted template: a named header, so points, a maths question and its
+  // accepted answers have somewhere to live. Offered alongside the plain one
+  // rather than replacing it, because a file with no header is still the
+  // shortest way to type fifty multiple-choice items.
   const downloadWeightedCSVTemplate = () => {
     const csv = [
-      'question_text,type,points,given,answer,choice_a,choice_b,choice_c,choice_d',
-      '"Which of these is a primary flight control?",mc,2,,D,"Flap","Slat","Spoiler","Aileron"',
-      '"Which of these are control surfaces?",multi,4,,A;B,"Aileron","Elevator","Flap","Slat"',
-      '"Differentiate with respect to x, showing your working.",math,3,y=5x,y\'=5,,,,',
-      '"Evaluate the integral, showing your working.",math,5,"y=\\int 2x\\,dx",y=x^2+C,,,,',
-      '"Explain Bernoulli\'s principle in your own words.",essay,10,,,,,,',
+      'question_text,type,points,given,answer,accept,choice_a,choice_b,choice_c,choice_d',
+      '"Which of these is a primary flight control?",mc,2,,D,,"Flap","Slat","Spoiler","Aileron"',
+      '"Which of these are control surfaces?",multi,4,,A;B,,"Aileron","Elevator","Flap","Slat"',
+      '"Evaluate the limit.",math,1,"\\lim_{x\\to 2}(x+3)",5,,,,,',
+      '"Differentiate with respect to x.",math,2,y=5x,y\'=5,,,,,',
+      '"Differentiate with respect to x.",math,3,"y=\\ln(x)","y\'=\\frac{1}{x}","y\'=x^{-1}",,,,',
+      '"Evaluate the integral.",math,5,"y=\\int 2x\\,dx",y=x^2+C,"y=x^2+K;y=x^2",,,,',
+      '"Explain Bernoulli\'s principle in your own words.",essay,10,,,,,,,',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);

@@ -78,7 +78,7 @@ check('it exists', weighted !== null);
 {
   const r = parseQuestionCSV(weighted);
   check('it imports with no errors at all', r.errors.length === 0, JSON.stringify(r.errors));
-  check('and yields five questions', r.questions.length === 5, `${r.questions.length}`);
+  check('and yields seven questions', r.questions.length === 7, `${r.questions.length}`);
   check('it is parsed in NAMED mode', readHeader(splitRow(weighted.split('\n')[0])) !== null);
 
   const types = r.questions.map(q => q.question_type);
@@ -90,7 +90,7 @@ check('it exists', weighted !== null);
   check('no item is worth less than one', r.questions.every(q => q.marks >= 1));
 
   const maths = r.questions.filter(q => q.question_type === 'worked_solution');
-  check('it shows two maths questions — a derivative and an integral', maths.length === 2);
+  check('it shows four maths questions — a limit, two derivatives and an integral', maths.length === 4);
   check('each carries the problem it starts from',
     maths.every(q => q.work_given && q.work_given.length > 0),
     JSON.stringify(maths.map(q => q.work_given)));
@@ -102,6 +102,19 @@ check('it exists', weighted !== null);
   check('the integral example survived the escaping — it still has a backslash',
     maths.some(q => q.work_given.includes('\\int')),
     JSON.stringify(maths.map(q => q.work_given)));
+  check('a limit example is shown too',
+    maths.some(q => q.work_given.includes('\\lim')),
+    JSON.stringify(maths.map(q => q.work_given)));
+  check('every maths item carries an accept list, even an empty one',
+    maths.every(q => Array.isArray(q.work_rubric.accept)));
+  check('and at least one DEMONSTRATES accept, or nobody learns the column exists',
+    maths.some(q => q.work_rubric.accept.length > 0),
+    JSON.stringify(maths.map(q => q.work_rubric.accept)));
+  check('the semicolon-separated example really yields two forms',
+    maths.some(q => q.work_rubric.accept.length === 2),
+    JSON.stringify(maths.map(q => q.work_rubric.accept)));
+  check('no non-maths row carries an accept value — that is an import error',
+    r.errors.length === 0);
   check('no row explains the format here either',
     r.questions.every(q => !/^\s*(delete|remove|note|example|instruction)/i.test(q.question_text)));
 }

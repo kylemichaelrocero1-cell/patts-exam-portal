@@ -11,7 +11,7 @@
 //
 //   npm run test:question-csv
 
-import { parseQuestionCSV, splitRow, readHeader } from '../questionCsv.js';
+import { parseQuestionCSV, splitRow, readHeader, splitAccept } from '../questionCsv.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -127,6 +127,40 @@ check('a maths row with no answer is an error — there would be nothing to mark
   /needs an answer/.test(P('question_text,type,given,answer\nQ,math,y=5x,').errors[0] || ''));
 check('a LaTeX answer with a comma survives if quoted',
   P('question_text,type,given,answer\nQ,math,y=x^2,"\\frac{1}{2},"').questions.length === 1);
+
+console.log('\n=== NAMED — other answers the item will take ===');
+check('accept is one of the headers that switches to named mode',
+  readHeader(['question_text', 'answer', 'accept']) !== null);
+{
+  const r = P('question_text,type,points,given,answer,accept\n'
+            + 'Differentiate,math,3,y=\\ln(x),y\'=\\frac{1}{x},"y\'=x^{-1};1/x"');
+  const q = r.questions[0];
+  check('the accepted forms are stored on the rubric', r.errors.length === 0
+    && q.work_rubric.accept.length === 2
+    && q.work_rubric.accept[0] === "y'=x^{-1}", JSON.stringify(r));
+  check('and the answer itself is not duplicated into the list',
+    !q.work_rubric.accept.includes(q.work_rubric.steps[0].latex));
+}
+check('an empty accept column is simply no extra forms',
+  P('question_text,type,given,answer,accept\nQ,math,y=5x,y\'=5,').questions[0].work_rubric.accept.length === 0);
+check('the answer repeated in accept is dropped, not stored twice',
+  P('question_text,type,given,answer,accept\nQ,math,y=5x,y\'=5,y\'=5').questions[0].work_rubric.accept.length === 0);
+
+console.log('\n=== splitting the accept list ===');
+check('semicolons separate', eq(splitAccept('a;b;c'), ['a', 'b', 'c']));
+check('spaces round them are trimmed', eq(splitAccept(' a ; b '), ['a', 'b']));
+check('empty entries are dropped', eq(splitAccept('a;;b;'), ['a', 'b']));
+check('a LaTeX thin space is NOT a separator — \\; would otherwise cut an answer in half',
+  eq(splitAccept('x\\;+1;y'), ['x\\;+1', 'y']), JSON.stringify(splitAccept('x\\;+1;y')));
+check('absolute values survive, which is why the separator is not a vertical bar',
+  eq(splitAccept('\\ln|x|+C;\\ln(|x|)+C'), ['\\ln|x|+C', '\\ln(|x|)+C']));
+check('nothing is no forms', eq(splitAccept(''), []) && eq(splitAccept(null), []));
+
+console.log('\n=== accept on a row that cannot use it ===');
+check('a multiple-choice row with an accept value is an error, not silently ignored',
+  /only applies to a maths question/.test(
+    P('question_text,points,a,b,answer,accept\nQ,1,x,y,A,something').errors[0] || ''),
+  JSON.stringify(P('question_text,points,a,b,answer,accept\nQ,1,x,y,A,something').errors));
 
 console.log('\n=== NAMED — inferring the type when it is not stated ===');
 check('choices and a letter mean multiple choice',

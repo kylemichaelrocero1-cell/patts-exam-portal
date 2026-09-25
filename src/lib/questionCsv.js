@@ -62,12 +62,14 @@ const FIELD_ALIASES = {
   given: 'given', problem: 'given', expression: 'given',
   answer: 'answer', correct_answer: 'answer', correct: 'answer', key: 'answer',
   variable: 'variable', with_respect_to: 'variable', wrt: 'variable',
+  accept: 'accept', also_accept: 'accept', alternatives: 'accept',
+  accepted: 'accept', variations: 'accept',
 };
 
 // The presence of any of these is what switches a file into named mode. Not
 // `question_text` or `answer` on their own: files today already head their
 // first column "question_text" and must keep parsing positionally.
-const NAMED_MODE_TRIGGERS = new Set(['type', 'points', 'given', 'variable']);
+const NAMED_MODE_TRIGGERS = new Set(['type', 'points', 'given', 'variable', 'accept']);
 
 const TYPE_ALIASES = {
   mc: 'multiple_choice', multiple_choice: 'multiple_choice', choice: 'multiple_choice',
@@ -144,13 +146,29 @@ function readPickedKey(raw, choices, rowNo, errors) {
   return set;
 }
 
+/**
+ * Other answers this item will take.
+ *
+ * Split on a semicolon that is NOT preceded by a backslash, because `\;` is a
+ * LaTeX spacing command and splitting on it would cut an answer in half. A
+ * vertical bar would have been the obvious separator and is worse: |x| is an
+ * absolute value and appears in half the answers in a calculus paper.
+ */
+export function splitAccept(cell) {
+  return String(cell ?? '')
+    .split(/(?<!\\);/)
+    .map(v => v.trim())
+    .filter(Boolean);
+}
+
 /** A worked item, all or nothing on its final answer. Null on error. */
-function buildWorked({ qText, points, given, answer, variable }, rowNo, errors) {
+function buildWorked({ qText, points, given, answer, variable, accept }, rowNo, errors) {
   const final = String(answer ?? '').trim();
   if (!final) {
     errors.push(`Row ${rowNo}: a maths question needs an answer — the simplified result, e.g. 5 or x^2+C`);
     return null;
   }
+  const also = splitAccept(accept).filter(v => v !== final);
   return {
     question_text: qText,
     question_type: 'worked_solution',
@@ -161,8 +179,12 @@ function buildWorked({ qText, points, given, answer, variable }, rowNo, errors) 
     work_variable: String(variable ?? '').trim() || 'x',
     work_rubric: {
       steps: [{ latex: final, marks: points, label: 'Final answer' }],
-      // The whole value of the item, so one step that does not follow takes
-      // all of it. That is what "all or nothing" means here.
+      // Other spellings this item will take (sql/027). The database already
+      // matches the cosmetic ones — spacing, \cdot, braces, a y'= on the
+      // front, and numbers compared as numbers — so this is only ever needed
+      // for the ones that take real algebra to see as equal, like x^{-1}
+      // against \frac{1}{x}.
+      accept: also,
       penaltyPerBrokenStep: points,
     },
   };
@@ -214,13 +236,20 @@ export function parseQuestionCSV(text) {
         return;
       }
       if (type === 'worked_solution') {
-        const item = buildWorked({ qText, points, given, answer, variable: at(f.variable) }, rowNo, errors);
+        const item = buildWorked({
+          qText, points, given, answer,
+          variable: at(f.variable), accept: at(f.accept),
+        }, rowNo, errors);
         if (item) questions.push(item);
         return;
       }
 
       if (choices.length < 2) {
         errors.push(`Row ${rowNo}: needs at least two choices, or a type of essay or math`);
+        return;
+      }
+      if (at(f.accept)) {
+        errors.push(`Row ${rowNo}: "accept" only applies to a maths question — a multiple-choice answer is a letter, so there is nothing to spell another way`);
         return;
       }
       const set = readPickedKey(answer, choices, rowNo, errors);

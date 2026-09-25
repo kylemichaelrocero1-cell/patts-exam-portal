@@ -4,13 +4,16 @@ import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
 import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
 import { makeRosterIndex, resolveStudent } from './lib/studentIdentity';
-import { choicesOf, letterFor, choicesPatch, keyIsValid, indexForLetter } from './lib/choices';
+import { choicesOf, letterFor, choicesPatch, keyIsValid } from './lib/choices';
 import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
          isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore } from './lib/workedShape';
+// Extracted from this file so it can be tested against the format's own
+// regression cases; the behaviour of a positional file is unchanged.
+import { parseQuestionCSV } from './lib/questionCsv';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -75,6 +78,21 @@ function QuestionCsvFormat({ dense = false }) {
         <li>For an <strong>essay</strong> question, leave every choice column and the answer empty.</li>
         <li>A file written for four or five choices still imports unchanged.</li>
       </ul>
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+        <strong style={{ display: 'block', marginBottom: 4 }}>To give an item more than one point, or to ask a maths question, name your columns</strong>
+        <div style={{ marginBottom: 6 }}>
+          <code style={{ ...mono, background: 'var(--surface-2)', padding: '2px 6px', borderRadius: 3, fontSize: '12px' }}>
+            question_text, type, points, given, answer, choice_a, choice_b, …
+          </code>
+        </div>
+        <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
+          <li>Naming <code style={mono}>points</code>, <code style={mono}>type</code> or <code style={mono}>given</code> in the header row is what switches the file to named columns. Order then stops mattering, and anything you do not name counts as a choice.</li>
+          <li><code style={mono}>points</code> — a whole number. Leave it blank for 1. An item worth 5 counts five times what a 1-point item does.</li>
+          <li><code style={mono}>type</code> — <code style={mono}>mc</code>, <code style={mono}>multi</code>, <code style={mono}>essay</code> or <code style={mono}>math</code>. Leave it out and it is worked out from the row.</li>
+          <li><strong>For a maths question:</strong> <code style={mono}>given</code> is the problem the student starts from, and <code style={mono}>answer</code> is the simplified result. The student types their working line by line and each line is checked against the one above it.</li>
+          <li>A maths question imported this way is <strong>all or nothing</strong> — full points for the right answer with sound working, none otherwise. For part marks on individual steps, add the question here in the editor instead.</li>
+        </ul>
+      </div>
       <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '8px 10px', overflowX: 'auto' }}>
         <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
           Seven choices, three of them correct
@@ -167,6 +185,9 @@ const [targetSection, setTargetSection] = useState('');
   const emptyQ = {
     question_text: '', choice_list: ['', '', '', ''], correct_answer: 0,
     correct_answers: [], question_type: 'multiple_choice', image_url: null,
+    // What the item is worth (sql/025). One unless the instructor says
+    // otherwise, which is what every item was worth before points existed.
+    marks: 1,
     // A worked item (sql/024). `work` is the rubric as the editor holds it;
     // it is written to questions.work_rubric, and to the three public columns
     // beside it, only when the type says worked_solution.
@@ -1066,8 +1087,8 @@ const [targetSection, setTargetSection] = useState('');
       if (steps.length === 0) {
         return alert('A worked solution needs at least one expected step, with the marks it carries. The last step is the final answer.');
       }
-      if (!(Number(qForm.work?.marks) >= 1)) {
-        return alert('Say what this worked question is worth — at least 1 mark.');
+      if (!(Number(qForm.marks) >= 1)) {
+        return alert('Say what this worked question is worth — at least 1 point.');
       }
     }
     const isEssay = qForm.question_type === 'essay';
@@ -1130,7 +1151,7 @@ const [targetSection, setTargetSection] = useState('');
       // What the item is worth. Everything that is not a worked solution stays
       // at 1, which is what keeps a sum of marks equal to the old count of
       // items for every paper that already exists.
-      marks: isWorked ? Number(qForm.work?.marks) || 1 : 1,
+      marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)),
       work_given: isWorked ? (qForm.work?.given || null) : null,
       work_variable: isWorked ? (qForm.work?.variable || 'x') : null,
       work_rubric: isWorked ? {
@@ -1185,6 +1206,7 @@ const [targetSection, setTargetSection] = useState('');
       correct_answers: indexSet(q.correct_answers) || [],
       question_type: q.question_type || 'multiple_choice',
       image_url: q.image_url || null,
+      marks: Number(q.marks) || 1,
       // A worked item's rubric comes back as stored; anything else gets a
       // blank one so switching an existing question to worked_solution has
       // something to edit rather than crashing on an undefined.
@@ -1203,68 +1225,6 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   // --- CSV HELPERS ---
-  const parseQuestionCSV = (text) => {
-    const rawRows = text.trim().split(/\r?\n/);
-    const rows = rawRows.map(row => {
-      const cells = [];
-      let cell = '', inQ = false;
-      for (const ch of row) {
-        if (ch === '"') { inQ = !inQ; }
-        else if (ch === ',' && !inQ) { cells.push(cell.trim()); cell = ''; }
-        else { cell += ch; }
-      }
-      cells.push(cell.trim());
-      return cells;
-    });
-    const firstCell = rows[0]?.[0]?.toLowerCase().replace(/\s/g, '_');
-    const dataRows = (firstCell === 'question_text' || firstCell === 'question') ? rows.slice(1) : rows;
-    const questions = [], errors = [];
-    dataRows.forEach((cols, idx) => {
-      const qText = cols[0]?.trim();
-      if (!qText) return;
-      // A blank first choice is how an essay row is written.
-      const isEssay = !(cols[1]?.trim());
-      if (isEssay) {
-        questions.push({ question_text: qText, question_type: 'essay', choices: [], correct_answer: null });
-      } else {
-        // Any number of choice columns (sql/016). correct_answer is always the
-        // LAST column, so everything between the question and it is a choice —
-        // which means a 4-column file, a 5-column one and a 7-column one all
-        // import with no flag and no header needed.
-        const trimmed = [...cols];
-        while (trimmed.length && !(trimmed[trimmed.length - 1] ?? '').trim()) trimmed.pop();
-        const raw = (trimmed[trimmed.length - 1]?.trim() || '').toUpperCase();
-        const list = trimmed.slice(1, trimmed.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
-        if (list.length < 2) { errors.push(`Row ${idx + 2}: needs at least two choices`); return; }
-
-        // Several answers are written with a separator: "A;C", "A C", "A|C",
-        // "A+C". The separator is REQUIRED, and is what makes the row a
-        // multiple-answer question — a bare "AA" already means the 27th
-        // choice in the letter scheme (sql/016) and has to keep meaning that.
-        const parts = raw.split(/[;|+/\s,]+/).filter(Boolean);
-        const keys = parts.map(part => (/^\d+$/.test(part) ? Number(part) : indexForLetter(part)));
-        if (keys.length === 0 || keys.some(k => k === null || k === undefined || Number.isNaN(k))) {
-          errors.push(`Row ${idx + 2}: invalid answer "${raw}" — use a letter (A, B, … ${letterFor(list.length - 1)}) or a number (0–${list.length - 1}), and separate several answers with a semicolon`);
-          return;
-        }
-        const outOfRange = keys.filter(k => !keyIsValid(k, list.length));
-        if (outOfRange.length > 0) {
-          errors.push(`Row ${idx + 2}: the answer is ${outOfRange.map(letterFor).join(', ')} but the row only has ${list.length} choices (A–${letterFor(list.length - 1)})`);
-          return;
-        }
-        const set = indexSet(keys);
-        if (set.length !== keys.length) {
-          errors.push(`Row ${idx + 2}: the answer "${raw}" names the same choice twice`);
-          return;
-        }
-        questions.push(set.length > 1
-          ? { question_text: qText, question_type: 'multi_select', choices: list, correct_answer: null, correct_answers: set }
-          : { question_text: qText, question_type: 'multiple_choice', choices: list, correct_answer: set[0] });
-      }
-    });
-    return { questions, errors };
-  };
-
   const downloadCSVTemplate = () => {
     // Plain, ordinary questions. The rows deliberately carry NO instructions of
     // their own: everything in question_text is a question, so a row that
@@ -1285,6 +1245,26 @@ const [targetSection, setTargetSection] = useState('');
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = 'question_template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // The weighted template: a named header, so points and a maths question have
+  // somewhere to live. Offered alongside the plain one rather than replacing
+  // it, because a file with no header is still the shortest way to type fifty
+  // multiple-choice items.
+  const downloadWeightedCSVTemplate = () => {
+    const csv = [
+      'question_text,type,points,given,answer,choice_a,choice_b,choice_c,choice_d',
+      '"Which of these is a primary flight control?",mc,2,,D,"Flap","Slat","Spoiler","Aileron"',
+      '"Which of these are control surfaces?",multi,4,,A;B,"Aileron","Elevator","Flap","Slat"',
+      '"Differentiate with respect to x, showing your working.",math,3,y=5x,y\'=5,,,,',
+      '"Evaluate the integral, showing your working.",math,5,"y=\\int 2x\\,dx",y=x^2+C,,,,',
+      '"Explain Bernoulli\'s principle in your own words.",essay,10,,,,,,',
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'question_template_with_points.csv'; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -1745,7 +1725,7 @@ async function fetchDashboardData() {
       // Fetch results for all exams (paged — this routinely exceeds 1000 rows)
       const resultsData = allExamIds.length > 0
         ? await fetchAllRows(() => supabase.from('results')
-            .select('student_id, exam_id, score, total_items, work_marks, work_total, work_marked_at, tab_switches, time_taken_seconds, violation_logs, submitted_at')
+            .select('student_id, exam_id, score, total_items, points_earned, points_total, work_marks, work_total, work_marked_at, tab_switches, time_taken_seconds, violation_logs, submitted_at')
             .in('exam_id', allExamIds))
         : [];
 
@@ -3119,7 +3099,10 @@ const deleteResult = async (studentId, examId) => {
           <div style={{ background: 'var(--navy-50)', border: '2px dashed var(--navy-200)', borderRadius: 'var(--r-lg)', padding: '20px 24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
               <h4 style={{ margin: 0, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="plus" size={16} color="var(--navy)" /> Create New Exam or Seatwork</h4>
-              <button onClick={downloadCSVTemplate} className="btn ghost sm"><Icon name="download" size={13} /> Download Template</button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={downloadCSVTemplate} className="btn ghost sm"><Icon name="download" size={13} /> Template</button>
+                <button onClick={downloadWeightedCSVTemplate} className="btn ghost sm"><Icon name="download" size={13} /> Template with points</button>
+              </div>
             </div>
 
             {/* What the template is, said before anyone downloads it. Folded
@@ -3205,7 +3188,7 @@ const deleteResult = async (studentId, examId) => {
               )}
               {csvExamParsed && csvExamParsed.errors.length === 0 && (
                 <span style={{ fontSize: '12px', color: 'var(--text-4)' }}>
-                  {csvExamParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvExamParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvExamParsed.questions.filter(q => q.question_type === 'essay').length} Essay
+                  {csvExamParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvExamParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvExamParsed.questions.filter(q => q.question_type === 'worked_solution').length} Maths · {csvExamParsed.questions.filter(q => q.question_type === 'essay').length} Essay · {csvExamParsed.questions.reduce((t, q) => t + (Number(q.marks) || 1), 0)} points
                 </span>
               )}
             </div>
@@ -3975,6 +3958,26 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 </div>
 
+                {/* Points, for every type. A paper of 1-point items scores
+                    exactly as it always did, so leaving this alone changes
+                    nothing (sql/025). */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="label">Worth</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <input
+                      className="input"
+                      type="number" min={1} max={100}
+                      value={qForm.marks}
+                      onChange={e => setQForm(f => ({ ...f, marks: Math.max(1, Math.min(100, Number(e.target.value) || 1)) }))}
+                      style={{ width: 92 }}
+                    />
+                    <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                      point{Number(qForm.marks) === 1 ? '' : 's'}
+                      {Number(qForm.marks) !== 1 && ' — this item counts for more than the others'}
+                    </span>
+                  </div>
+                </div>
+
                 <div style={{ marginBottom: '12px' }}>
                   <label className="label">Question Text</label>
                   <textarea className="input" value={qForm.question_text} onChange={e => setQForm(f => ({ ...f, question_text: e.target.value }))} placeholder="Enter the question..." rows={3} style={{ resize: 'vertical' }} />
@@ -4114,6 +4117,7 @@ const deleteResult = async (studentId, examId) => {
                   <Suspense fallback={<div style={{ padding: 16, fontSize: 13, color: 'var(--ink-4)' }}>Loading the maths editor…</div>}>
                     <WorkedRubricEditor
                       value={qForm.work}
+                      marks={qForm.marks}
                       onChange={work => setQForm(f => ({ ...f, work }))}
                     />
                   </Suspense>
@@ -4136,6 +4140,9 @@ const deleteResult = async (studentId, examId) => {
               <div className="card" style={{ padding: '20px 24px', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' }}>
                   <h4 style={{ margin: 0, color: 'var(--ink-1)', display: 'flex', alignItems: 'center', gap: 8 }}><Icon name="download" size={15} color="var(--navy)" /> Import Questions from CSV</h4>
+                  <button className="btn ghost sm" onClick={downloadWeightedCSVTemplate} style={{ width: 'auto' }}>
+                    <Icon name="download" size={14} /> Template with points
+                  </button>
                   <button className="btn ghost sm" onClick={downloadCSVTemplate} style={{ width: 'auto' }}>
                     <Icon name="download" size={13} /> Download Template
                   </button>
@@ -4152,7 +4159,7 @@ const deleteResult = async (studentId, examId) => {
                   {csvParsed && (
                     <>
                       <span style={{ fontSize: '12px', color: 'var(--ink-3)' }}>
-                        {csvParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvParsed.questions.filter(q => q.question_type === 'essay').length} Essay
+                        {csvParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvParsed.questions.filter(q => q.question_type === 'worked_solution').length} Maths · {csvParsed.questions.filter(q => q.question_type === 'essay').length} Essay · {csvParsed.questions.reduce((t, q) => t + (Number(q.marks) || 1), 0)} points
                       </span>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 600, color: csvReplaceMode ? 'var(--bad)' : 'var(--ink-2)' }}>
                         <input type="checkbox" checked={csvReplaceMode} onChange={e => setCsvReplaceMode(e.target.checked)} style={{ width: '15px', height: '15px' }} />
@@ -4195,6 +4202,8 @@ const deleteResult = async (studentId, examId) => {
                               <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
                               {q.question_text}
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
+                              {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>Maths</span>}
+                              {Number(q.marks) > 1 && <span className="px-pill" style={{ marginLeft: 10 }}>{q.marks} pts</span>}
                               {isMultiSelect(q) && <span className="px-pill ok" style={{ marginLeft: 10 }}>Multiple answers</span>}
                             </p>
                             {q.image_url && (

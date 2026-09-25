@@ -16,8 +16,12 @@ import { MATH_PALETTE, insertIntoFocusedField } from '../lib/mathPalette.js';
 // mark for finishing. It is stated on screen because an instructor who does
 // not know it will write a rubric that behaves surprisingly.
 
-export default function WorkedRubricEditor({ value, onChange }) {
-  const marks = Number(value?.marks) || 3;
+// `marks` comes from the parent, not from here. Every question type can carry
+// points now (sql/025), so the field that sets them belongs beside the question
+// type where it applies to all of them — two inputs for the same number would
+// eventually disagree.
+export default function WorkedRubricEditor({ value, onChange, marks: marksProp }) {
+  const marks = Number(marksProp) || Number(value?.marks) || 3;
   const steps = Array.isArray(value?.steps) && value.steps.length
     ? value.steps
     : [{ latex: '', marks: 1, label: '' }];
@@ -32,7 +36,7 @@ export default function WorkedRubricEditor({ value, onChange }) {
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 10, marginBottom: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10, marginBottom: 14 }}>
         <label style={{ display: 'block' }}>
           <span style={LABEL}>The problem, as the student sees it</span>
           <MathField
@@ -48,15 +52,6 @@ export default function WorkedRubricEditor({ value, onChange }) {
             value={value?.variable || 'x'}
             onChange={e => set({ variable: e.target.value.trim().slice(0, 3) })}
             placeholder="x"
-          />
-        </label>
-        <label style={{ display: 'block' }}>
-          <span style={LABEL}>Worth (marks)</span>
-          <input
-            className="input"
-            type="number" min={1} max={100}
-            value={marks}
-            onChange={e => set({ marks: Number(e.target.value) })}
           />
         </label>
       </div>

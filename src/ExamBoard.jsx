@@ -646,7 +646,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       }
 
       localStorage.removeItem(storageKey);
-      setScoreDisplay({ score: correctCount, total: mcTotal || questions.length });
+      // An item may be worth more than one point (sql/025), in which case the
+      // weighted pair is the score — and the two are equal on an unweighted
+      // paper, so this reads the same as it always did there.
+      const weighted = outcome?.points_total !== null && outcome?.points_total !== undefined;
+      setScoreDisplay(weighted
+        ? { score: Number(outcome.points_earned) || 0, total: Number(outcome.points_total) || 0 }
+        : { score: correctCount, total: mcTotal || questions.length });
 
     } catch (err) {
       alert("There was an error saving your exam. Please contact your instructor.");
@@ -1203,6 +1209,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             {worked && (
               <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
                 Show your working · {currentQ?.marks || 1} mark{(currentQ?.marks || 1) === 1 ? '' : 's'}
+              </span>
+            )}
+            {/* Only when it is worth more than one. Saying "1 point" on every
+                question of an unweighted paper is noise. */}
+            {!worked && Number(currentQ?.marks) > 1 && (
+              <span style={{ background: 'var(--gold-100)', color: 'var(--gold-700)', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+                {currentQ.marks} points
               </span>
             )}
             {multiSelect && (

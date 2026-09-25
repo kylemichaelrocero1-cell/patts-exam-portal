@@ -47,7 +47,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         const [assessments, resultsRes, lessonsRes, progressRes, attemptsRes] = await Promise.all([
           selectAssessments(q => q.eq('is_open', true)),
           supabase.from('results')
-            .select('exam_id, score, total_items, work_marks, work_total, submitted_at')
+            .select('exam_id, score, total_items, points_earned, points_total, work_marks, work_total, submitted_at')
             .eq('student_id', student.id),
           supabase.from('lessons')
             .select('id, title, target_section, is_published')
@@ -58,7 +58,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           // Practice retakes are not in results, so without this a student who
           // had sat five mock exams saw "0 submitted" and an empty list.
           supabase.from('review_attempts')
-            .select('assessment_id, attempt_no, score, total_items, submitted_at')
+            .select('assessment_id, attempt_no, score, total_items, points_earned, points_total, submitted_at')
             .eq('student_id', student.id),
         ]);
         if (cancelled) return;
@@ -83,6 +83,8 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
             exam_id: a.assessment_id,
             score: a.score,
             total_items: a.total_items,
+            points_earned: a.points_earned,
+            points_total: a.points_total,
             submitted_at: a.submitted_at,
             attempts: rawAttempts.filter(x => x.assessment_id === a.assessment_id).length,
             is_practice: true,

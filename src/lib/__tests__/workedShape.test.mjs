@@ -40,6 +40,32 @@ check('a paper scored out of nothing has no percentage rather than a crash',
 check('an empty row does not throw',
   combinedScore(null).score === 0 && combinedScore(undefined).total === 0);
 
+console.log('\n=== an item may be worth more than one point (sql/025) ===');
+{
+  const r = combinedScore({ score: 2, total_items: 4, points_earned: 7, points_total: 11 });
+  check('the weighted sum wins over the count when it is there',
+    r.score === 7 && r.total === 11, JSON.stringify(r));
+  check('and the percentage is of the points', r.pct === 64, String(r.pct));
+}
+{
+  const r = combinedScore({ score: 40, total_items: 50 });
+  check('a row written before 025 falls back to its count, unrestated',
+    r.score === 40 && r.total === 50 && r.pct === 80, JSON.stringify(r));
+}
+check('points_total of 0 is a real paper with no picked items, not a missing value',
+  (() => { const r = combinedScore({ score: 0, total_items: 0, points_earned: 0, points_total: 0 });
+           return r.score === 0 && r.total === 0 && r.pct === null; })());
+check('earning no points is not the same as having none recorded',
+  (() => { const r = combinedScore({ score: 0, total_items: 4, points_earned: 0, points_total: 11 });
+           return r.score === 0 && r.total === 11 && r.pct === 0; })());
+check('weighted picked items and pending working add up',
+  (() => { const r = combinedScore({ score: 2, total_items: 4, points_earned: 7, points_total: 11, work_total: 3 });
+           return r.score === 7 && r.total === 14 && r.pending === 3 && r.pct === null; })(),
+  JSON.stringify(combinedScore({ score: 2, total_items: 4, points_earned: 7, points_total: 11, work_total: 3 })));
+check('and once the working is marked, everything is one number',
+  (() => { const r = combinedScore({ score: 2, total_items: 4, points_earned: 7, points_total: 11, work_marks: 3, work_total: 3 });
+           return r.score === 10 && r.total === 14 && r.pending === 0; })());
+
 console.log('\n=== marked worked items are added in ===');
 {
   const r = combinedScore({ score: 12, total_items: 15, work_marks: 4, work_total: 5 });

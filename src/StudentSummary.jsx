@@ -8,6 +8,7 @@ import {
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
 import { fetchAnswerReview } from './lib/answerReview';
+import { combinedScore } from './lib/workedShape.js';
 
 // A student's landing page: what needs doing, what has been done, how they did.
 // Everything here is derived from data the other tabs already load — this is a
@@ -46,7 +47,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         const [assessments, resultsRes, lessonsRes, progressRes, attemptsRes] = await Promise.all([
           selectAssessments(q => q.eq('is_open', true)),
           supabase.from('results')
-            .select('exam_id, score, total_items, submitted_at')
+            .select('exam_id, score, total_items, work_marks, work_total, submitted_at')
             .eq('student_id', student.id),
           supabase.from('lessons')
             .select('id, title, target_section, is_published')
@@ -162,9 +163,15 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
   const { todo, upcoming, results, titles, reviewable, lessons, completed } = data;
 
   // Only graded work counts toward an average; a 0/0 row would drag it to zero.
-  const graded = results.filter(r => r.total_items > 0);
+  // A paper whose worked items are still awaiting an instructor is left out
+  // too — combinedScore() returns a null percentage for exactly that case, and
+  // averaging a half-marked paper would show a student a figure that changes
+  // by itself later.
+  const graded = results
+    .map(r => ({ row: r, m: combinedScore(r) }))
+    .filter(({ m }) => m.total > 0 && m.pct !== null);
   const avg = graded.length
-    ? Math.round(graded.reduce((a, r) => a + (r.score / r.total_items) * 100, 0) / graded.length)
+    ? Math.round(graded.reduce((a, { m }) => a + m.pct, 0) / graded.length)
     : null;
 
   // A student's own record of their own work is permanent. Closing a paper or
@@ -263,7 +270,10 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                 </thead>
                 <tbody>
                   {shown.map(r => {
-                    const pct = r.total_items > 0 ? Math.round((r.score / r.total_items) * 100) : null;
+                    // Worked items are marked by an instructor after the fact
+                    // (sql/024), so a paper can be genuinely half-marked here.
+                    const m = combinedScore(r);
+                    const pct = m.pct;
                     return (
                       <tr key={`${r.exam_id}-${r.is_practice ? 'p' : 'g'}`}>
                         <td style={{ fontWeight: 600 }}>
@@ -275,7 +285,12 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                           )}
                         </td>
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: pct === null ? 'var(--ink-4)' : pct >= 75 ? 'var(--ok)' : 'var(--ink-1)' }}>
-                          {r.score}/{r.total_items}{pct !== null ? ` · ${pct}%` : ''}
+                          {m.score}/{m.total}{pct !== null ? ` · ${pct}%` : ''}
+                          {m.pending > 0 && (
+                            <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 600, color: 'var(--warn)', fontFamily: 'var(--font-sans)' }}>
+                              {m.pending} mark{m.pending === 1 ? '' : 's'} awaiting marking
+                            </span>
+                          )}
                         </td>
                         <td style={{ textAlign: 'right', color: 'var(--ink-4)', fontSize: 12.5 }}>
                           {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}

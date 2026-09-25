@@ -24,8 +24,9 @@ check('multi_select ticks', isMultiSelect({ question_type: 'multi_select' }));
 check('multiple_choice picks', !isMultiSelect({ question_type: 'multiple_choice' }));
 check('an item with no type stated is a single-answer one, as it always was',
   !isMultiSelect({}) && !isMultiSelect(null));
-check('every type the editor offers is one of the three the database allows',
-  eq(QUESTION_TYPES.map(t => t.value), ['multiple_choice', 'multi_select', 'essay']));
+check('every type the editor offers is one the database allows (sql/018 + sql/024)',
+  eq(QUESTION_TYPES.map(t => t.value),
+     ['multiple_choice', 'multi_select', 'essay', 'worked_solution']));
 
 console.log('\n=== reading a key or an answer as a set ===');
 check('one index becomes a one-element set', eq(indexSet(2), [2]));

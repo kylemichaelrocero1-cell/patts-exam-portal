@@ -131,4 +131,8 @@ export const QUESTION_TYPES = [
   { value: 'multiple_choice', label: 'Multiple Choice' },
   { value: 'multi_select', label: 'Multiple Answers' },
   { value: 'essay', label: 'Essay / Open-ended' },
+  // sql/024. Marked out of `marks` rather than counted as one item, and marked
+  // in the instructor's browser rather than in Postgres, so it is handled
+  // apart from the three above everywhere it appears.
+  { value: 'worked_solution', label: 'Worked Solution (maths)' },
 ];

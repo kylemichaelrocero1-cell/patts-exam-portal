@@ -10,6 +10,7 @@ import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
+import { combinedScore } from './lib/workedShape';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -18,6 +19,11 @@ const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
 // Pure presentation over data the dashboard already holds — no queries of its
 // own — but split out because it is a large view most sessions never open.
 const ClassReview = lazy(() => import('./dashboard/ClassReview'));
+// Both pull in MathLive and Compute Engine — well over three megabytes of
+// maths editor and computer algebra. Split out hard, so an instructor who
+// never writes a worked item never downloads any of it.
+const WorkedRubricEditor = lazy(() => import('./dashboard/WorkedRubricEditor'));
+const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -153,7 +159,19 @@ const [targetSection, setTargetSection] = useState('');
   // (sql/018 keeps them mutually exclusive in the database). That way
   // switching between Multiple Choice and Multiple Answers and back does not
   // throw away what was already ticked.
-  const emptyQ = { question_text: '', choice_list: ['', '', '', ''], correct_answer: 0, correct_answers: [], question_type: 'multiple_choice', image_url: null };
+  // Scripts whose worked items nobody has marked yet. combinedScore() is the
+  // single definition of "pending" — a row is waiting when it carries marks
+  // available and no marks awarded.
+  const scriptsToMark = results.filter(r => combinedScore(r).pending > 0).length;
+
+  const emptyQ = {
+    question_text: '', choice_list: ['', '', '', ''], correct_answer: 0,
+    correct_answers: [], question_type: 'multiple_choice', image_url: null,
+    // A worked item (sql/024). `work` is the rubric as the editor holds it;
+    // it is written to questions.work_rubric, and to the three public columns
+    // beside it, only when the type says worked_solution.
+    work: { given: '', variable: 'x', marks: 3, steps: [{ latex: '', marks: 1, label: '' }] },
+  };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
   const [qImageFile, setQImageFile] = useState(null);
@@ -1043,8 +1061,18 @@ const [targetSection, setTargetSection] = useState('');
   const saveQuestion = async () => {
     if (!qExamId) return;
     if (!qForm.question_text.trim()) return alert('Question text is required.');
+    if (qForm.question_type === 'worked_solution') {
+      const steps = (qForm.work?.steps || []).filter(s => String(s?.latex || '').trim());
+      if (steps.length === 0) {
+        return alert('A worked solution needs at least one expected step, with the marks it carries. The last step is the final answer.');
+      }
+      if (!(Number(qForm.work?.marks) >= 1)) {
+        return alert('Say what this worked question is worth — at least 1 mark.');
+      }
+    }
     const isEssay = qForm.question_type === 'essay';
     const isMulti = qForm.question_type === 'multi_select';
+    const isWorked = qForm.question_type === 'worked_solution';
     const keySet = indexSet(qForm.correct_answers) || [];
 
     if (!isEssay) {
@@ -1092,12 +1120,29 @@ const [targetSection, setTargetSection] = useState('');
       question_type: qForm.question_type,
       // Only `choices` is written; the trigger in sql/016 mirrors the first
       // five into choice_a..choice_e for clients still on the old build.
-      ...(isEssay ? { choices: [] } : choicesPatch(qForm.choice_list)),
+      ...((isEssay || isWorked) ? { choices: [] } : choicesPatch(qForm.choice_list)),
       // Exactly one of the two keys, never both: sql/018 constrains them to
-      // match the type, so sending the unused one would be rejected.
-      correct_answer: (isEssay || isMulti) ? null : Number(qForm.correct_answer),
+      // match the type, so sending the unused one would be rejected. A worked
+      // item keys on neither (sql/024).
+      correct_answer: (isEssay || isMulti || isWorked) ? null : Number(qForm.correct_answer),
       correct_answers: isMulti ? keySet : null,
       image_url: imageUrl || null,
+      // What the item is worth. Everything that is not a worked solution stays
+      // at 1, which is what keeps a sum of marks equal to the old count of
+      // items for every paper that already exists.
+      marks: isWorked ? Number(qForm.work?.marks) || 1 : 1,
+      work_given: isWorked ? (qForm.work?.given || null) : null,
+      work_variable: isWorked ? (qForm.work?.variable || 'x') : null,
+      work_rubric: isWorked ? {
+        steps: (qForm.work?.steps || [])
+          .filter(st => String(st?.latex || '').trim())
+          .map(st => ({
+            latex: String(st.latex).trim(),
+            marks: Number(st.marks) || 0,
+            label: String(st.label || '').trim(),
+          })),
+        penaltyPerBrokenStep: 1,
+      } : null,
     };
 
     let error;
@@ -1140,6 +1185,17 @@ const [targetSection, setTargetSection] = useState('');
       correct_answers: indexSet(q.correct_answers) || [],
       question_type: q.question_type || 'multiple_choice',
       image_url: q.image_url || null,
+      // A worked item's rubric comes back as stored; anything else gets a
+      // blank one so switching an existing question to worked_solution has
+      // something to edit rather than crashing on an undefined.
+      work: {
+        given: q.work_given || '',
+        variable: q.work_variable || 'x',
+        marks: Number(q.marks) || 3,
+        steps: Array.isArray(q.work_rubric?.steps) && q.work_rubric.steps.length
+          ? q.work_rubric.steps
+          : [{ latex: '', marks: 1, label: '' }],
+      },
     });
     setQImageFile(null);
     setQImagePreview(q.image_url || null);
@@ -1689,7 +1745,7 @@ async function fetchDashboardData() {
       // Fetch results for all exams (paged — this routinely exceeds 1000 rows)
       const resultsData = allExamIds.length > 0
         ? await fetchAllRows(() => supabase.from('results')
-            .select('student_id, exam_id, score, total_items, tab_switches, time_taken_seconds, violation_logs, submitted_at')
+            .select('student_id, exam_id, score, total_items, work_marks, work_total, work_marked_at, tab_switches, time_taken_seconds, violation_logs, submitted_at')
             .in('exam_id', allExamIds))
         : [];
 
@@ -2524,6 +2580,12 @@ const deleteResult = async (studentId, examId) => {
                   { label: 'Total Students', value: studentsList.length, color: '#2980B9', icon: 'users', sub: 'in your sections' },
                   { label: 'Total Results', value: results.length, color: '#27AE60', icon: 'bar-chart', sub: 'submissions' },
                   { label: 'Pass Rate', value: (() => { const n = results.length; if (n === 0) return '–'; const p = results.filter(r => r.total_items > 0 && (r.score / r.total_items) >= 0.75).length; return `${Math.round((p / n) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: '≥75% passing' },
+                  // Worked maths items can only be marked in this browser
+                  // (sql/024), so scripts sit waiting until somebody opens
+                  // them. This tile is the prompt; the Results table says which.
+                  ...(scriptsToMark > 0
+                    ? [{ label: 'To Mark', value: scriptsToMark, color: 'var(--warn)', icon: 'edit', sub: `script${scriptsToMark === 1 ? '' : 's'} with working` }]
+                    : []),
                 ].map(card => (
                   <div key={card.label} style={{ background: 'var(--surface-2)', border: '1.5px solid var(--line)', borderRadius: 'var(--r-md)', padding: '16px 14px', textAlign: 'center' }}>
                     <Icon name={card.icon} size={20} color={card.color} style={{ marginBottom: 8 }} />
@@ -2753,7 +2815,15 @@ const deleteResult = async (studentId, examId) => {
                       filteredAndSortedResults.map((row, index) => {
                         const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
                         const examTitle = examsDict[row.exam_id] || 'Unknown Exam';
-                        const percentage = row.total_items > 0 ? Math.round((row.score / row.total_items) * 100) : 0;
+                        // Worked items are marked here, in this browser, after
+                        // the fact (sql/024), so a row can be half-marked. The
+                        // percentage falls back to the picked-item one while
+                        // marks are outstanding rather than showing a figure
+                        // that will move on its own.
+                        const m = combinedScore(row);
+                        const percentage = m.pct !== null
+                          ? m.pct
+                          : (row.total_items > 0 ? Math.round((row.score / row.total_items) * 100) : 0);
                         const essayCount = (examQuestionsCache[row.exam_id] || []).filter(q => q.question_type === 'essay').length;
                         return (
                           <tr key={index}>
@@ -2762,8 +2832,8 @@ const deleteResult = async (studentId, examId) => {
                             <td style={{ color: 'var(--ink-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
                             <td style={{ textAlign: 'right' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{row.score}/{row.total_items}</span>
-                                <span style={{ color: percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{percentage}%</span>
+                                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</span>
+                                <span style={{ color: percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
                                 {/* Manual edit pencil — shown when answers are missing (data lost from force-submit bug) */}
                                 {row.total_items > 0 && (!row.answers_json || Object.keys(row.answers_json).length === 0) && (
                                   <button
@@ -2774,6 +2844,15 @@ const deleteResult = async (studentId, examId) => {
                                 )}
                               </div>
                               {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2, textAlign: 'right' }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
+                              {/* The only thing that tells an instructor a
+                                  script is waiting on them. Without it the
+                                  pending-marks window is invisible from this
+                                  side and nobody ever opens the paper. */}
+                              {m.pending > 0 && (
+                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--warn)', marginTop: 2, textAlign: 'right' }}>
+                                  {m.pending} mark{m.pending === 1 ? '' : 's'} to mark
+                                </span>
+                              )}
                             </td>
                             <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : 'N/A'}</td>
                             <td>
@@ -3932,7 +4011,7 @@ const deleteResult = async (studentId, examId) => {
                   )}
                 </div>
 
-                {qForm.question_type !== 'essay' && (
+                {qForm.question_type !== 'essay' && qForm.question_type !== 'worked_solution' && (
                   <>
                     {/* One row per choice, added and removed freely. The radio
                         lives on the row, so marking the correct one and typing
@@ -4029,6 +4108,15 @@ const deleteResult = async (studentId, examId) => {
                   <div style={{ padding: '12px 16px', background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', marginBottom: '16px', fontSize: '13px', color: 'var(--warn)' }}>
                     Students will type a free-form written answer. This question will not be auto-graded. Review answers in the Results tab.
                   </div>
+                )}
+
+                {qForm.question_type === 'worked_solution' && (
+                  <Suspense fallback={<div style={{ padding: 16, fontSize: 13, color: 'var(--ink-4)' }}>Loading the maths editor…</div>}>
+                    <WorkedRubricEditor
+                      value={qForm.work}
+                      onChange={work => setQForm(f => ({ ...f, work }))}
+                    />
+                  </Suspense>
                 )}
 
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -4479,9 +4567,45 @@ const deleteResult = async (studentId, examId) => {
                 </div>
               )}
 
+              {/* Worked items are marked as a set rather than one at a time:
+                  the marks are saved in a single call, so a script cannot end
+                  up half-marked. They are therefore pulled out of the
+                  per-question list below and shown together here. */}
+              {(examQuestionsCache[viewingStudent.exam_id] || [])
+                .some(q => q.question_type === 'worked_solution') && (
+                <Suspense fallback={<div style={{ padding: 16, fontSize: 13, color: 'var(--ink-4)' }}>Loading the marker…</div>}>
+                  <WorkedMarking
+                    assessmentId={viewingStudent.exam_id}
+                    studentId={viewingStudent.student_id}
+                    studentName={viewingStudent.full_name || viewingStudent.student_name}
+                    questions={examQuestionsCache[viewingStudent.exam_id] || []}
+                    storedAnswers={viewingStudent.answers_json || {}}
+                    attemptNo={viewingStudent.attempt_no ?? null}
+                    onSaved={marks => {
+                      // The row in the Results table behind this modal still
+                      // says "N marks to mark". Patched locally rather than
+                      // refetched, the same way a manual score edit is, so the
+                      // badge clears the moment the save succeeds instead of
+                      // lying until the next full reload.
+                      const awarded = Object.values(marks).reduce((t, i) => t + (Number(i.marks) || 0), 0);
+                      const available = Object.values(marks).reduce((t, i) => t + (Number(i.total) || 0), 0);
+                      setResults(prev => prev.map(r =>
+                        r.student_id === viewingStudent.student_id && r.exam_id === viewingStudent.exam_id
+                          ? { ...r, work_marks: awarded, work_total: available, work_marked_at: new Date().toISOString() }
+                          : r
+                      ));
+                      setViewingStudent(v => (v ? { ...v, work_marks: awarded, work_total: available } : v));
+                    }}
+                  />
+                </Suspense>
+              )}
+
               <div style={{ display: 'grid', gap: '12px' }}>
                 {(examQuestionsCache[viewingStudent.exam_id] || []).map((q, idx) => {
                   const sAnswer = (viewingStudent.answers_json || {})[q.id];
+
+                  // Shown above, by WorkedMarking, with its ticks and its marks.
+                  if (q.question_type === 'worked_solution') return null;
 
                   if (q.question_type === 'essay') {
                     const essayText = sAnswer?.text;

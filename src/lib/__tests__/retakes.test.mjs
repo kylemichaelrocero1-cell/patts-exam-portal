@@ -3,7 +3,7 @@
 //
 //   npm run test:retakes
 
-import { isPaperFinished, sittingDecision, restartPatch } from '../retakes.js';
+import { isPaperFinished, sittingDecision, restartPatch, firstAttempts } from '../retakes.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -67,6 +67,23 @@ console.log('\n=== restartPatch ===');
     && Object.keys(p.work_answers_json).length === 0);
   check('nor does its answered count', p.answers_count === 0);
   check('nor its violations', p.violation_count === 0 && p.violation_log.length === 0);
+}
+
+console.log('\n=== firstAttempts ===');
+{
+  const rows = [
+    { student_id: 'a', attempt_no: 3, answers_json: { q: 3 } },
+    { student_id: 'a', attempt_no: 1, answers_json: { q: 1 } },
+    { student_id: 'b', attempt_no: 2, answers_json: { q: 2 } },
+    { student_id: 'a', attempt_no: 2, answers_json: { q: 2 } },
+  ];
+  const got = firstAttempts(rows);
+  check('one row per student', got.length === 2);
+  check('the lowest attempt number wins, whatever order they arrive in',
+    got.find(r => r.student_id === 'a').attempt_no === 1);
+  check('a student whose first attempt is missing keeps their earliest',
+    got.find(r => r.student_id === 'b').attempt_no === 2);
+  check('nothing in, nothing out', firstAttempts([]).length === 0 && firstAttempts(null).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

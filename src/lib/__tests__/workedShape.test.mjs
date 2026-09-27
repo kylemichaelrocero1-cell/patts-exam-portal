@@ -9,6 +9,7 @@
 
 import {
   isWorkedSolution, linesOf, hasWork, combinedScore, workMarksAvailable,
+  finalLineOf, workedKeyOf, workedItemStats,
 } from '../workedShape.js';
 
 let pass = 0, fail = 0;
@@ -104,6 +105,46 @@ check('a worked item with no marks stated counts as one',
 check('a paper with no worked items has none',
   workMarksAvailable([{ question_type: 'multiple_choice', marks: 1 }]) === 0
   && workMarksAvailable([]) === 0 && workMarksAvailable(null) === 0);
+
+console.log('\n=== the item analysis for a worked item ===');
+{
+  check('the marked line is the last one with anything on it',
+    finalLineOf({ lines: ['2x+2', '  ', ''] }) === '2x+2'
+    && finalLineOf({ lines: [' 6 '] }) === '6' && finalLineOf(null) === '');
+
+  const q = {
+    id: 'q6', marks: 2,
+    work_rubric: { steps: [{ latex: 'f(x)=x^2' }, { latex: '6' }], accept: ['6', ' 6.0 ', ''] },
+  };
+  check('the key is the last step, and the accept list without it or blanks',
+    eq(workedKeyOf(q), { model: '6', accepted: ['6.0'] }));
+  check('an item with no rubric has an empty key, not a crash',
+    eq(workedKeyOf({}), { model: '', accepted: [] }));
+
+  const w = (line, marks, extra = {}) => ({ q6: { type: 'worked', lines: [line], marks, of: 2, ...extra } });
+  const s = workedItemStats(q, [
+    w('6', 2), w('6', 2), w('6', 2),
+    w('0/0', 0), w('0/0', 0),
+    w('3', 1),                                          // part marks
+    { q6: { type: 'worked', lines: ['9'], marks: 2, total: 2 } }, // an instructor override
+    w('x+3', null),                                     // not marked yet
+    { q6: { type: 'worked', lines: ['', ' '] } },       // left blank
+    {},                                                 // never touched it
+  ]);
+  check('everyone who sat the paper is counted', s.sat === 10);
+  check('full marks, from the marks — an override with no correct flag counts',
+    s.full === 4, JSON.stringify(s));
+  check('part marks are neither right nor wrong', s.partial === 1);
+  check('no marks', s.zero === 2);
+  check('an unmarked answer is pending, not wrong', s.pending === 1);
+  check('a blank line and a missing item are both blank', s.blank === 2);
+  check('answers are grouped by what was written, most common first',
+    eq(s.groups.map(g => [g.latex, g.count]), [['6', 3], ['0/0', 2], ['3', 1], ['9', 1], ['x+3', 1]]));
+  check('each group knows how it was marked',
+    s.groups[0].full === 3 && s.groups[1].zero === 2 && s.groups[4].pending === 1);
+  check('nobody sat it: all zero, no groups',
+    eq(workedItemStats(q, []), { sat: 0, blank: 0, pending: 0, full: 0, partial: 0, zero: 0, groups: [] }));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -102,3 +102,70 @@ export function workMarksAvailable(questions) {
     .filter(isWorkedSolution)
     .reduce((t, q) => t + (Number(q.marks) || 1), 0);
 }
+
+/**
+ * The answer a worked item is marked on: the last line with anything on it.
+ * The same line score_answers() picks in Postgres (sql/027), so the item
+ * analysis groups students by exactly what was marked.
+ */
+export function finalLineOf(value) {
+  const lines = linesOf(value).map(l => l.trim()).filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+/**
+ * The model answer and every other answer the paper accepts, as LaTeX. The
+ * model answer is the rubric's last step — what the question list shows.
+ */
+export function workedKeyOf(q) {
+  const steps = Array.isArray(q?.work_rubric?.steps) ? q.work_rubric.steps : [];
+  const model = String(steps[steps.length - 1]?.latex ?? '').trim();
+  const accepted = (Array.isArray(q?.work_rubric?.accept) ? q.work_rubric.accept : [])
+    .map(a => String(a ?? '').trim())
+    .filter(a => a && a !== model);
+  return { model, accepted };
+}
+
+/**
+ * How a class did on one worked item, for the item analysis.
+ *
+ * A worked item has no choices to count, so what the class needs to see is
+ * how many got it right and — the useful part — what the rest actually
+ * wrote. Answers are grouped by the line that was marked, most common first,
+ * so a misconception the whole class shares sits at the top.
+ *
+ * Right means FULL marks, read from the marks on file rather than the
+ * checker's `correct` flag: an instructor's override (record_work_marks,
+ * sql/024) replaces the item without that flag, and the mark it sets is the
+ * one that counts. Marks of null are an item submitted but not yet marked.
+ *
+ * @param q        the question, for its id and what it is worth
+ * @param answered one results.answers_json per student who sat the paper
+ */
+export function workedItemStats(q, answered) {
+  const worth = Number(q?.marks) || 1;
+  const stats = { sat: 0, blank: 0, pending: 0, full: 0, partial: 0, zero: 0, groups: [] };
+  const byAnswer = new Map();
+
+  (answered || []).forEach(aj => {
+    stats.sat++;
+    const item = aj?.[q?.id];
+    const line = finalLineOf(item);
+    if (!line) { stats.blank++; return; }
+
+    const raw = item?.marks;
+    const pending = raw === null || raw === undefined || raw === '';
+    const earned = pending ? 0 : Number(raw) || 0;
+    const outOf = Number(item?.of ?? item?.total) || worth;
+    const verdict = pending ? 'pending' : earned >= outOf ? 'full' : earned > 0 ? 'partial' : 'zero';
+    stats[verdict]++;
+
+    const g = byAnswer.get(line) || { latex: line, count: 0, full: 0, partial: 0, zero: 0, pending: 0 };
+    g.count++;
+    g[verdict]++;
+    byAnswer.set(line, g);
+  });
+
+  stats.groups = [...byAnswer.values()].sort((a, b) => b.count - a.count);
+  return stats;
+}

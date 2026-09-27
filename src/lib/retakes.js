@@ -72,3 +72,20 @@ export function restartPatch(now = new Date()) {
     violation_log: [],
   };
 }
+
+/**
+ * Each student's FIRST attempt at a practice paper, for the item analysis.
+ *
+ * A practice paper can be sat any number of times, and once answers are shown
+ * after submitting, every later attempt is taken with the key in hand. Only
+ * the first says anything about the item itself — counting them all would
+ * report the questions a class found hardest as the ones they got right most.
+ */
+export function firstAttempts(rows) {
+  const first = new Map();
+  (rows || []).forEach(r => {
+    const had = first.get(r.student_id);
+    if (!had || Number(r.attempt_no) < Number(had.attempt_no)) first.set(r.student_id, r);
+  });
+  return [...first.values()];
+}

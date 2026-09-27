@@ -10,7 +10,8 @@ import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
-import { combinedScore } from './lib/workedShape';
+import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
+import { firstAttempts } from './lib/retakes';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -164,6 +165,10 @@ const [targetSection, setTargetSection] = useState('');
   const [viewingStatsExam, setViewingStatsExam] = useState(null);
   const [examQuestionsCache, setExamQuestionsCache] = useState({});
   const [answersJsonCache, setAnswersJsonCache] = useState({}); // keyed by `studentId_examId`
+  // Item analysis on a practice paper: each student's first attempt's
+  // answers_json, keyed by paper. Refetched on every open — practice keeps
+  // coming in, and a cached copy would quietly go stale.
+  const [practiceStatsCache, setPracticeStatsCache] = useState({});
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
 
   // --- ATTENDANCE STATES ---
@@ -311,6 +316,21 @@ const [targetSection, setTargetSection] = useState('');
     setViewingStudent({ ...row, answers_json: answersJson });
   };
 
+  // The answers the item analysis counts, one answers_json per student. The
+  // graded sittings when there are any — a paper later opened for retakes
+  // keeps its real exam as the thing analysed — otherwise, on a practice
+  // paper, each student's first attempt (see firstAttempts).
+  const statsSourceFor = (examId) => {
+    const graded = results.filter(r => r.exam_id === examId);
+    if (graded.length === 0 && practiceStatsCache[examId]) {
+      return { practice: true, answers: practiceStatsCache[examId] };
+    }
+    return {
+      practice: false,
+      answers: graded.map(r => answersJsonCache[`${r.student_id}_${examId}`] || {}),
+    };
+  };
+
   const openExamStats = async (examId) => {
     setIsLoadingQuestions(true);
     const examResults = results.filter(r => r.exam_id === examId);
@@ -329,6 +349,20 @@ const [targetSection, setTargetSection] = useState('');
             data.forEach(r => { next[`${r.student_id}_${examId}`] = r.answers_json || {}; });
             return next;
           });
+        })(),
+        // A practice paper files every sitting in review_attempts and nothing
+        // in results, so the analysis read an empty list and drew every option
+        // at 0%. Only fetched when there is no graded sitting to show instead.
+        (async () => {
+          if (!examAllowsRetakes(examId) || examResults.length > 0) return;
+          const data = await fetchAllRows(() => supabase
+            .from('review_attempts')
+            .select('student_id, attempt_no, answers_json')
+            .eq('assessment_id', examId));
+          setPracticeStatsCache(prev => ({
+            ...prev,
+            [examId]: firstAttempts(data).map(r => r.answers_json || {}),
+          }));
         })(),
       ]);
     } catch (err) {
@@ -4769,7 +4803,15 @@ const deleteResult = async (studentId, examId) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
                 <div>
                   <h2 style={{ margin: 0, color: 'white', fontSize: '18px' }}>Item Analysis & Statistics</h2>
-                  <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px' }}>How many students chose each option.</p>
+                  <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,.6)', fontSize: '13px' }}>
+                    {(() => {
+                      const src = statsSourceFor(viewingStatsExam);
+                      const n = src.answers.length;
+                      return src.practice
+                        ? `Practice paper — each student's first attempt (${n} student${n === 1 ? '' : 's'}).`
+                        : `How many students chose each option, and what they typed on maths items (${n} submission${n === 1 ? '' : 's'}).`;
+                    })()}
+                  </p>
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn ghost sm" onClick={printAnalysis} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
@@ -4799,16 +4841,122 @@ const deleteResult = async (studentId, examId) => {
                   );
                 }
 
-                const examResults = results.filter(r => r.exam_id === viewingStatsExam);
-                const totalAnswers = examResults.length;
+                const statAnswers = statsSourceFor(viewingStatsExam).answers;
+                const totalAnswers = statAnswers.length;
+
+                // A "type your answer" item has no choices, so the option bars
+                // below drew nothing and the card was just "Find the second
+                // derivative." — no function, no answer. Show the problem and
+                // the key, then how the class did and what they actually wrote.
+                if (isWorkedSolution(q)) {
+                  const key = workedKeyOf(q);
+                  const st = workedItemStats(q, statAnswers);
+                  const pct = n => (st.sat > 0 ? Math.round((n / st.sat) * 100) : 0);
+                  return (
+                    <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
+                      <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
+                        {idx + 1}. {q.question_text}
+                        <span className="px-pill info" style={{ marginLeft: 8 }}>Type your answer</span>
+                        <span className="px-pill muted" style={{ marginLeft: 6 }}>
+                          {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
+                        </span>
+                      </p>
+                      {q.image_url && (
+                        <img src={q.image_url} alt="Figure" style={{ maxWidth: '100%', maxHeight: 160, objectFit: 'contain', display: 'block', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface-2)', marginBottom: 12 }} />
+                      )}
+                      <Suspense fallback={null}>
+                        <div className="q-maths">
+                          {q.work_given && (
+                            <span className="q-maths-part">
+                              <span className="q-maths-tag">Problem</span>
+                              <MathStatic latex={q.work_given} />
+                            </span>
+                          )}
+                          {key.model && (
+                            <span className="q-maths-part">
+                              <span className="q-maths-tag">Answer</span>
+                              <MathStatic latex={key.model} />
+                            </span>
+                          )}
+                          {key.accepted.length > 0 && (
+                            <span className="q-maths-part" style={{ flexWrap: 'wrap' }}>
+                              <span className="q-maths-tag">Also accepted</span>
+                              {key.accepted.map(a => (
+                                <span key={a} style={{ padding: '1px 7px', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--white)' }}>
+                                  <MathStatic latex={a} />
+                                </span>
+                              ))}
+                            </span>
+                          )}
+                        </div>
+                      </Suspense>
+
+                      <div style={{ margin: '12px 0 14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, fontSize: '13px', marginBottom: 6 }}>
+                          <span style={{ color: 'var(--ink-2)' }}>
+                            <strong style={{ color: 'var(--ok)' }}>{st.full} of {st.sat}</strong> got it right
+                          </span>
+                          <span style={{ fontWeight: 700, color: 'var(--ink-2)' }}>{pct(st.full)}%</span>
+                        </div>
+                        <div style={{ background: 'var(--line)', height: '8px', borderRadius: 'var(--r-pill)', overflow: 'hidden' }}>
+                          <div style={{ width: `${pct(st.full)}%`, height: '100%', background: 'var(--ok)', borderRadius: 'var(--r-pill)' }} />
+                        </div>
+                        <p style={{ margin: '6px 0 0', fontSize: '12px', color: 'var(--ink-3)' }}>
+                          {[
+                            st.zero > 0 && `${st.zero} wrong`,
+                            st.partial > 0 && `${st.partial} part marks`,
+                            st.blank > 0 && `${st.blank} left blank`,
+                            st.pending > 0 && `${st.pending} not marked yet`,
+                          ].filter(Boolean).join(' · ') || (st.sat === 0 ? 'Nobody has sat this paper yet.' : '')}
+                        </p>
+                      </div>
+
+                      {st.groups.length > 0 && (
+                        <>
+                          <div className="eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>What students wrote</div>
+                          <div style={{ display: 'grid', gap: '8px' }}>
+                            {st.groups.slice(0, 12).map(g => {
+                              const right = g.full === g.count;
+                              const wrong = g.zero === g.count;
+                              const tone = right ? 'ok' : wrong ? 'bad' : null;
+                              const share = pct(g.count);
+                              return (
+                                <div key={g.latex} style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', background: tone ? `var(--${tone}-bg)` : 'var(--surface-2)', border: `1.5px solid ${tone ? `var(--${tone}-bd)` : 'var(--line)'}` }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0, fontSize: 15, color: 'var(--ink-1)', overflowX: 'auto' }}>
+                                      <Suspense fallback={<code>{g.latex}</code>}><MathStatic latex={g.latex} /></Suspense>
+                                      <span className={`px-pill ${tone || 'muted'}`} style={{ fontSize: '11px' }}>
+                                        {right ? 'Correct' : wrong ? 'Wrong'
+                                          : g.pending === g.count ? 'Not marked yet' : 'Mixed marks'}
+                                      </span>
+                                    </span>
+                                    <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink-2)', whiteSpace: 'nowrap' }}>{g.count} ({share}%)</span>
+                                  </div>
+                                  <div style={{ background: 'var(--line)', height: '8px', borderRadius: 'var(--r-pill)', overflow: 'hidden' }}>
+                                    <div style={{ width: `${share}%`, height: '100%', background: right ? 'var(--ok)' : wrong ? 'var(--bad)' : 'var(--navy-500)', borderRadius: 'var(--r-pill)' }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {st.groups.length > 12 && (
+                            <p style={{ margin: '8px 0 0', fontSize: '12px', color: 'var(--ink-3)' }}>
+                              …and {st.groups.length - 12} other answer{st.groups.length - 12 === 1 ? '' : 's'}, each written by fewer students.
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+
                 const counts = {};   // any number of choices (sql/016)
                 // A multi-answer item's `chosen` is a set (sql/018), so every
                 // index a student ticked is counted. The percentages then read
                 // as "how many of the class ticked this choice" rather than
                 // summing to 100, which is the right question for the type.
                 let fullyRight = 0;
-                examResults.forEach(r => {
-                  const aj = answersJsonCache[`${r.student_id}_${r.exam_id}`] || {};
+                statAnswers.forEach(aj => {
                   const sAnswer = aj[q.id];
                   if (sAnswer === undefined) return;
                   (indexSet(sAnswer.chosen) || []).forEach(i => { counts[i] = (counts[i] || 0) + 1; });

@@ -35,6 +35,7 @@
 import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent,
          indefiniteIntegrand, antiderivativeTarget, derivativeSubjectOf,
          differentiate } from './mathCheck.js';
+import { labelOf, labelProblem, withoutLabel } from './mathLabel.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -181,8 +182,20 @@ export function markAnswer(lines, rubric, opts = {}) {
   const variable = opts.variable || rubric?.variable || 'x';
   const target = given ? antiderivativeTarget(given) : null;
 
+  // THE LABEL IS JUDGED ON ITS OWN (mathLabel.js, and sql/032 in the
+  // database, which must agree). So when the key has one, the value is
+  // compared with both labels off: isFinalForm's own subject check took
+  // f'(x) for f''(x) and g''(x) for f''(x), and would overrule the stricter
+  // rule the database applies.
+  const accepted = [key, ...(Array.isArray(rubric?.accept) ? rubric.accept : [])]
+    .map(a => String(a ?? '').trim()).filter(Boolean);
+  const keyHasLabel = accepted.some(a => labelOf(a));
+
   const isRight = line => {
-    if (!target) return isFinalForm(line, key);
+    if (!target) {
+      return keyHasLabel ? isFinalForm(withoutLabel(line), withoutLabel(key))
+                         : isFinalForm(line, key);
+    }
     const p = parseLine(line);
     if (!p.valid) return false;
     // An answer still holding the integral, or still written as a derivative,
@@ -193,18 +206,24 @@ export function markAnswer(lines, rubric, opts = {}) {
     return !!d && equivalent(d, target) === 'equal';
   };
 
-  const correct = work.some(isRight);
+  const valueRight = work.some(isRight);
+  // Only once the value is right: a wrong value with a wrong label is wrong
+  // for its value, and saying so is the more useful reason.
+  const labelWrong = valueRight ? labelProblem(answer, accepted) : null;
+  const correct = valueRight && !labelWrong;
   return {
     marks: correct ? total : 0,
     total, correct, blank: false, answer,
     reason: correct
       ? 'Correct answer.'
-      : (equivalentToKey(work, key)
+      : labelWrong
+        || (equivalentToKey(work, key)
           ? 'Equal to the answer but not simplified, or not in the form asked for.'
           : 'Not the right answer.'),
+    ...(labelWrong ? { labelWrong: true } : {}),
     // Kept so the instructor can see WHY a near miss was refused rather than
     // having to work it out from the number.
-    nearMiss: !correct && equivalentToKey(work, key),
+    nearMiss: !correct && !labelWrong && equivalentToKey(work, key),
     ...(opts.variable ? { variable: opts.variable } : {}),
   };
 }

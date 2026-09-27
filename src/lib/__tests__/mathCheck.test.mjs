@@ -179,12 +179,15 @@ console.log('\n=== answer only, all or nothing ===');
     markAnswer(["y'=5x"], r).marks === 0);
   check('nothing written takes none, and says so',
     markAnswer([], r).marks === 0 && markAnswer([], r).blank);
-  check('a bare 5 is accepted — the answer is given, only the label is missing',
-    markAnswer(['5'], r).marks === 2,
+  // Changed 2026-09-27 (sql/032): the key has a label, so the label is part
+  // of the answer. A bare 5 has not said what 5 is.
+  check('a bare 5 is refused — the key is labelled, so the answer must be too',
+    markAnswer(['5'], r).marks === 0 && markAnswer(['5'], r).labelWrong === true
+    && /no label/.test(markAnswer(['5'], r).reason),
     JSON.stringify(markAnswer(['5'], r)));
   check('and it is NOT docked for failing to follow from the problem, which is what markWork would do',
-    markAnswer(['5'], r).marks === 2 && markWork(['y=5x', '5'], r).marks < 2,
-    `markAnswer=${markAnswer(['5'], r).marks} markWork=${markWork(['y=5x', '5'], r).marks}`);
+    markAnswer(["y'=5"], r).marks === 2 && markWork(['y=5x', '5'], r).marks < 2,
+    `markAnswer=${markAnswer(["y'=5"], r).marks} markWork=${markWork(['y=5x', '5'], r).marks}`);
   check('an unsimplified but equal answer is refused, and flagged as a near miss',
     markAnswer(["y'=5(1)x^{1-1}"], r).marks === 0
     && markAnswer(["y'=5(1)x^{1-1}"], r).nearMiss === true,
@@ -192,6 +195,28 @@ console.log('\n=== answer only, all or nothing ===');
   check('the reason distinguishes a near miss from a plain wrong answer',
     /not simplified|form asked/i.test(markAnswer(["y'=5(1)x^{1-1}"], r).reason)
     && /not the right answer/i.test(markAnswer(["y'=99"], r).reason));
+}
+{
+  // MATH 117 Q27. f(x) = 12x^2 - 12x was marked right: the value matches and
+  // the label, which is what "second derivative" is testing, was stripped.
+  const q27 = { variable: 'x', marks: 3, steps: [{ latex: "f''(x)=12x^2-12x", marks: 3 }] };
+  const m = a => markAnswer([a], q27);
+  check('f(x) = … is wrong for a second derivative', m('f(x)=12x^2-12x').marks === 0,
+    JSON.stringify(m('f(x)=12x^2-12x')));
+  check("f'(x) = … is wrong too — isFinalForm alone took it", m("f^{\\prime}(x)=12x^2-12x").marks === 0);
+  check("f''(x) = …, as the editor writes it, is right", m("f^{\\prime\\prime}(x)=12x^2-12x").marks === 3);
+  check("y'' and d²y/dx² stand in for f''(x)",
+    m("y^{\\prime\\prime}=12x^2-12x").marks === 3 && m('\\frac{d^2y}{dx^2}=12x^2-12x').marks === 3);
+  check("g''(x), f''(t) and F''(x) are wrong",
+    m("g''(x)=12x^2-12x").marks === 0 && m("f''(t)=12x^2-12x").marks === 0 && m("F''(x)=12x^2-12x").marks === 0);
+  check('the reason names both labels',
+    /wrong label: f\(x\) where the question asks for f''\(x\)/.test(m('f(x)=12x^2-12x').reason),
+    m('f(x)=12x^2-12x').reason);
+  check('a wrong VALUE is reported as a wrong value, whatever its label',
+    m("f(x)=12x^2").reason === 'Not the right answer.');
+  const lim = { variable: 'x', marks: 2, steps: [{ latex: '6', marks: 2 }] };
+  check('a key with no label judges none: 6 and L = 6 are both right',
+    markAnswer(['6'], lim).marks === 2 && markAnswer(['L=6'], lim).marks === 2);
 }
 {
   const solve = { variable: 'x', marks: 3, steps: [{ latex: 'x=3', marks: 3, label: 'Final answer' }] };

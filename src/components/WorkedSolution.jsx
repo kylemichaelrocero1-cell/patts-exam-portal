@@ -92,6 +92,15 @@ export default function WorkedSolution({
         score in full for a correct answer. Type <code>/</code> for a fraction,
         <code>^</code> for a power, and <code>'</code> for a prime.
       </p>
+      {/* sql/032 marks the label as part of the answer, so say so before
+          anyone is marked down for it. The examples are first derivatives on
+          purpose: which notation a higher derivative takes is what is being
+          tested, and the hint must not answer it. */}
+      <p className="ws-hint">
+        <strong>Write the notation, not just the value.</strong> When the question asks
+        for a derivative, begin with it — for example <code>f'(x) =</code> or{' '}
+        <code>dy/dx =</code>. A missing label, or the wrong one, is marked wrong.
+      </p>
     </div>
   );
 }

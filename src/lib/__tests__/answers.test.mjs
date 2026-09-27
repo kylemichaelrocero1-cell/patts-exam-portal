@@ -10,6 +10,7 @@ import {
   isMultiSelect, indexSet, correctSetOf, sameSet, isAnswerCorrect,
   toggleIndex, isSelected, hasAnswer, answeredCount, keySetIsValid,
   answerPayload, answersPayload, QUESTION_TYPES,
+  isItemAnswered, answeredOnPaper, keepOnPaper,
 } from '../answers.js';
 
 let pass = 0, fail = 0;
@@ -88,6 +89,42 @@ check('an empty tick list does NOT count as answered',
   answeredCount({ a: 1, b: [], c: [0, 1] }) === 2);
 check('choice zero counts as answered', answeredCount({ a: 0 }) === 1);
 check('nothing answered is nothing', answeredCount({}) === 0 && answeredCount(null) === 0);
+
+console.log('\n=== counting against the paper, not the saved entries ===');
+{
+  // The phone screenshot: a paper rebuilt with new ids, six answers still
+  // saved against the old ones, three answered on the paper as it is now.
+  const paper = [
+    { id: 'n1' }, { id: 'n2' }, { id: 'n3' }, { id: 'n4' },
+    { id: 'e1', question_type: 'essay' },
+    { id: 'w1', question_type: 'worked_solution' },
+  ];
+  const answers = { n1: 0, n2: 3, n3: [1, 2], o1: 1, o2: 0, o3: 2, o4: 1, o5: 3, o6: 0 };
+  check('entries alone overcount a rebuilt paper', answeredCount(answers) === 9);
+  check('the paper count sees only the three on this paper',
+    answeredOnPaper(paper, { answers }) === 3);
+  check('an essay counts once it has words, not whitespace',
+    answeredOnPaper(paper, { essays: { e1: '  ' } }) === 0
+    && answeredOnPaper(paper, { essays: { e1: 'Lift' } }) === 1);
+  check('a worked item counts once a line is written',
+    answeredOnPaper(paper, { work: { w1: { lines: [''] } } }) === 0
+    && answeredOnPaper(paper, { work: { w1: { lines: ['2x'] } } }) === 1);
+  check('a picked answer does not count for an essay with the same id',
+    answeredOnPaper(paper, { answers: { e1: 1 } }) === 0);
+  check('an unticked multi-answer item is not answered',
+    !isItemAnswered({ id: 'm', question_type: 'multi_select' }, { answers: { m: [] } }));
+  check('no paper yet counts nothing', answeredOnPaper([], { answers }) === 0);
+
+  const kept = keepOnPaper(answers, paper);
+  check('the stale entries are dropped', eq(Object.keys(kept), ['n1', 'n2', 'n3']));
+  check('what is kept is untouched', kept.n3 === answers.n3 && kept.n1 === 0);
+  const clean = { n1: 1 };
+  check('a clean map comes back as the same object', keepOnPaper(clean, paper) === clean);
+  check('an empty or missing map is left alone',
+    eq(keepOnPaper({}, paper), {}) && keepOnPaper(null, paper) === null);
+  check('numeric ids match their string keys',
+    eq(keepOnPaper({ 7: 1, 8: 2 }, [{ id: 7 }]), { 7: 1 }));
+}
 
 console.log('\n=== validating a key against the choices ===');
 check('a key inside the list is usable', keySetIsValid([0, 2], 3));

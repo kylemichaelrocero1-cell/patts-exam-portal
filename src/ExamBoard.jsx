@@ -7,7 +7,8 @@ import { clearPasswordGate } from './lib/examGateKeys';
 import Icon from './components/Icon';
 import AnswerReview from './components/AnswerReview';
 import {
-  isMultiSelect, isSelected, toggleIndex, hasAnswer, answeredCount, answersPayload,
+  isMultiSelect, isSelected, toggleIndex, answeredCount, answersPayload,
+  isItemAnswered, answeredOnPaper, keepOnPaper,
 } from './lib/answers';
 import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
@@ -25,11 +26,33 @@ const WorkedSolution = lazy(() => import('./components/WorkedSolution.jsx'));
 // header, the palette, the submit modal and three separate pushers — and a
 // count that disagreed with itself between any two of them would look, to a
 // student, exactly like lost work.
-function countAnswered(mc, essays, work) {
+//
+// Counted item by item against the paper, the way the navigator lights them.
+// Counting saved entries instead showed "9 / 30" beside a navigator with 3
+// lit, because a rebuilt paper's items have new ids and the old answers were
+// still saved against the old ones (see answeredOnPaper). Until the paper has
+// loaded there is nothing to count against, and the entries are all there is.
+function countAnswered(questions, mc, essays, work) {
+  if (questions?.length) return answeredOnPaper(questions, { answers: mc, essays, work });
   return answeredCount(mc)
     + Object.values(essays || {}).filter(t => t?.trim().length > 0).length
     + Object.values(work || {}).filter(hasWork).length;
 }
+
+// Question text and choices, scaled together. Kept per device — a phone
+// wants a bigger step than a laptop, and it is a reading preference, not
+// exam state.
+const TEXT_SCALES = [1, 1.12, 1.25];
+const TEXT_SIZE_KEY = 'exam_text_size';
+
+// When the clock crosses one of these, the student is told once, in words.
+// Turning the timer red at five minutes is easy to miss on a phone, where the
+// header is the one thing not being looked at.
+const TIME_NOTICES = [
+  { at: 60, text: '1 minute left. Your paper is submitted automatically when time runs out.' },
+  { at: 300, text: '5 minutes left. Check your unanswered and bookmarked questions.' },
+  { at: 600, text: '10 minutes left.' },
+];
 
 // How long to let an instructor's force submit finish before deciding what a
 // 'finished' row means. The claim and the marking are two round trips.
@@ -96,6 +119,38 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // this only makes sure they are told rather than left typing into a paper
   // that is no longer open.
   const [endedByInstructor, setEndedByInstructor] = useState(false);
+
+  // --- SCREEN-ONLY STATE (nothing here is saved with the paper) ---
+  // The question list as a bottom sheet on a phone. On a wider screen the
+  // same panel sits beside the question and this does nothing.
+  const [navOpen, setNavOpen] = useState(false);
+  const [textSize, setTextSize] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(TEXT_SIZE_KEY));
+      return TEXT_SCALES[v] ? v : 0;
+    } catch { return 0; }
+  });
+  const [timeNotice, setTimeNotice] = useState(null);
+  const lastTimeLeftRef = useRef(null);
+  // The figure viewer covers the whole screen, so nothing can move to another
+  // question while it is open; it always opens fitted to the screen.
+  const [figureOpen, setFigureOpen] = useState(false);
+  const [figureFull, setFigureFull] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine !== false);
+  const [reconnects, setReconnects] = useState(0);
+  // A phone drawing the desktop layout: Safari's page zoom turned down, or
+  // "Request Desktop Website" left on. Everything is then a third of the size
+  // and nothing here can undo it — the browser setting has to change. Read
+  // once; a touch screen whose short side is phone-sized but whose page is
+  // laid out wider than any phone.
+  const [zoomedOutPhone] = useState(() => {
+    try {
+      const shortSide = Math.min(window.screen.width, window.screen.height);
+      return navigator.maxTouchPoints > 0 && shortSide > 0 && shortSide < 600
+        && window.innerWidth > 780;
+    } catch { return false; }
+  });
+  const [zoomNoticeClosed, setZoomNoticeClosed] = useState(false);
 
   // --- LIVE PROCTORING STATES ---
   // Restored from localStorage so a locked student sees the lock screen immediately on
@@ -260,7 +315,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             // back exactly as it was, clock included.
             await supabase.from('live_sessions').update({
               status: 'active',
-              answers_count: countAnswered(answers, essayAnswers, workAnswers),
+              answers_count: countAnswered(questions, answers, essayAnswers, workAnswers),
               violation_count: tabSwitchCount,
               updated_at: new Date()
             }).eq('id', existing.id);
@@ -283,8 +338,8 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             const serverMax = new Date(existing.created_at).getTime() + (exam.duration_minutes * 60 * 1000) + 30000;
             if (endTimeRef.current > serverMax) endTimeRef.current = serverMax;
           }
-          const localCount = countAnswered(answers, essayAnswers, workAnswers);
-          const serverCount = countAnswered(existing.answers_json, existing.essay_answers_json, existing.work_answers_json);
+          const localCount = countAnswered(questions, answers, essayAnswers, workAnswers);
+          const serverCount = countAnswered(questions, existing.answers_json, existing.essay_answers_json, existing.work_answers_json);
           // Use existing.answers_count as a floor so a page refresh never resets the count to 0
           // when answers_json is missing (column not migrated) or localStorage was cleared.
           const safeCount = Math.max(localCount, serverCount, existing.answers_count || 0);
@@ -305,7 +360,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             student_name: student.full_name,
             status: 'active',
             violation_count: tabSwitchCount,
-            answers_count: countAnswered(answers, essayAnswers, workAnswers)
+            answers_count: countAnswered(questions, answers, essayAnswers, workAnswers)
           }])
           .select()
           .single();
@@ -427,7 +482,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     return () => {
       if (violationPushDebounceRef.current) clearTimeout(violationPushDebounceRef.current);
     };
-  }, [tabSwitchCount, violationLogs, liveSessionId]);
+  }, [tabSwitchCount, violationLogs, liveSessionId, reconnects]);
 
   // --- COUNT PUSHER (2s debounce) — writes ONLY answers_count so admin monitor is always current.
   // Isolated from the JSON pusher: if answers_json/essay_answers_json columns are missing the
@@ -437,12 +492,16 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     countPushDebounceRef.current = setTimeout(() => {
       countPushDebounceRef.current = null;
-      const liveCount = countAnswered(answers, essayAnswers, workAnswers);
+      const liveCount = countAnswered(questions, answers, essayAnswers, workAnswers);
       // Never write below the server-known count from session init — prevents a page refresh
       // on a new device from briefly resetting the count to 0 in the admin monitor.
-      const safeCount = Math.max(liveCount, minAnswersCountRef.current);
+      // Only until the paper has loaded, though: that floor was counted from saved
+      // entries, which can include answers to items no longer on the paper, and once
+      // the paper is here the count against it is the true one.
+      const paperLoaded = questions.length > 0;
+      const safeCount = paperLoaded ? liveCount : Math.max(liveCount, minAnswersCountRef.current);
       // Once the live count catches up, the floor is no longer needed.
-      if (liveCount >= minAnswersCountRef.current) minAnswersCountRef.current = 0;
+      if (paperLoaded || liveCount >= minAnswersCountRef.current) minAnswersCountRef.current = 0;
       supabase.from('live_sessions').update({
         answers_count: safeCount,
         updated_at: new Date()
@@ -453,7 +512,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     return () => {
       if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
     };
-  }, [answers, essayAnswers, workAnswers, liveSessionId]);
+  }, [answers, essayAnswers, workAnswers, questions, liveSessionId, reconnects]);
 
   // --- JSON PROGRESS PUSHER (5s debounce) — writes full answers for cross-device resume.
   // Requires answers_json, essay_answers_json, exam_set columns in live_sessions.
@@ -475,7 +534,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     return () => {
       if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
     };
-  }, [answers, essayAnswers, workAnswers, liveSessionId]);
+    // `reconnects` re-sends on coming back online: a push made with no signal
+    // fails, and nothing else would try again until the next answer changed.
+  }, [answers, essayAnswers, workAnswers, liveSessionId, reconnects]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {
@@ -495,6 +556,39 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       return next;
     });
   };
+
+  // --- ANSWERS TO ITEMS THAT ARE NOT ON THIS PAPER ---
+  // A rebuilt paper has new question ids, and whatever was saved against the
+  // old ones — on this device, or in the live session a resume restores from —
+  // comes back with nothing on screen to belong to. It cannot be marked (the
+  // server marks against the paper's own items) but it was being counted, and
+  // pushed to the live monitor as if it were progress. Dropped once the paper
+  // is here, and again if a restore from the server lands after that.
+  useEffect(() => {
+    if (questions.length === 0) return;
+    const prune = (map, setter) => {
+      if (keepOnPaper(map, questions) !== map) setter(prev => keepOnPaper(prev, questions));
+    };
+    prune(answers, setAnswers);
+    prune(essayAnswers, setEssayAnswers);
+    prune(workAnswers, setWorkAnswers);
+    prune(flaggedQuestions, setFlaggedQuestions);
+  }, [questions, answers, essayAnswers, workAnswers, flaggedQuestions]);
+
+  // --- CONNECTION ---
+  // Answers are written to this device on every change, so losing signal
+  // loses nothing — but a student on mobile data cannot know that, and the
+  // live session stops hearing from them. Say so, and push again on return.
+  useEffect(() => {
+    const up = () => { setIsOnline(true); setReconnects(n => n + 1); };
+    const down = () => setIsOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
 
   // --- AUTO-SAVER ---
   useEffect(() => {
@@ -692,6 +786,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       setIsLoading(false);
       setIsSubmitting(false);
       setShowSubmitModal(false);
+      // Spent either way. After a failure the student carries on answering,
+      // and a retry — or the clock running out — must send what they have
+      // now, not what they had when they first pressed Submit.
+      answersSnapshotRef.current = null;
+      essaySnapshotRef.current = null;
+      workSnapshotRef.current = null;
     }
   }, [answers, essayAnswers, workAnswers, questions, tabSwitchCount, violationLogs, timeLeft, startingSeconds, liveSessionId, student, exam, isSubmitting]);
   // answersSnapshotRef / essaySnapshotRef intentionally excluded — refs are stable
@@ -952,6 +1052,108 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exam?.id, student?.id, exam?.shuffle_choices, exam?.shuffle_questions]);
 
+  // --- MOVING BETWEEN QUESTIONS ---
+  const goTo = useCallback((n) => {
+    setCurrentQuestion(Math.min(Math.max(1, n), Math.max(1, questions.length)));
+    setNavOpen(false);
+  }, [questions.length]);
+
+  // Snapshot the answers as the confirmation opens, so what is submitted is
+  // what the student was looking at when they confirmed.
+  const openSubmit = () => {
+    answersSnapshotRef.current = { ...answers };
+    essaySnapshotRef.current = { ...essayAnswers };
+    workSnapshotRef.current = { ...workAnswers };
+    setNavOpen(false);
+    setShowSubmitModal(true);
+  };
+
+  // ...and let go of it if they back out. Kept, the snapshot outlived the
+  // modal: a student who opened it, cancelled, and carried on answering had
+  // the OLD snapshot sent when the clock ran out or the paper was closed on
+  // them, and everything answered after that cancel was lost.
+  const closeSubmit = () => {
+    setShowSubmitModal(false);
+    setConfirmText('');
+    answersSnapshotRef.current = null;
+    essaySnapshotRef.current = null;
+    workSnapshotRef.current = null;
+  };
+
+  // A new question starts at its top. On a phone the Next button is at the
+  // bottom of a long page, and without this the next question opened already
+  // scrolled past its own text.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [currentQuestion]);
+
+  useEffect(() => {
+    try { localStorage.setItem(TEXT_SIZE_KEY, String(textSize)); } catch { /* private mode */ }
+  }, [textSize]);
+
+  // --- TIME NOTICES ---
+  // Only on the way down through a mark, never for one already passed when
+  // the page opened — except that a refresh deep into the paper does cross
+  // them all at once, and then the nearest is the one worth saying.
+  useEffect(() => {
+    if (!sittingResolved || scoreDisplay || isSubmitting) return;
+    const prev = lastTimeLeftRef.current;
+    lastTimeLeftRef.current = timeLeft;
+    if (prev === null || timeLeft <= 0) return;
+    const crossed = TIME_NOTICES.find(n => prev > n.at && timeLeft <= n.at && startingSeconds > n.at);
+    if (crossed) setTimeNotice(crossed.text);
+  }, [timeLeft, sittingResolved, scoreDisplay, isSubmitting, startingSeconds]);
+
+  useEffect(() => {
+    if (!timeNotice) return;
+    const t = setTimeout(() => setTimeNotice(null), 9000);
+    return () => clearTimeout(t);
+  }, [timeNotice]);
+
+  // --- KEYBOARD (a laptop; a phone has no keys to press) ---
+  // ← → to move, and the letter beside a choice to pick it. Never while the
+  // student is typing — an essay, a maths answer, the confirmation box — and
+  // never with a modifier held, which is the anti-cheat handler's territory.
+  useEffect(() => {
+    // Only while the paper is actually being sat. These are registered on
+    // every screen, and a locked student — or one already submitted — must not
+    // be able to change an answer from the keyboard.
+    if (isLoading || scoreDisplay || isSubmitting || endedByInstructor || examStatus === 'locked') return;
+    if (showSubmitModal || figureOpen || navOpen) return;
+    const onKey = (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.target?.closest?.('input, textarea, select, math-field, [contenteditable="true"]')) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); goTo(currentQuestion + 1); return; }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(currentQuestion - 1); return; }
+      const q = questions[currentQuestion - 1];
+      if (!q || isWorkedSolution(q) || q.question_type === 'essay') return;
+      if (!/^[a-z]$/i.test(e.key)) return;
+      const position = e.key.toLowerCase().charCodeAt(0) - 97;
+      const original = (q.choice_order || [])[position];
+      if (original === undefined) return;
+      e.preventDefault();
+      setAnswers(prev => ({
+        ...prev,
+        [q.id]: isMultiSelect(q) ? toggleIndex(prev[q.id], original) : original,
+      }));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [questions, currentQuestion, showSubmitModal, figureOpen, navOpen, goTo,
+      isLoading, scoreDisplay, isSubmitting, endedByInstructor, examStatus]);
+
+  // Escape closes whatever is open over the paper.
+  useEffect(() => {
+    if (!navOpen && !figureOpen) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      setNavOpen(false);
+      setFigureOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen, figureOpen]);
+
   if (isLoading && !isSubmitting) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)' }}>
       <div style={{ textAlign: 'center', color: 'var(--ink-3)' }}>
@@ -1151,32 +1353,103 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   const currentQ = questions[currentQuestion - 1] || {};
   const multiSelect = isMultiSelect(currentQ);
   const worked = isWorkedSolution(currentQ);
+  const isEssay = currentQ?.question_type === 'essay';
+  const isLast = questions.length > 0 && currentQuestion === questions.length;
+  const isFlagged = !!flaggedQuestions[currentQ?.id];
+  const lowTime = timeLeft <= 300;
+
+  // One count, read everywhere on this screen — see countAnswered().
+  const totalAnswered = countAnswered(questions, answers, essayAnswers, workAnswers);
+  const allAnswered = questions.length > 0 && totalAnswered === questions.length;
+  // Question NUMBERS, as the student sees them on the navigator.
+  const answeredMaps = { answers, essays: essayAnswers, work: workAnswers };
+  const unansweredNos = questions
+    .map((q, i) => (isItemAnswered(q, answeredMaps) ? null : i + 1)).filter(Boolean);
+  const flaggedNos = questions
+    .map((q, i) => (flaggedQuestions[q.id] ? i + 1 : null)).filter(Boolean);
+  // The next one after this question, wrapping round to the first.
+  const nextOf = list => list.find(n => n > currentQuestion) ?? list[0];
+
+  // "submit now" as a phone types it — often with the trailing space that
+  // predictive text adds, which used to leave the Submit button greyed out
+  // with no hint why.
+  const confirmed = confirmText.trim().replace(/\s+/g, ' ').toLowerCase() === 'submit now';
+
+  const pickChoice = originalIndex => setAnswers(prev => ({
+    ...prev,
+    [currentQ.id]: multiSelect ? toggleIndex(prev[currentQ.id], originalIndex) : originalIndex,
+  }));
 
   return (
-    <div className="prevent-select" style={{ minHeight: '100vh', background: 'var(--paper)' }} onContextMenu={e => e.preventDefault()}>
+    <div
+      className={`exam-shell prevent-select${navOpen ? ' nav-open' : ''}`}
+      style={{ '--q-scale': TEXT_SCALES[textSize] }}
+      onContextMenu={e => e.preventDefault()}
+    >
 
-      {/* ── Submit confirmation modal ── */}
+      {/* ── Submit confirmation ── */}
       {showSubmitModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div className="card" style={{ maxWidth: 440, width: '100%', padding: 0, overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
-            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 28px', borderBottom: '3px solid var(--gold)' }}>
-              <h2 style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
+        <div className="exam-overlay" role="dialog" aria-modal="true" aria-labelledby="submit-title">
+          <div className="card exam-dialog">
+            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 24px', borderBottom: '3px solid var(--gold)' }}>
+              <h2 id="submit-title" style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
               <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
-                {countAnswered(answers, essayAnswers, workAnswers)} of {questions.length} questions answered
+                {totalAnswered} of {questions.length} questions answered
               </p>
             </div>
-            <div style={{ padding: '24px 28px' }}>
-              {(() => {
-                const totalAnswered = countAnswered(answers, essayAnswers, workAnswers);
-                const unanswered = questions.length - totalAnswered;
-                return unanswered > 0 ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--warn)', fontWeight: 500 }}>
+            <div style={{ padding: '20px 24px 24px' }}>
+              {/* Not just how many are left, but which — each one a way back
+                  to it. A count alone left the student to hunt through the
+                  navigator for the gap. */}
+              {unansweredNos.length > 0 && (
+                <div className="submit-list warn">
+                  <div className="submit-list-title">
                     <Icon name="alert" size={15} />
-                    {unanswered} question{unanswered !== 1 ? 's' : ''} left unanswered.
+                    {unansweredNos.length} question{unansweredNos.length !== 1 ? 's' : ''} left unanswered
                   </div>
-                ) : null;
-              })()}
-              <p style={{ margin: '0 0 14px', color: 'var(--ink-3)', fontSize: 13.5, textAlign: 'center' }}>
+                  <div className="submit-chips">
+                    {unansweredNos.map(n => (
+                      <button key={n} type="button" className="submit-chip"
+                        onClick={() => { closeSubmit(); goTo(n); }}
+                        aria-label={`Go to question ${n}`}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {flaggedNos.length > 0 && (
+                <div className="submit-list flag">
+                  <div className="submit-list-title">
+                    <Icon name="bookmark" size={14} color="#E67E22" />
+                    {flaggedNos.length} bookmarked for review
+                  </div>
+                  <div className="submit-chips">
+                    {flaggedNos.map(n => (
+                      <button key={n} type="button" className="submit-chip"
+                        onClick={() => { closeSubmit(); goTo(n); }}
+                        aria-label={`Go to bookmarked question ${n}`}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(unansweredNos.length > 0 || flaggedNos.length > 0) && (
+                <p style={{ margin: '-4px 0 16px', fontSize: 12, color: 'var(--ink-4)' }}>
+                  Tap a number to go back to that question.
+                </p>
+              )}
+              {allAnswered && flaggedNos.length === 0 && (
+                <div className="submit-list ok">
+                  <div className="submit-list-title">
+                    <Icon name="check-circle" size={15} />
+                    Every question has an answer.
+                  </div>
+                </div>
+              )}
+
+              <p style={{ margin: '0 0 12px', color: 'var(--ink-3)', fontSize: 13.5, textAlign: 'center' }}>
                 Type <strong style={{ color: 'var(--navy)' }}>submit now</strong> to confirm:
               </p>
               <input
@@ -1185,17 +1458,21 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 value={confirmText}
                 onChange={e => setConfirmText(e.target.value)}
                 placeholder="type here…"
-                style={{ textAlign: 'center', fontSize: 16, borderColor: confirmText.toLowerCase() === 'submit now' ? 'var(--ok)' : undefined }}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete="off"
+                spellCheck={false}
+                enterKeyHint="done"
+                style={{ textAlign: 'center', fontSize: 16, borderColor: confirmed ? 'var(--ok)' : undefined }}
               />
               <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
-                <button className="btn ghost" style={{ flex: 1 }}
-                  onClick={() => { setShowSubmitModal(false); setConfirmText(''); }}>
-                  Cancel
+                <button className="btn ghost" style={{ flex: 1 }} onClick={closeSubmit}>
+                  Keep working
                 </button>
                 <button
                   className="btn"
-                  style={{ flex: 1, background: confirmText.toLowerCase() === 'submit now' ? 'var(--ok)' : 'var(--ink-4)', border: 'none' }}
-                  disabled={confirmText.toLowerCase() !== 'submit now' || isSubmitting}
+                  style={{ flex: 1, background: confirmed ? 'var(--ok)' : 'var(--ink-4)', border: 'none' }}
+                  disabled={!confirmed || isSubmitting}
                   onClick={executeSubmission}
                 >
                   {isSubmitting ? 'Saving…' : 'Submit Exam'}
@@ -1207,9 +1484,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       )}
 
       {/* ── Sticky exam header ── */}
-      <header className="patts-header" style={{ padding: '11px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1 }}>
-          <img src="/patts-logo.png" alt="PATTS" style={{ height: 34, objectFit: 'contain', flexShrink: 0 }} />
+      <header className="patts-header exam-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1, minWidth: 0 }}>
+          <img src="/patts-logo.png" alt="PATTS" className="exam-logo" />
           <p className="exam-student-name" style={{ margin: 0, fontSize: 12.5, color: 'rgba(255,255,255,.68)', fontWeight: 500 }}>
             {student?.full_name} &nbsp;·&nbsp; Set {examSet}
           </p>
@@ -1218,7 +1495,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           <div className="exam-header-meta" style={{ fontSize: 11, textAlign: 'right', color: 'rgba(255,255,255,.52)', lineHeight: 1.5 }}>
             Local Time<br /><strong style={{ color: 'white', fontSize: 13 }}>{localTime}</strong>
           </div>
-          <div style={{
+          <div title="Tab switches recorded" style={{
             display: 'flex', alignItems: 'center', gap: 6,
             background: tabSwitchCount > 0 ? 'rgba(231,76,60,.25)' : 'rgba(255,255,255,.1)',
             border: `1px solid ${tabSwitchCount > 0 ? 'rgba(231,76,60,.5)' : 'rgba(255,255,255,.15)'}`,
@@ -1228,12 +1505,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             <Icon name="flag" size={13} />
             {tabSwitchCount}
           </div>
-          <div className="exam-timer" style={{
+          <div className="exam-timer" role="timer" aria-label="Time left" style={{
             fontSize: 22, fontWeight: 800, letterSpacing: '-.02em',
-            color: timeLeft <= 300 ? '#FF8F85' : 'white',
-            background: timeLeft <= 300 ? 'rgba(231,76,60,.22)' : 'rgba(255,255,255,.1)',
+            color: lowTime ? '#FF8F85' : 'white',
+            background: lowTime ? 'rgba(231,76,60,.22)' : 'rgba(255,255,255,.1)',
             padding: '6px 16px', borderRadius: 'var(--r-sm)',
-            border: timeLeft <= 300 ? '1px solid rgba(231,76,60,.4)' : '1px solid rgba(255,255,255,.14)',
+            border: lowTime ? '1px solid rgba(231,76,60,.4)' : '1px solid rgba(255,255,255,.14)',
             fontVariantNumeric: 'tabular-nums',
           }}>
             {formatTime(timeLeft)}
@@ -1241,17 +1518,51 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         </div>
       </header>
 
+      {timeNotice && (
+        <div className="exam-toast" role="status" aria-live="polite">
+          <Icon name="clock" size={15} />
+          <span style={{ flex: 1 }}>{timeNotice}</span>
+          <button type="button" className="exam-toast-close" onClick={() => setTimeNotice(null)} aria-label="Dismiss">
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      )}
+
       {/* ── Exam body ── */}
-      <div className="exam-layout" style={{ padding: '20px 24px 8px' }}>
+      <div className="exam-layout">
 
         {/* Main question panel */}
         <main className="main-panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
+          {zoomedOutPhone && !zoomNoticeClosed && (
+            <div className="exam-notice info zoom">
+              <Icon name="info" size={18} />
+              <span style={{ flex: 1 }}>
+                <strong>This page is showing its computer layout, so everything is tiny.</strong>{' '}
+                On iPhone, tap <strong>aA</strong> in the address bar, set the zoom to 100% and choose
+                {' '}<strong>Request Mobile Website</strong>. On Android, open the browser menu and untick
+                {' '}<strong>Desktop site</strong>. Your answers are kept.
+              </span>
+              <button type="button" className="exam-notice-close" onClick={() => setZoomNoticeClosed(true)} aria-label="Dismiss">
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+          )}
+          {!isOnline && (
+            <div className="exam-notice warn" role="status">
+              <Icon name="alert" size={16} />
+              <span>
+                <strong>You are offline.</strong> Keep answering — everything is saved on this
+                device and is sent as soon as you are back online. Reconnect before you submit.
+              </span>
+            </div>
+          )}
+
+          <div className="q-meta">
             <span style={{ background: 'var(--navy)', color: 'white', borderRadius: 'var(--r-sm)', padding: '4px 12px', fontSize: 12.5, fontWeight: 700, letterSpacing: '.02em', flexShrink: 0 }}>
               Q {currentQuestion}
             </span>
             <span style={{ color: 'var(--ink-4)', fontSize: 13, flexShrink: 0 }}>of {questions.length}</span>
-            {currentQ?.question_type === 'essay' && (
+            {isEssay && (
               <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
                 Essay
               </span>
@@ -1274,41 +1585,33 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 Select all that apply
               </span>
             )}
-            {flaggedQuestions[currentQ?.id] && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#FFF6E5', border: '1px solid #F0CA80', color: '#A56B0A', padding: '3px 9px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>
-                <Icon name="bookmark" size={11} color="#E67E22" />
-                Bookmarked
-              </span>
-            )}
             <button
+              type="button"
+              className={`q-bookmark${isFlagged ? ' on' : ''}`}
               onClick={() => toggleFlag(currentQ?.id)}
-              title={flaggedQuestions[currentQ?.id] ? 'Remove bookmark' : 'Bookmark for review'}
-              style={{
-                marginLeft: 'auto', flexShrink: 0,
-                width: 30, height: 30,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: flaggedQuestions[currentQ?.id] ? '#FFF6E5' : 'transparent',
-                border: `1.5px solid ${flaggedQuestions[currentQ?.id] ? '#F0CA80' : 'var(--line)'}`,
-                color: flaggedQuestions[currentQ?.id] ? '#E67E22' : 'var(--ink-4)',
-                borderRadius: 'var(--r-sm)', cursor: 'pointer', transition: 'all var(--t-1)',
-              }}
+              aria-pressed={isFlagged}
+              title={isFlagged ? 'Remove bookmark' : 'Bookmark for review'}
             >
               <Icon name="bookmark" size={14} />
+              <span className="q-bookmark-label">{isFlagged ? 'Bookmarked' : 'Bookmark'}</span>
             </button>
           </div>
 
-          <p style={{ fontSize: 17, lineHeight: 1.68, color: 'var(--ink-1)', minHeight: 72, margin: '0 0 16px' }}>
+          <p className="q-text">
             {currentQ?.question_text}
           </p>
 
           {currentQ?.image_url && (
-            <div style={{ margin: '0 0 20px', borderRadius: 'var(--r-md)', overflow: 'hidden', border: '1.5px solid var(--line)', background: 'var(--surface-2)', textAlign: 'center' }}>
-              <img
-                src={currentQ.image_url}
-                alt="Question figure"
-                draggable={false}
-                style={{ maxWidth: '100%', maxHeight: 380, objectFit: 'contain', display: 'inline-block', verticalAlign: 'middle' }}
-              />
+            <div
+              className="q-figure"
+              role="button"
+              tabIndex={0}
+              aria-label="Enlarge the figure"
+              onClick={() => { setFigureFull(false); setFigureOpen(true); }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFigureFull(false); setFigureOpen(true); } }}
+            >
+              <img src={currentQ.image_url} alt="Question figure" draggable={false} />
+              <span className="q-figure-hint"><Icon name="search" size={12} /> Tap to enlarge</span>
             </div>
           )}
 
@@ -1327,9 +1630,11 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 onChange={v => setWorkAnswers(prev => ({ ...prev, [currentQ.id]: v }))}
               />
             </Suspense>
-          ) : currentQ?.question_type === 'essay' ? (
+          ) : isEssay ? (
             <div>
               <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)' }}>Type your answer in the box below.</p>
+              {/* 16px and up: iOS zooms the whole page in on any field
+                  smaller than that the moment it is tapped. */}
               <textarea
                 value={essayAnswers[currentQ.id] || ''}
                 onChange={e => setEssayAnswers(prev => ({ ...prev, [currentQ.id]: e.target.value }))}
@@ -1339,7 +1644,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                 style={{
                   width: '100%', padding: '14px 16px', border: '2px solid', boxSizing: 'border-box',
                   borderColor: essayAnswers[currentQ.id]?.trim() ? 'var(--navy)' : 'var(--line)',
-                  borderRadius: 'var(--r-md)', fontSize: 15, lineHeight: 1.6,
+                  borderRadius: 'var(--r-md)', fontSize: 'calc(16px * var(--q-scale, 1))', lineHeight: 1.6,
                   resize: 'vertical', fontFamily: 'inherit', color: 'var(--ink-1)',
                   background: 'var(--white)', transition: 'border-color var(--t-fast)',
                   outline: 'none',
@@ -1350,33 +1655,33 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
               </div>
             </div>
           ) : (
-            <div className="choices">
+            <div className="choices" role={multiSelect ? 'group' : 'radiogroup'} aria-label="Choices">
               {/* A multi-answer item (sql/018) holds an ARRAY of indices and
                   ticks rather than picks, so a second click on the same choice
                   unticks it instead of doing nothing. A single-answer item
-                  keeps holding one index. */}
-              {(currentQ?.choice_order || []).map((originalIndex) => {
+                  keeps holding one index. The letter is the position ON
+                  SCREEN — it names what the student sees, and the stored
+                  index underneath is what gets marked. */}
+              {(currentQ?.choice_order || []).map((originalIndex, position) => {
                 // The stored index, never the position on screen, so marking
                 // is unaffected by the order the choices are shown in.
                 const picked = multiSelect
                   ? isSelected(answers[currentQ?.id], originalIndex)
                   : answers[currentQ?.id] === originalIndex;
+                const letter = position < 26 ? String.fromCharCode(65 + position) : String(position + 1);
                 return (
                   <button
                     key={originalIndex}
+                    type="button"
                     className={`choice-btn ${picked ? 'selected' : ''} ${multiSelect ? 'tickable' : ''}`}
-                    aria-pressed={multiSelect ? picked : undefined}
-                    onClick={() => setAnswers(prev => ({
-                      ...prev,
-                      [currentQ.id]: multiSelect
-                        ? toggleIndex(prev[currentQ.id], originalIndex)
-                        : originalIndex,
-                    }))}
+                    role={multiSelect ? 'checkbox' : 'radio'}
+                    aria-checked={picked}
+                    onClick={() => pickChoice(originalIndex)}
                   >
-                    {multiSelect && (
-                      <span className="tick-box" aria-hidden="true">{picked ? '\u2713' : ''}</span>
-                    )}
-                    <span className={multiSelect ? 'tick-text' : undefined}>
+                    <span className="choice-key" aria-hidden="true">
+                      {multiSelect && picked ? '✓' : letter}
+                    </span>
+                    <span className="choice-text">
                       {(currentQ.choice_list || [])[originalIndex]}
                     </span>
                   </button>
@@ -1385,112 +1690,132 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 28, gap: 12 }}>
+          {/* On a phone these are replaced by the bar pinned to the bottom of
+              the screen, which is where a thumb already is. */}
+          <div className="exam-inline-nav">
             <button
-              className="btn ghost" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-              onClick={() => setCurrentQuestion(q => Math.max(1, q - 1))}
+              className="btn ghost" style={{ flex: 1 }}
+              onClick={() => goTo(currentQuestion - 1)}
               disabled={currentQuestion === 1}
             >
               <Icon name="arrow-left" size={15} /> Previous
             </button>
-            <button
-              className="btn" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-              onClick={() => setCurrentQuestion(q => Math.min(questions.length, q + 1))}
-              disabled={currentQuestion === questions.length}
-            >
-              Next <Icon name="arrow-right" size={15} />
-            </button>
+            {isLast ? (
+              <button
+                className="btn" style={{ flex: 1, background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none' }}
+                onClick={openSubmit}
+              >
+                <Icon name="check-circle" size={15} /> Review &amp; Submit
+              </button>
+            ) : (
+              <button className="btn" style={{ flex: 1 }} onClick={() => goTo(currentQuestion + 1)}>
+                Next <Icon name="arrow-right" size={15} />
+              </button>
+            )}
           </div>
+          <p className="exam-keys-hint">
+            Tip: <kbd>←</kbd> <kbd>→</kbd> move between questions · press the letter beside a choice to pick it
+          </p>
         </main>
 
-        {/* Side panel — navigator + submit */}
-        <aside className="side-panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        {/* The question list. Beside the paper on a wide screen; on a phone a
+            sheet that slides up from the bottom bar, so the question itself
+            gets the whole screen. */}
+        <div className="sheet-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
+        <aside className="side-panel" aria-label="Question navigator">
+          <div className="sheet-handle" aria-hidden="true" />
+          <div className="side-head">
             <div className="eyebrow" style={{ fontSize: 10 }}>Navigator</div>
-            <span style={{ fontSize: 12, color: 'var(--ink-4)', fontWeight: 600 }}>
-              {countAnswered(answers, essayAnswers, workAnswers)}/{questions.length}
-            </span>
+            <span className="side-count">{totalAnswered}/{questions.length}</span>
+            <button type="button" className="sheet-close" onClick={() => setNavOpen(false)} aria-label="Close the question list">
+              <Icon name="x" size={16} />
+            </button>
+          </div>
+
+          <div className="nav-legend" aria-hidden="true">
+            <span><i className="lg-answered" />Answered</span>
+            <span><i className="lg-current" />Current</span>
+            <span><i className="lg-open" />Not answered</span>
+            <span><i className="lg-flagged" />Bookmarked</span>
           </div>
 
           <div className="grid-container">
             {questions.map((q, i) => {
-              const isAnswered = isWorkedSolution(q)
-                ? hasWork(workAnswers[q.id])
-                : q.question_type === 'essay'
-                  ? (essayAnswers[q.id]?.trim().length > 0)
-                  : hasAnswer(answers[q.id]);
-              const isFlagged = !!flaggedQuestions[q.id];
+              const isAnswered = isItemAnswered(q, answeredMaps);
+              const flagged = !!flaggedQuestions[q.id];
+              const isCurrent = currentQuestion === i + 1;
               return (
                 <div
                   key={q.id}
-                  onClick={() => setCurrentQuestion(i + 1)}
-                  className={`grid-item ${currentQuestion === i + 1 ? 'active' : ''} ${isAnswered ? 'answered' : ''}`}
-                  style={{ position: 'relative' }}
+                  role="button"
+                  tabIndex={0}
+                  aria-current={isCurrent ? 'step' : undefined}
+                  aria-label={`Question ${i + 1}, ${isAnswered ? 'answered' : 'not answered'}${flagged ? ', bookmarked' : ''}`}
+                  onClick={() => goTo(i + 1)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goTo(i + 1); } }}
+                  className={`grid-item ${isCurrent ? 'active' : ''} ${isAnswered ? 'answered' : ''}`}
                 >
                   {i + 1}
-                  {isFlagged && (
-                    <span style={{
-                      position: 'absolute', top: 2, right: 2,
-                      width: 5, height: 5, borderRadius: '50%',
-                      background: currentQuestion === i + 1 ? 'var(--navy)' : '#E67E22',
-                      display: 'block', flexShrink: 0,
-                    }} />
-                  )}
+                  {flagged && <span className="grid-flag" />}
                 </div>
               );
             })}
           </div>
 
           <div style={{ marginTop: 16, padding: 12, background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
-            {(() => {
-              const totalAnswered = countAnswered(answers, essayAnswers, workAnswers);
-              const flaggedCount = Object.keys(flaggedQuestions).length;
-              return (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>
-                    <span>Answered</span>
-                    <span style={{ fontWeight: 700, color: totalAnswered === questions.length ? 'var(--ok)' : 'var(--navy)' }}>
-                      {totalAnswered} / {questions.length}
-                    </span>
-                  </div>
-                  <div style={{ background: 'var(--line)', borderRadius: 'var(--r-full)', height: 5, overflow: 'hidden', marginBottom: flaggedCount > 0 ? 10 : 0 }}>
-                    <div style={{
-                      height: '100%', borderRadius: 'var(--r-full)',
-                      background: totalAnswered === questions.length ? 'var(--ok)' : 'var(--gold)',
-                      width: `${questions.length > 0 ? (totalAnswered / questions.length) * 100 : 0}%`,
-                      transition: 'width var(--t)',
-                    }} />
-                  </div>
-                  {flaggedCount > 0 && (() => {
-                    const flaggedIndices = questions
-                      .map((q, i) => ({ i, id: q.id }))
-                      .filter(({ id }) => flaggedQuestions[id]);
-                    const nextFlagged = flaggedIndices.find(({ i }) => i >= currentQuestion) || flaggedIndices[0];
-                    return (
-                      <button
-                        onClick={() => setCurrentQuestion(nextFlagged.i + 1)}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                          background: '#FFF6E5', border: '1px solid #F0CA80',
-                          borderRadius: 'var(--r-xs)', padding: '6px 10px',
-                          color: '#A56B0A', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                        }}
-                      >
-                        <Icon name="bookmark" size={12} color="#E67E22" />
-                        {flaggedCount} bookmarked — jump to next
-                        <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
-                      </button>
-                    );
-                  })()}
-                </>
-              );
-            })()}
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ink-3)', marginBottom: 6 }}>
+              <span>Answered</span>
+              <span style={{ fontWeight: 700, color: allAnswered ? 'var(--ok)' : 'var(--navy)' }}>
+                {totalAnswered} / {questions.length}
+              </span>
+            </div>
+            <div style={{ background: 'var(--line)', borderRadius: 'var(--r-full)', height: 5, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 'var(--r-full)',
+                background: allAnswered ? 'var(--ok)' : 'var(--gold)',
+                width: `${questions.length > 0 ? (totalAnswered / questions.length) * 100 : 0}%`,
+                transition: 'width var(--t)',
+              }} />
+            </div>
+            {unansweredNos.length > 0 && (
+              <button type="button" className="jump-btn unanswered" onClick={() => goTo(nextOf(unansweredNos))}>
+                <Icon name="circle" size={12} />
+                {unansweredNos.length} unanswered — go to next
+                <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
+              </button>
+            )}
+            {flaggedNos.length > 0 && (
+              <button type="button" className="jump-btn flagged" onClick={() => goTo(nextOf(flaggedNos))}>
+                <Icon name="bookmark" size={12} color="#E67E22" />
+                {flaggedNos.length} bookmarked — go to next
+                <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
+              </button>
+            )}
+          </div>
+
+          <div className="text-size">
+            <span>Text size</span>
+            <div className="text-size-btns" role="group" aria-label="Text size">
+              {TEXT_SCALES.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className={i === textSize ? 'on' : ''}
+                  aria-pressed={i === textSize}
+                  aria-label={['Normal', 'Large', 'Largest'][i]}
+                  onClick={() => setTextSize(i)}
+                  style={{ fontSize: 12 + i * 3 }}
+                >
+                  A
+                </button>
+              ))}
+            </div>
           </div>
 
           <button
             className="btn"
             style={{ marginTop: 14, width: '100%', background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none', boxShadow: 'var(--s-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-            onClick={() => { answersSnapshotRef.current = { ...answers }; essaySnapshotRef.current = { ...essayAnswers }; workSnapshotRef.current = { ...workAnswers }; setShowSubmitModal(true); }}
+            onClick={openSubmit}
           >
             <Icon name="check-circle" size={16} />
             Submit Final Exam
@@ -1501,6 +1826,50 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       <p style={{ textAlign: 'center', margin: '6px 0 10px', fontSize: 10, color: 'rgba(0,0,0,.15)', letterSpacing: '.18em', fontWeight: 700 }}>
         KMR · PATTS COLLEGE OF AERONAUTICS
       </p>
+
+      {/* ── Phone: previous / question list / next, under the thumb ── */}
+      <nav className="exam-bottom-bar" aria-label="Question navigation">
+        <button type="button" className="bb-btn bb-prev" onClick={() => goTo(currentQuestion - 1)}
+          disabled={currentQuestion === 1} aria-label="Previous question">
+          <Icon name="arrow-left" size={18} />
+        </button>
+        <button type="button" className="bb-btn bb-list" onClick={() => setNavOpen(true)}
+          aria-label={`Question ${currentQuestion} of ${questions.length}. Open the question list`}>
+          <Icon name="grid" size={17} />
+          <span className="bb-list-text">
+            <strong>Q{currentQuestion} of {questions.length}</strong>
+            <small>
+              {totalAnswered} answered{flaggedNos.length > 0 ? ` · ${flaggedNos.length} bookmarked` : ''}
+            </small>
+          </span>
+        </button>
+        {isLast ? (
+          <button type="button" className="bb-btn bb-next bb-finish" onClick={openSubmit}>
+            Finish <Icon name="check" size={16} />
+          </button>
+        ) : (
+          <button type="button" className="bb-btn bb-next" onClick={() => goTo(currentQuestion + 1)}>
+            Next <Icon name="arrow-right" size={16} />
+          </button>
+        )}
+      </nav>
+
+      {/* ── A figure, as big as the screen allows ── */}
+      {figureOpen && currentQ?.image_url && (
+        <div className={`figure-viewer${figureFull ? ' full' : ''}`} role="dialog" aria-modal="true" aria-label="Question figure">
+          <div className="figure-viewer-bar">
+            <button type="button" onClick={() => setFigureFull(f => !f)}>
+              {figureFull ? 'Fit to screen' : 'Actual size'}
+            </button>
+            <button type="button" onClick={() => setFigureOpen(false)}>
+              <Icon name="x" size={15} /> Close
+            </button>
+          </div>
+          <div className="figure-viewer-body" onClick={e => { if (e.target === e.currentTarget) setFigureOpen(false); }}>
+            <img src={currentQ.image_url} alt="Question figure" draggable={false} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -384,10 +384,68 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: var(--r-xs); cursor: pointer; font-weight: 600; font-size: 13px;
   border: 1.5px solid transparent; transition: all var(--t-1); color: var(--ink-3);
 }
+.grid-item { position: relative; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .grid-item:hover  { border-color: var(--navy); color: var(--navy); background: var(--navy-100); }
 .grid-item.active { background: var(--gold); color: var(--navy-900); border-color: var(--gold); }
 .grid-item.answered { background: var(--navy); color: white; border-color: var(--navy); }
 .grid-item.active.answered { background: var(--gold); color: var(--navy-900); border-color: var(--gold); }
+.grid-item:focus-visible { outline: 2px solid var(--navy-500); outline-offset: 2px; }
+.grid-flag {
+  position: absolute; top: 2px; right: 2px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #E67E22;
+}
+.grid-item.active .grid-flag { background: var(--navy); }
+
+.side-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.side-count { margin-left: auto; font-size: 12px; color: var(--ink-4); font-weight: 600; }
+.nav-legend {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  margin: 10px 0 2px; font-size: 11px; color: var(--ink-3);
+}
+.nav-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.nav-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; }
+.nav-legend .lg-answered { background: var(--navy); }
+.nav-legend .lg-current  { background: var(--gold); }
+.nav-legend .lg-open     { background: var(--surface-2); border: 1px solid var(--line); }
+.nav-legend .lg-flagged  { width: 7px; height: 7px; border-radius: 50%; background: #E67E22; }
+
+/* The two "go to next" shortcuts under the progress bar. Hover is restated
+   because the global button:hover would otherwise repaint them navy. */
+.exam-shell .jump-btn,
+.exam-shell .jump-btn:hover:not(:disabled) {
+  transform: none; box-shadow: none;
+}
+.exam-shell .jump-btn {
+  display: flex; align-items: center; justify-content: flex-start; gap: 6px;
+  width: 100%; margin-top: 10px; padding: 7px 10px;
+  border-radius: var(--r-xs); font-size: 12px; font-weight: 600;
+  text-align: left; line-height: 1.35;
+}
+.exam-shell .jump-btn.unanswered,
+.exam-shell .jump-btn.unanswered:hover:not(:disabled) {
+  background: var(--navy-50); border: 1px solid var(--navy-200); color: var(--navy);
+}
+.exam-shell .jump-btn.flagged,
+.exam-shell .jump-btn.flagged:hover:not(:disabled) {
+  background: #FFF6E5; border: 1px solid #F0CA80; color: #A56B0A;
+}
+.exam-shell .jump-btn + .jump-btn { margin-top: 6px; }
+
+.text-size {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; font-size: 12px; color: var(--ink-3);
+}
+.text-size-btns { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.exam-shell .text-size-btns button,
+.exam-shell .text-size-btns button:hover:not(:disabled) {
+  width: 40px; height: 32px; padding: 0; border-radius: 0;
+  background: var(--white); color: var(--ink-3); font-weight: 700;
+  transform: none; box-shadow: none;
+}
+.exam-shell .text-size-btns button + button { border-left: 1px solid var(--line); }
+.exam-shell .text-size-btns button.on,
+.exam-shell .text-size-btns button.on:hover:not(:disabled) { background: var(--navy); color: white; }
 
 /* ── Choices (legacy exam board) ────────────── */
 .choices {
@@ -397,20 +455,41 @@ tbody tr:last-child td { border-bottom: none; }
   margin-top: 10px;
 }
 .choice-btn {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 12px;
   width: 100%;
   text-align: left;
   background: var(--white);
   border: 2px solid var(--border);
   color: var(--text-2);
-  padding: 14px 20px;
+  padding: 14px 18px;
   border-radius: var(--r-md);
-  font-size: 15px;
+  font-size: calc(15px * var(--q-scale, 1));
   font-weight: 400;
   line-height: 1.5;
   transition: all var(--t-fast);
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
+/* The letter beside each choice — its position on screen, so a student can
+   say "I picked C" and press C on a keyboard. */
+.choice-key {
+  flex-shrink: 0;
+  width: 28px; height: 28px;
+  margin-top: -2px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--line);
+  color: var(--ink-3);
+  font-size: 13px; font-weight: 700; line-height: 1;
+  transition: all var(--t-fast);
+}
+.choice-text { flex: 1; min-width: 0; overflow-wrap: break-word; }
+.choice-btn.selected .choice-key { background: var(--gold); border-color: var(--gold); color: var(--navy-900); }
 .choice-btn:hover:not(:disabled) {
   background: var(--navy-tint);
   border-color: var(--navy);
@@ -425,42 +504,33 @@ tbody tr:last-child td { border-bottom: none; }
   box-shadow: var(--s-sm);
   font-weight: 500;
 }
+/* Hovering the picked choice must still read as picked. It used to fall back
+   to the pale hover style, so the choice just clicked looked unpicked until
+   the pointer moved away. */
+.choice-btn.selected:hover:not(:disabled) {
+  background: var(--navy-700);
+  border-color: var(--navy-700);
+  color: white;
+}
+/* A touch screen keeps :hover on whatever was last tapped. There it only ever
+   made the choice just picked look unpicked, so on touch it changes nothing. */
+@media (hover: none) {
+  .choice-btn:hover:not(:disabled) { background: var(--white); border-color: var(--border); color: var(--text-2); }
+  .choice-btn.selected:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: white; }
+}
 .choice-btn:active:not(:disabled) {
   background: var(--navy-tint) !important;
   border-color: var(--navy) !important;
   transform: none !important;
 }
 
-/* A multi-answer item is ticked, not picked, so the box has to be visible
-   before it is filled — a student must be able to see that several answers
-   are wanted without having to click one to find out. */
-.choice-btn.tickable {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-.choice-btn.tickable .tick-box {
-  flex-shrink: 0;
-  width: 19px;
-  height: 19px;
-  margin-top: 1px;
-  border: 2px solid var(--border);
-  border-radius: 5px;
-  background: var(--white);
-  color: var(--navy);
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 15px;
-  text-align: center;
-  transition: all var(--t-fast);
-}
-/* min-width:0 so a long choice wraps inside the flex row instead of
-   stretching the button past the panel on a phone. */
-.choice-btn.tickable .tick-text { flex: 1; min-width: 0; }
-.choice-btn.tickable:hover:not(:disabled) .tick-box { border-color: var(--navy); }
-.choice-btn.tickable.selected .tick-box {
-  background: var(--white);
-  border-color: var(--white);
+/* A multi-answer item is ticked, not picked, so its letter sits in a square
+box that fills with a tick — a student must be able to see that several
+   answers are wanted without having to click one to find out. */
+.choice-btn.tickable .choice-key { border-radius: 5px; background: var(--white); border-width: 2px; }
+.choice-btn.tickable.selected .choice-key {
+  background: var(--white); border-color: var(--white); color: var(--navy);
+  font-size: 15px; font-weight: 800;
 }
 
 /* ── Exam layout ─────────────────────────────── */
@@ -471,6 +541,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .main-panel {
   flex: 2;
+  min-width: 0;
   background: var(--white);
   padding: 30px;
   border-radius: var(--r-lg);
@@ -483,8 +554,170 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: var(--r-lg);
   box-shadow: var(--s-md);
   position: sticky;
-  top: 20px;
+  /* clear of the sticky exam header, which it used to slide under */
+  top: 84px;
+  /* and never taller than the screen, or Submit sits below the fold for as
+     long as the panel is stuck */
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
 }
+
+/* ── Exam board (ExamBoard.jsx) ─────────────── */
+.exam-shell { min-height: 100vh; background: var(--paper); }
+.exam-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 24px;
+  position: sticky; top: 0; z-index: 10;
+}
+.exam-logo { height: 34px; object-fit: contain; flex-shrink: 0; }
+.exam-layout { padding: 20px 24px 8px; }
+
+.q-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.q-text {
+  font-size: calc(17px * var(--q-scale, 1));
+  line-height: 1.68; color: var(--ink-1);
+  min-height: 72px; margin: 0 0 16px;
+  overflow-wrap: break-word;
+}
+.exam-shell .q-bookmark,
+.exam-shell .q-bookmark:hover:not(:disabled) {
+  background: transparent; color: var(--ink-4);
+  border: 1.5px solid var(--line);
+  transform: none; box-shadow: none;
+}
+.exam-shell .q-bookmark {
+  margin-left: auto; flex-shrink: 0;
+  width: auto; height: 32px; padding: 0 10px; gap: 6px;
+  border-radius: var(--r-sm);
+  font-size: 12px; font-weight: 600;
+  touch-action: manipulation;
+}
+.exam-shell .q-bookmark.on,
+.exam-shell .q-bookmark.on:hover:not(:disabled) { background: #FFF6E5; border-color: #F0CA80; color: #A56B0A; }
+
+.q-figure {
+  position: relative;
+  margin: 0 0 20px;
+  border-radius: var(--r-md); overflow: hidden;
+  border: 1.5px solid var(--line); background: var(--surface-2);
+  text-align: center; cursor: zoom-in;
+}
+.q-figure img { max-width: 100%; max-height: 380px; object-fit: contain; display: inline-block; vertical-align: middle; }
+.q-figure-hint {
+  position: absolute; right: 8px; bottom: 8px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(6,24,41,.72); color: white;
+  font-size: 11.5px; font-weight: 600;
+  padding: 4px 9px; border-radius: var(--r-full);
+  pointer-events: none;
+}
+
+.exam-inline-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; }
+.exam-keys-hint { display: none; margin: 14px 0 0; font-size: 11.5px; color: var(--ink-4); text-align: center; }
+.exam-keys-hint kbd {
+  font-family: var(--font-sans); font-size: 10.5px;
+  padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px;
+  border-radius: 4px; background: var(--surface-2); color: var(--ink-3);
+}
+@media (hover: hover) and (pointer: fine) { .exam-keys-hint { display: block; } }
+
+.exam-notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; margin-bottom: 16px;
+  border-radius: var(--r-sm);
+  font-size: 13px; line-height: 1.5;
+}
+.exam-notice > svg { flex-shrink: 0; margin-top: 2px; }
+.exam-notice.warn { background: var(--warn-bg); border: 1px solid var(--warn-bd); color: var(--warn); }
+.exam-notice.info { background: var(--info-bg); border: 1px solid var(--info-bd); color: var(--info); }
+/* Read on a page drawn at a third of its size, so it is set large. */
+.exam-notice.zoom { font-size: 17px; }
+.exam-shell .exam-notice-close,
+.exam-shell .exam-notice-close:hover:not(:disabled) {
+  flex-shrink: 0; width: 28px; height: 28px; padding: 0;
+  background: transparent; color: inherit; border: 1px solid currentColor;
+  border-radius: var(--r-sm); transform: none; box-shadow: none; opacity: .7;
+}
+
+.exam-toast {
+  position: fixed; top: 76px; left: 50%; z-index: 70;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px;
+  width: max-content; max-width: min(520px, calc(100vw - 24px));
+  padding: 10px 10px 10px 14px;
+  background: var(--navy-900); color: white;
+  border: 1px solid var(--gold); border-radius: var(--r-md);
+  box-shadow: var(--s-lg);
+  font-size: 13.5px; font-weight: 600; line-height: 1.4;
+  animation: examToastIn .25s var(--ease-out);
+}
+@keyframes examToastIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+.exam-shell .exam-toast-close,
+.exam-shell .exam-toast-close:hover:not(:disabled) {
+  flex-shrink: 0; width: 28px; height: 28px; padding: 0;
+  background: rgba(255,255,255,.12); color: white;
+  border-radius: var(--r-sm); transform: none; box-shadow: none;
+}
+
+/* Submit confirmation */
+.exam-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; justify-content: center; align-items: center;
+  padding: 20px; overflow-y: auto;
+  background: rgba(6,24,41,.88);
+}
+.exam-dialog { max-width: 460px; width: 100%; margin: auto; padding: 0; overflow: hidden; box-shadow: var(--s-xl); }
+.submit-list { border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 12px; }
+.submit-list.warn { background: var(--warn-bg); border: 1px solid var(--warn-bd); color: var(--warn); }
+.submit-list.flag { background: var(--surface-2); border: 1px solid var(--line); color: #A56B0A; }
+.submit-list.ok   { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok); }
+.submit-list-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.submit-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px; max-height: 128px; overflow-y: auto;
+}
+.exam-shell .submit-chip,
+.exam-shell .submit-chip:hover:not(:disabled) {
+  width: auto; min-width: 38px; height: 34px; padding: 0 8px;
+  background: var(--white); color: var(--navy);
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  font-size: 13px; font-weight: 700;
+  transform: none; box-shadow: none;
+}
+
+/* Figure viewer */
+.figure-viewer {
+  position: fixed; inset: 0; z-index: 1100;
+  display: flex; flex-direction: column;
+  background: var(--navy-900);
+}
+.figure-viewer-bar { display: flex; justify-content: space-between; gap: 8px; padding: 10px 12px; }
+.exam-shell .figure-viewer-bar button,
+.exam-shell .figure-viewer-bar button:hover:not(:disabled) {
+  width: auto; padding: 9px 14px;
+  background: rgba(255,255,255,.12); color: white;
+  border: 1px solid rgba(255,255,255,.22);
+  font-size: 13.5px; transform: none; box-shadow: none;
+}
+.figure-viewer-body {
+  flex: 1; min-height: 0; overflow: auto;
+  display: flex; padding: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+/* margin:auto rather than centring the flex box, so an image larger than the
+   screen can still be scrolled to its top-left corner. */
+.figure-viewer-body img {
+  margin: auto; max-width: 100%; max-height: 100%;
+  object-fit: contain; background: white; border-radius: var(--r-sm);
+}
+.figure-viewer.full .figure-viewer-body img { max-width: none; max-height: none; }
+
+/* Phone-only pieces: hidden until the breakpoint below turns them on. */
+.exam-bottom-bar, .sheet-backdrop, .sheet-handle { display: none; }
+.exam-shell .sheet-close { display: none; }
 
 /* ── Anti-cheat ──────────────────────────────── */
 .prevent-select {
@@ -534,23 +767,106 @@ input:checked + .slider::before { transform: translateX(26px); }
 @media (max-width: 1024px) {
   .app-container { padding: 16px; }
   .main-panel { padding: 22px; }
-  .side-panel { padding: 16px; position: relative; top: 0; }
+  .side-panel { padding: 16px; position: relative; top: 0; max-height: none; overflow: visible; }
   .header { padding: 14px 20px; }
 }
 
 @media (max-width: 768px) {
   .app-container { padding: 14px; }
-  .exam-layout { flex-direction: column-reverse !important; gap: 14px !important; }
-  .side-panel {
-    width: 100% !important; max-height: 240px !important;
-    overflow-y: auto !important; padding: 14px !important;
-    position: relative !important; top: 0 !important;
-  }
-  .grid-container { grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)) !important; gap: 6px !important; }
-  .grid-item { padding: 6px !important; font-size: 12px !important; }
-  .choice-btn { padding: 12px 14px !important; }
   .exam-header-meta { display: none !important; }
-  .exam-layout { padding: 14px !important; }
+
+  /* ── Exam board on a phone ──
+     The question gets the whole screen. Previous / Next live in a bar pinned
+     to the bottom, where a thumb already is, and the navigator becomes a
+     sheet that slides up from that bar. It used to sit ABOVE the question,
+     240px of it, so every question began half a screen down. */
+  .exam-header { padding: 9px 14px; }
+  .exam-layout { flex-direction: column; gap: 14px; padding: 12px; }
+  .main-panel { width: 100%; padding: 18px 16px 20px; }
+  .q-text { min-height: 0; }
+  .choice-btn { padding: 13px 14px; min-height: 54px; }
+  .exam-shell .q-bookmark { height: 38px; }
+  .exam-inline-nav, .exam-keys-hint { display: none !important; }
+  .exam-toast { top: 62px; }
+
+  .exam-shell { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+  .exam-bottom-bar {
+    display: flex; gap: 8px; align-items: stretch;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: rgba(255,255,255,.97);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 20px rgba(13,27,46,.08);
+  }
+  .exam-shell .bb-btn,
+  .exam-shell .bb-btn:hover:not(:disabled),
+  .exam-shell .bb-btn:active:not(:disabled) { transform: none; box-shadow: none; }
+  .exam-shell .bb-btn {
+    width: auto; height: 52px; padding: 0 16px; gap: 6px;
+    border-radius: var(--r-md);
+    font-size: 15px; font-weight: 700;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+  }
+  .exam-shell .bb-prev,
+  .exam-shell .bb-prev:hover:not(:disabled) {
+    background: var(--white); color: var(--navy); border: 1.5px solid var(--line);
+  }
+  .exam-shell .bb-prev { flex: 0 0 52px; padding: 0; }
+  .exam-shell .bb-list,
+  .exam-shell .bb-list:hover:not(:disabled) {
+    background: var(--navy-50); color: var(--navy); border: 1.5px solid var(--navy-200);
+  }
+  .exam-shell .bb-list { flex: 1; min-width: 0; justify-content: flex-start; gap: 10px; padding: 0 12px; }
+  .bb-list-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.25; }
+  .bb-list-text strong { font-size: 14px; }
+  .bb-list-text small {
+    font-size: 11.5px; font-weight: 500; color: var(--ink-3);
+    max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .exam-shell .bb-next,
+  .exam-shell .bb-next:hover:not(:disabled) { background: var(--navy); color: white; }
+  .exam-shell .bb-next { flex: 0 0 auto; min-width: 104px; }
+  .exam-shell .bb-finish,
+  .exam-shell .bb-finish:hover:not(:disabled) { background: linear-gradient(135deg, #27AE60, #1E8449); }
+
+  .side-panel {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
+    max-height: 85vh; max-height: 85dvh;
+    overflow-y: auto; overscroll-behavior: contain;
+    padding: 8px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -12px 40px rgba(6,24,41,.22);
+    transform: translateY(105%); visibility: hidden;
+    transition: transform .26s var(--ease-out), visibility 0s linear .26s;
+  }
+  .exam-shell.nav-open .side-panel {
+    transform: none; visibility: visible;
+    transition: transform .26s var(--ease-out);
+  }
+  .sheet-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 55;
+    background: rgba(6,24,41,.5);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .exam-shell.nav-open .sheet-backdrop { opacity: 1; pointer-events: auto; }
+  .sheet-handle { display: block; width: 40px; height: 4px; border-radius: 4px; background: var(--ink-5); margin: 2px auto 10px; }
+  .exam-shell .sheet-close { display: inline-flex; }
+  .exam-shell .sheet-close,
+  .exam-shell .sheet-close:hover:not(:disabled) {
+    flex-shrink: 0; width: 36px; height: 36px; padding: 0;
+    border-radius: 50%; background: var(--surface-2); color: var(--ink-2);
+    border: 1px solid var(--line); transform: none; box-shadow: none;
+  }
+  .grid-container {
+    grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+    gap: 8px; max-height: none; overflow: visible; padding-right: 0;
+  }
+  .grid-item {
+    height: 44px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; border-radius: var(--r-sm);
+  }
+  .grid-flag { width: 8px; height: 8px; top: 3px; right: 3px; }
   .admin-tabs > div { scrollbar-width: none; }
   .admin-tabs > div::-webkit-scrollbar { display: none; }
   .exam-card { flex-direction: column !important; align-items: stretch !important; gap: 14px !important; }
@@ -561,12 +877,26 @@ input:checked + .slider::before { transform: translateX(26px); }
   .admin-tabs { padding: 0 14px !important; }
 }
 
+/* While the student is typing, a keyboard owns the bottom of the screen and a
+   bar pinned there only gets in its way. One rule each, so a browser without
+   :has() drops these alone and keeps the bar. */
+@media (max-width: 768px) {
+  .exam-shell:has(textarea:focus) .exam-bottom-bar { display: none; }
+  .exam-shell:has(math-field:focus-within) .exam-bottom-bar { display: none; }
+  body:has(.ML__keyboard.is-visible) .exam-bottom-bar { display: none; }
+}
+
 @media (max-width: 480px) {
   .login-container { margin: 0 !important; border-radius: 0 !important; min-height: 100dvh; }
   .exam-student-name { display: none !important; }
   .exam-header-right { gap: 8px !important; }
   .exam-timer { font-size: 18px !important; padding: 5px 10px !important; }
-  .exam-layout { padding: 10px !important; }
+  .exam-logo { height: 28px; }
+  .exam-layout { padding: 10px; }
+  .main-panel { padding: 16px 14px 18px; }
+  .exam-overlay { padding: 12px; align-items: flex-start; }
+  .exam-shell .q-bookmark-label { display: none; }
+  .exam-shell .q-bookmark { width: 38px; padding: 0; }
   .admin-header { padding: 10px 12px !important; }
   .admin-header-subtitle { display: none !important; }
   .admin-header-btns { flex-shrink: 0 !important; }

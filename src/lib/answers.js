@@ -22,6 +22,10 @@
 // read through indexSet() so a comparison never depends on which of the two
 // it was handed, nor on the order the indices arrived in.
 
+// workedShape.js, never workedSolution.js: this file is in the main bundle,
+// and the latter pulls in the computer algebra system.
+import { hasWork, isWorkedSolution } from './workedShape.js';
+
 /** Is this item ticked rather than picked? */
 export function isMultiSelect(q) {
   return (q?.question_type || 'multiple_choice') === 'multi_select';
@@ -94,6 +98,48 @@ export function hasAnswer(value) {
 /** How many of these answers count as answered. */
 export function answeredCount(answers) {
   return Object.values(answers || {}).filter(hasAnswer).length;
+}
+
+// COUNTING AGAINST THE PAPER.
+//
+// answeredCount() counts entries, and an entry is not an item on the paper.
+// When a paper is rebuilt — a loader deletes its questions and inserts them
+// again — every item gets a new id, but the answers kept on the student's
+// phone and in their live session are still keyed by the old ones. Counting
+// entries then told a student "9 / 30 answered" while the navigator, which
+// looks each item up by its id, lit only the 3 they had actually answered on
+// this paper. The two below go item by item instead, so the count and the
+// navigator are the same question asked the same way.
+
+/**
+ * Has this item been answered? Each kind is looked up where it is kept: a
+ * worked item in `work`, an essay in `essays`, anything picked in `answers`.
+ */
+export function isItemAnswered(q, { answers, essays, work } = {}) {
+  const id = q?.id;
+  if (isWorkedSolution(q)) return hasWork(work?.[id]);
+  if (q?.question_type === 'essay') return String(essays?.[id] ?? '').trim().length > 0;
+  return hasAnswer(answers?.[id]);
+}
+
+/** How many of THIS paper's items are answered. */
+export function answeredOnPaper(questions, maps) {
+  return (questions || []).filter(q => isItemAnswered(q, maps)).length;
+}
+
+/**
+ * The map with every entry for an item that is not on the paper dropped.
+ * Hands back the SAME object when there was nothing to drop, so a caller can
+ * tell by identity whether anything changed.
+ */
+export function keepOnPaper(map, questions) {
+  if (!map || typeof map !== 'object') return map;
+  const onPaper = new Set((questions || []).map(q => String(q.id)));
+  const keys = Object.keys(map);
+  if (keys.every(k => onPaper.has(k))) return map;
+  const kept = {};
+  keys.forEach(k => { if (onPaper.has(k)) kept[k] = map[k]; });
+  return kept;
 }
 
 /** Is a multi-answer key usable against this many choices? */

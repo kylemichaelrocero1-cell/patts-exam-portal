@@ -63,7 +63,8 @@ console.log('\n=== restartPatch ===');
   check('the clock starts again', p.created_at === now.toISOString());
   check('the sitting is active', p.status === 'active');
   check('last sitting\'s answers do not carry over',
-    Object.keys(p.answers_json).length === 0 && Object.keys(p.essay_answers_json).length === 0);
+    Object.keys(p.answers_json).length === 0 && Object.keys(p.essay_answers_json).length === 0
+    && Object.keys(p.work_answers_json).length === 0);
   check('nor does its answered count', p.answers_count === 0);
   check('nor its violations', p.violation_count === 0 && p.violation_log.length === 0);
 }

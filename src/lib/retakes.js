@@ -63,6 +63,10 @@ export function restartPatch(now = new Date()) {
     updated_at: now,
     answers_json: {},
     essay_answers_json: {},
+    // Worked answers too (sql/024). Left out, the last sitting's working sat
+    // in the row until this sitting's first save overwrote it, and a retake
+    // opened on another device in that window got it back.
+    work_answers_json: {},
     answers_count: 0,
     violation_count: 0,
     violation_log: [],

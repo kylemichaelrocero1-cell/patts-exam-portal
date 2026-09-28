@@ -18,6 +18,7 @@ import {
 } from '../mathCheck.js';
 import {
   markWork, markAnswer, milestonesOf, totalMarks, isWorkedSolution, linesOf, hasWork,
+  acceptedFormVerdict,
 } from '../workedSolution.js';
 
 useEngine(new ComputeEngine());
@@ -217,6 +218,45 @@ console.log('\n=== answer only, all or nothing ===');
   const lim = { variable: 'x', marks: 2, steps: [{ latex: '6', marks: 2 }] };
   check('a key with no label judges none: 6 and L = 6 are both right',
     markAnswer(['6'], lim).marks === 2 && markAnswer(['L=6'], lim).marks === 2);
+}
+{
+  // MATH 117 Q23, d/dx(y^3). The engine cannot see that y' is dy/dx, so the
+  // accept list is the only thing that says 3y^2y' is right — and the
+  // dashboard's marker used to ignore it, re-marking wrong what the database
+  // had marked right.
+  const q23 = { variable: 'x', marks: 2,
+    steps: [{ latex: '3y^2\\frac{dy}{dx}', marks: 2 }], accept: ['3y^2dy/(dx)', "3y^2y'"] };
+  const m = a => markAnswer([a], q23);
+  check("an accepted answer is right: 3y^2y', and as the editor writes it",
+    m("3y^2y'").marks === 2 && m('3y^{2}y^{\\prime}').marks === 2,
+    JSON.stringify(m('3y^{2}y^{\\prime}')));
+  check('the key itself is still right', m('3y^2\\frac{dy}{dx}').marks === 2);
+  check("but not y'' or a missing y'",
+    m("3y^2y''").marks === 0 && m('3y^2').marks === 0 && m("2y^2y'").marks === 0);
+  check('without it in the accept list, it is not right',
+    markAnswer(["3y^2y'"], { ...q23, accept: [] }).marks === 0);
+}
+{
+  // The question editor's warning on an accepted form. It flagged Q23's
+  // 3y^2dy/(dx) as NOT matching 3y^2 dy/dx — an invitation to delete a
+  // right answer — because the engine read dy/(dx) as d*y/(d*x).
+  const v = acceptedFormVerdict;
+  check('3y^2dy/(dx) is not called different from 3y^2 dy/dx',
+    v('3y^2dy/(dx)', '3y^2\\frac{dy}{dx}') !== 'different', v('3y^2dy/(dx)', '3y^2\\frac{dy}{dx}'));
+  check("nor is 3y^2y'", v("3y^2y'", '3y^2\\frac{dy}{dx}') !== 'different');
+  check('but 2y^2dy/(dx) is not called EQUAL either — the engine cannot tell',
+    v('2y^2dy/(dx)', '3y^2\\frac{dy}{dx}') !== 'equal', v('2y^2dy/(dx)', '3y^2\\frac{dy}{dx}'));
+  check('a Leibniz label is judged as a label: dy/dx = -x/y is equal',
+    v('dy/dx=-x/y', '\\frac{dy}{dx}=-\\frac{x}{y}') === 'equal', v('dy/dx=-x/y', '\\frac{dy}{dx}=-\\frac{x}{y}'));
+  check('and a wrong value after it is still different',
+    v('dy/dx=x/y', '\\frac{dy}{dx}=-\\frac{x}{y}') === 'different');
+  check("a wrong label is different: f(x)= where f''(x)= is the answer",
+    v('f(x)=12x^2-12x', "f''(x)=12x^2-12x") === 'different');
+  check('real algebra is still checked: x^{-1} and 1/x',
+    v('x^{-1}', '\\frac{1}{x}') === 'equal' && v("y'=x^{-1}", "y'=\\frac{1}{x}") === 'equal'
+    && v('x^{-2}', '\\frac{1}{x}') === 'different');
+  check('and a minus on the numerator is the same answer',
+    v('\\frac{-6}{(2u+1)^4}', '-\\frac{6}{(2u+1)^4}') === 'equal');
 }
 {
   const solve = { variable: 'x', marks: 3, steps: [{ latex: 'x=3', marks: 3, label: 'Final answer' }] };

@@ -35,7 +35,7 @@
 import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent,
          indefiniteIntegrand, antiderivativeTarget, derivativeSubjectOf,
          differentiate } from './mathCheck.js';
-import { labelOf, labelProblem, withoutLabel } from './mathLabel.js';
+import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -191,10 +191,15 @@ export function markAnswer(lines, rubric, opts = {}) {
     .map(a => String(a ?? '').trim()).filter(Boolean);
   const keyHasLabel = accepted.some(a => labelOf(a));
 
+  // Against EVERY accepted answer, not just the key — the database does, and
+  // the engine cannot always see what the instructor can: 3y^2y' is
+  // 3y^2 dy/dx, but to the engine y' and dy/dx are two unrelated things, so a
+  // key-only check re-marked it wrong and saving overturned the database.
   const isRight = line => {
     if (!target) {
-      return keyHasLabel ? isFinalForm(withoutLabel(line), withoutLabel(key))
-                         : isFinalForm(line, key);
+      return accepted.some(acc => (keyHasLabel
+        ? isFinalForm(withoutLabel(line), withoutLabel(acc))
+        : isFinalForm(line, acc)));
     }
     const p = parseLine(line);
     if (!p.valid) return false;
@@ -232,4 +237,27 @@ function equivalentToKey(work, key) {
   return work.some(line => latexEquivalent(line, key) === 'equal');
 }
 
+// A derivative written into an answer's value: y', \prime, \frac{dy}{dx},
+// \frac{d}{dx}, dy/dx, dy/(dx), d^3y/(dx^3).
+const HOLDS_DERIVATIVE =
+  /'|\\prime|\\frac\{d[\^{}0-9]*[a-z]?\}\{d[a-z]|(^|[^a-z\\])d[\^{}0-9]*[a-z]\s*\/\s*\(?\s*d[a-z]/i;
 
+/**
+ * Is `form`, offered as another accepted answer, the same as `answer`?
+ * 'equal', 'different' or 'unknown'. This is the question editor's warning
+ * and marks nothing: it is advice to the instructor.
+ *
+ * The label and the value are judged apart, as the marker judges them. And
+ * where either value holds a derivative the engine's opinion is worthless:
+ * it reads dy/dx as a constant, so 2y^2 dy/dx came out EQUAL to 3y^2 dy/dx,
+ * and it reads dy/(dx) as d times y over d times x, so 3y^2 dy/(dx) came out
+ * DIFFERENT from 3y^2 \frac{dy}{dx}. Those are 'unknown' — no warning is
+ * better than a wrong one, which invites deleting a right answer.
+ */
+export function acceptedFormVerdict(form, answer) {
+  const lf = labelOf(form), la = labelOf(answer);
+  if (lf && la && !labelsAgree(lf, la)) return 'different';
+  const a = withoutLabel(form), b = withoutLabel(answer);
+  if (HOLDS_DERIVATIVE.test(a) || HOLDS_DERIVATIVE.test(b)) return 'unknown';
+  return latexEquivalent(a, b);
+}

@@ -1332,6 +1332,12 @@ button.card { color: var(--ink-1); background: var(--surface); }
   color: var(--ink-4); font-size: 14px; line-height: 1; cursor: pointer;
 }
 .wr-chip .katex, .wr-chip .math-static { color: inherit; }
+.wr-accept-add { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.wr-accept-add .math-field-wrap { flex: 1 1 auto; min-width: 0; }
+@media (max-width: 480px) {
+  .wr-accept-add { flex-direction: column; align-items: stretch; }
+  .wr-accept-add .btn { width: 100% !important; }
+}
 .wr-warn {
   margin: 8px 0 0; padding: 8px 11px;
   font-size: 12.5px; line-height: 1.5;

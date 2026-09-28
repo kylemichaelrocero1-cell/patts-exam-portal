@@ -87,6 +87,14 @@ export default function WorkedRubricEditor({ value, onChange, marks: marksProp }
  */
 function AcceptedAnswers({ answer, accept, suggestions, onChange }) {
   const [verdicts, setVerdicts] = useState({});
+  // A form the suggestions will never think of — 3y^2y' where the answer says
+  // 3y^2 dy/dx is one: the engine does not know y' and dy/dx are the same.
+  const [draft, setDraft] = useState('');
+  const addDraft = () => {
+    const v = draft.trim();
+    if (v && v !== answer.trim() && !accept.includes(v)) onChange([...accept, v]);
+    setDraft('');
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -94,12 +102,11 @@ function AcceptedAnswers({ answer, accept, suggestions, onChange }) {
     const t = setTimeout(async () => {
       try {
         const { ready } = await import('../lib/mathCheck.js');
-        const ce = await ready();
-        const { latexEquivalent } = await import('../lib/mathCheck.js');
-        void ce;
+        await ready();
+        const { acceptedFormVerdict } = await import('../lib/workedSolution.js');
         const out = {};
         for (const v of accept) {
-          try { out[v] = latexEquivalent(v, answer); } catch { out[v] = 'unknown'; }
+          try { out[v] = acceptedFormVerdict(v, answer); } catch { out[v] = 'unknown'; }
         }
         if (!cancelled) setVerdicts(out);
       } catch { /* the engine is optional here; the list still works */ }
@@ -116,7 +123,8 @@ function AcceptedAnswers({ answer, accept, suggestions, onChange }) {
         Spacing, <code>\left</code>, <code>\cdot</code>, braces, a <code>y&apos;=</code> on
         the front, and numbers like <code>0.5</code> against <code>\frac{'{1}{2}'}</code> are
         matched already. Add only what needs real algebra &mdash; <code>x^{'{-1}'}</code> where
-        the answer says <code>1/x</code>.
+        the answer says <code>1/x</code> &mdash; or another notation, like <code>y&apos;</code> where
+        it says <code>dy/dx</code>. Type it below and press Enter.
       </p>
 
       {accept.length > 0 && (
@@ -130,6 +138,15 @@ function AcceptedAnswers({ answer, accept, suggestions, onChange }) {
           ))}
         </div>
       )}
+
+      <div className="wr-accept-add">
+        <MathField value={draft} onChange={setDraft} onEnter={addDraft}
+                   ariaLabel="Another answer to accept" />
+        <button type="button" className="btn ghost sm" style={{ width: 'auto' }}
+                onClick={addDraft} disabled={!draft.trim()}>
+          + Accept this too
+        </button>
+      </div>
 
       {suggestions.length > 0 && (
         <div className="wr-chips">
@@ -145,8 +162,8 @@ function AcceptedAnswers({ answer, accept, suggestions, onChange }) {
 
       {wrong.length > 0 && (
         <p className="wr-warn">
-          <strong>{wrong.length} accepted answer{wrong.length === 1 ? '' : 's'} do
-          not match the answer.</strong> Anything left here is marked correct, so a
+          <strong>{wrong.length} accepted answer{wrong.length === 1 ? ' does' : 's do'} not
+          match the answer.</strong> Anything left here is marked correct, so a
           student writing it would get all the points. Remove it unless you mean it.
         </p>
       )}

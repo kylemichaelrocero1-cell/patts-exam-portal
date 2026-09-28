@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { supabase } from './supabase';
 import { prepareQuestions } from './lib/examOrder';
-import { fetchAssessmentById, isMissingFunctionError } from './lib/assessments';
+import { isMissingFunctionError } from './lib/assessments';
 import { fetchAnswerReview } from './lib/answerReview';
 import { clearPasswordGate } from './lib/examGateKeys';
 import Icon from './components/Icon';
@@ -13,6 +13,7 @@ import {
 import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js';
+import { sessionReplaced } from './lib/sessionCheck.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -57,6 +58,9 @@ const TIME_NOTICES = [
 // How long to let an instructor's force submit finish before deciding what a
 // 'finished' row means. The claim and the marking are two round trips.
 const FINISH_SETTLE_MS = 4000;
+// How often an open paper checks that its account has not been logged into
+// elsewhere (see the CLONE GUARD). One request per student per interval.
+const SESSION_CHECK_MS = 60000;
 
 export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
@@ -194,27 +198,32 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // where answers couldn't be loaded locally (no localStorage, no answers_json column).
   const minAnswersCountRef = useRef(0);
 
-  // --- CLONE GUARD: Check for multiple logins (30s interval reduces DB load for 121 students) ---
+  // --- CLONE GUARD: has this account been logged into somewhere else? ---
+  // Once a minute, asked of the database (sql/034) rather than read out of the
+  // users table: the token never comes back to the browser. This used to read
+  // the table every 30 seconds, and across a class that was most of the
+  // project's log volume on an exam day. It stops once the paper is in —
+  // there is nothing left for a second login to interfere with.
   useEffect(() => {
+    if (!student?.id || scoreDisplay || endedByInstructor) return;
+    let stopped = false;
     const checkSession = setInterval(async () => {
       const localToken = localStorage.getItem('local_session_token');
-      if (!localToken || !student?.id) return;
+      const replaced = await sessionReplaced(supabase, student.id, localToken);
+      // Only a definite yes. "Could not tell" (null) never ends a sitting.
+      if (stopped || replaced !== true) return;
+      stopped = true;
+      clearInterval(checkSession);
+      alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
+      // Clear both tokens so reload lands at login instead of re-entering ExamBoard
+      // and re-triggering this guard in an infinite loop.
+      localStorage.removeItem('local_session_token');
+      localStorage.removeItem('patts_student_session');
+      window.location.reload();
+    }, SESSION_CHECK_MS);
 
-      const { data } = await supabase.from('users').select('session_token').eq('id', student.id).single();
-
-      if (data && data.session_token && data.session_token !== localToken) {
-        clearInterval(checkSession);
-        alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
-        // Clear both tokens so reload lands at login instead of re-entering ExamBoard
-        // and re-triggering this guard in an infinite loop.
-        localStorage.removeItem('local_session_token');
-        localStorage.removeItem('patts_student_session');
-        window.location.reload();
-      }
-    }, 30000);
-
-    return () => clearInterval(checkSession);
-  }, [student?.id]);
+    return () => { stopped = true; clearInterval(checkSession); };
+  }, [student?.id, scoreDisplay, endedByInstructor]);
 
   // SUBMISSION CONTROLS
   const [showSubmitModal, setShowSubmitModal] = useState(false);
@@ -803,28 +812,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     }
   }, [timeLeft, sittingResolved, scoreDisplay, isSubmitting, isLoading, endedByInstructor, executeSubmission]);
 
-  // --- EXAM-CLOSE WATCHER (30s poll) ---
-  // Catches the case where the instructor closes the exam while a student's tab
-  // is open. The student's client-side timer keeps running but never hits 0 if
-  // they still have time left — this poll detects the close and auto-submits.
-  // Only polls when the student is actively in the exam (not submitted, not locked).
-  useEffect(() => {
-    if (!exam?.id || scoreDisplay || isSubmitting || endedByInstructor) return;
-    const executeRef = { current: executeSubmission };
-    executeRef.current = executeSubmission;
-    const poll = setInterval(async () => {
-      if (isSubmittingRef.current || scoreDisplay) return;
-      // Mock exams live only in `assessments`; the old `exams` query returned
-      // no row for them, so an instructor closing one mid-attempt never
-      // triggered the auto-submit.
-      const data = await fetchAssessmentById(exam.id, 'id, is_open').catch(() => null);
-      if (data && data.is_open === false) {
-        clearInterval(poll);
-        executeRef.current();
-      }
-    }, 30000);
-    return () => clearInterval(poll);
-  }, [exam?.id, scoreDisplay, isSubmitting, endedByInstructor, executeSubmission]);
+  // --- NO EXAM-CLOSE WATCHER, deliberately ---
+  // Closing a paper hides it from the list; it does NOT end sittings already
+  // in progress. The instructor ends those with Force Submit, or the clock
+  // does. A 30-second poll here was meant to auto-submit on close, but it
+  // depended on executeSubmission, which changes every second with the
+  // clock, so its timer was restarted every second and never once fired.
+  // Every exam has run without it, and that is now the intended behaviour.
 
   // --- ANTI-CHEAT ---
   useEffect(() => {

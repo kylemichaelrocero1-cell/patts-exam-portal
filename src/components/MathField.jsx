@@ -7,6 +7,8 @@ import { useEffect, useRef, useState } from 'react';
 // different lazy chunk and the exam board never loads it.
 import 'katex/dist/katex.min.css';
 import { rememberField } from '../lib/mathPalette.js';
+import { displayLatex } from '../lib/mathDisplay.js';
+import { canonicalPrimes } from '../lib/primeTyping.js';
 
 // A single line of maths, typed the way Google Docs or Symbolab let you type
 // it: 1/2 opens a fraction, ^ raises an exponent, \sqrt builds a radical, and
@@ -42,6 +44,21 @@ function loadMathlive() {
     loading = import('mathlive').catch(err => { loading = null; throw err; });
   }
   return loading;
+}
+
+/**
+ * Put the caret just after the LaTeX `prefix` — the offset whose content up
+ * to it serialises to exactly that. The end of the field if none does.
+ */
+function caretAfter(field, prefix) {
+  const want = String(prefix).replace(/\s+/g, '');
+  const last = field.lastOffset;
+  for (let p = 0; p <= last; p++) {
+    let got;
+    try { got = field.getValue(0, p, 'latex'); } catch { continue; }
+    if (String(got).replace(/\s+/g, '') === want) { field.position = p; return; }
+  }
+  field.position = last;
 }
 
 export default function MathField({
@@ -88,10 +105,19 @@ export default function MathField({
       // on the virtual keyboard moves focus off the field and fired focusout.
       field.mathVirtualKeyboardPolicy = 'auto';
       field.smartMode = false;
-      field.value = value || '';
+      field.value = canonicalPrimes(value || '').latex;
       if (readOnly) field.readOnly = true;
 
       field.addEventListener('input', () => {
+        // Primes on one level, however they were typed (lib/primeTyping.js):
+        // pressing prime with the caret inside a superscript stacked each new
+        // prime on top of the last. Fixed as it happens, with the caret put
+        // straight after the primes so typing carries on at the base.
+        const fixed = canonicalPrimes(field.value);
+        if (fixed.changedEnd >= 0) {
+          field.value = fixed.latex;
+          caretAfter(field, fixed.latex.slice(0, fixed.changedEnd));
+        }
         handlers.current.onChange?.(field.value);
       });
 
@@ -141,7 +167,8 @@ export default function MathField({
 
   useEffect(() => {
     const field = fieldRef.current;
-    if (field && field.value !== (value || '')) field.value = value || '';
+    const want = canonicalPrimes(value || '').latex;
+    if (field && field.value !== want) field.value = want;
   }, [value]);
 
   useEffect(() => {
@@ -197,7 +224,9 @@ export function MathStatic({ latex, ariaLabel = 'Maths' }) {
     import('katex').then(({ default: katex }) => {
       if (cancelled || !ref.current) return;
       try {
-        katex.render(String(latex || ''), ref.current, {
+        // displayLatex: the maths keyboard's own commands (\differentialD,
+        // \placeholder…) as KaTeX can draw them, instead of their names in red.
+        katex.render(displayLatex(latex), ref.current, {
           throwOnError: false, displayMode: false,
         });
       } catch {

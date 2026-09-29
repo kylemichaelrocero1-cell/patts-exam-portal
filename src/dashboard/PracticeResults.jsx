@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
+import { submittedDateTime } from '../lib/examDates.js';
 
 // Every sitting on an unlimited-retake paper. These never reach `results` —
 // submit_assessment() routes them to review_attempts so practice cannot move a
@@ -135,14 +136,18 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
 
   // One line per attempt — the raw history, not the collapsed view.
   const exportCSV = () => {
-    const head = ['Student', 'Section', 'Assessment', 'Attempt', 'Score', 'Total', 'Percent', 'Time taken (s)', 'Submitted'];
+    const head = ['Student', 'Section', 'Assessment', 'Attempt', 'Score', 'Total', 'Percent', 'Time taken (s)',
+      'Date Taken', 'Time Submitted'];
     const lines = [head.join(',')];
     filtered.forEach(g => g.rows.forEach(r => {
       const p = pct(r.score, r.total_items);
+      // Philippine time. This was an ISO timestamp in UTC, eight hours behind
+      // the class — an attempt before 8 AM showed the previous day's date.
+      const when = submittedDateTime(r.submitted_at);
       lines.push([
         g.name, g.section, g.title, r.attempt_no, r.score, r.total_items,
         p === null ? '' : p.toFixed(1), r.time_taken_seconds ?? '',
-        r.submitted_at ? new Date(r.submitted_at).toISOString() : '',
+        when.date, when.time,
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
     }));
     const url = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' }));

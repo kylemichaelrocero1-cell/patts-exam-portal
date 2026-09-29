@@ -11,6 +11,8 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
+import { submittedDateTime } from './lib/examDates';
+import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
@@ -2413,23 +2415,13 @@ const deleteResult = async (studentId, examId) => {
   })();
 
   const exportCSV = () => {
-    const headers = ['Name', 'Section', 'Exam', 'Score', 'Total Items', 'Percentage', 'Time Taken (s)', 'Violations'];
-    const rows = filteredAndSortedResults.map(row => {
-      const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
-      const examTitle = examsDict[row.exam_id] || 'Unknown Exam';
-      const pct = row.total_items > 0 ? Math.round((row.score / row.total_items) * 100) : 0;
-      return [
-        `"${student.name}"`,
-        `"${student.section}"`,
-        `"${examTitle}"`,
-        row.score,
-        row.total_items,
-        `${pct}%`,
-        row.time_taken_seconds ?? '',
-        row.tab_switches ?? 0,
-      ].join(',');
-    });
-    const csv = [headers.join(','), ...rows].join('\n');
+    // Same score as the table, plus when it was handed in (src/lib/resultsExport.js).
+    const rows = filteredAndSortedResults.map(row => resultsCsvRow(
+      row,
+      students[row.student_id] || { name: 'Unknown', section: 'Unknown' },
+      examsDict[row.exam_id] || 'Unknown Exam',
+    ).join(','));
+    const csv = [RESULTS_CSV_HEADERS.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3871,11 +3863,17 @@ const deleteResult = async (studentId, examId) => {
           : ['All'];
 
         const exportAttendanceCSV = () => {
-          const headers = ['Student Name', 'Section', 'Status'];
+          const headers = ['Student Name', 'Section', 'Status', 'Date Taken', 'Time Submitted'];
           const rows = eligibleStudents.map(s => {
             const st = getStatus(s.id);
             const label = st === 'done' ? 'Done' : st === 'active' ? 'Taking Exam' : st === 'locked' ? 'LOCKED' : 'Absent';
-            return [`"${s.full_name}"`, `"${s.section || ''}"`, `"${label}"`].join(',');
+            // When a Done paper was handed in, in Philippine time; blank for
+            // everyone who has not handed one in.
+            const filed = st === 'done'
+              ? results.find(r => r.student_id === s.id && r.exam_id === attendanceExam)
+              : null;
+            const when = submittedDateTime(filed?.submitted_at);
+            return [`"${s.full_name}"`, `"${s.section || ''}"`, `"${label}"`, when.date, when.time].join(',');
           });
           const csv = [headers.join(','), ...rows].join('\n');
           const blob = new Blob([csv], { type: 'text/csv' });

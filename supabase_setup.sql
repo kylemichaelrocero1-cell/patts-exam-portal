@@ -121,8 +121,8 @@ CREATE TABLE IF NOT EXISTS public.live_sessions (
   answers_count      integer NOT NULL DEFAULT 0,
   violation_count    integer NOT NULL DEFAULT 0,
   violation_log      jsonb DEFAULT '[]'::jsonb,  -- note: SINGULAR here
-  answers_json       jsonb,          -- MC answers, autosaved every 5s
-  essay_answers_json jsonb,          -- essay text, autosaved every 5s
+  answers_json       jsonb,          -- MC answers, saved 2s after the last change
+  essay_answers_json jsonb,          -- essay text, saved with the MC answers
   exam_set           text,           -- 'A' or 'B'
   created_at         timestamptz NOT NULL DEFAULT now(),
   updated_at         timestamptz NOT NULL DEFAULT now(),

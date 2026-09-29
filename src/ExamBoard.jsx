@@ -191,10 +191,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   const essaySnapshotRef = useRef(null);
   const workSnapshotRef = useRef(null);
   // Debounce handles — each pusher has its own ref so they never cancel each other
-  const livePushDebounceRef = useRef(null);
+  const progressPushDebounceRef = useRef(null);
   const violationPushDebounceRef = useRef(null);
-  const countPushDebounceRef = useRef(null);
-  // Floor for answers_count: prevents COUNT PUSHER from writing 0 when init restores a session
+  // Floor for answers_count: prevents PROGRESS PUSHER from writing 0 when init restores a session
   // where answers couldn't be loaded locally (no localStorage, no answers_json column).
   const minAnswersCountRef = useRef(0);
 
@@ -493,14 +492,16 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     };
   }, [tabSwitchCount, violationLogs, liveSessionId, reconnects]);
 
-  // --- COUNT PUSHER (2s debounce) — writes ONLY answers_count so admin monitor is always current.
-  // Isolated from the JSON pusher: if answers_json/essay_answers_json columns are missing the
-  // JSON pusher will fail silently but this pusher still keeps the count accurate.
+  // --- PROGRESS PUSHER (2s debounce) — the count for the admin monitor and the full answers
+  // for cross-device resume, in ONE write. These used to be two pushers, 2s and 5s after
+  // the last change, kept apart in case the answer columns had not been migrated. They
+  // have been everywhere for a long time, and the pair was a third of the project's log
+  // lines: every answer showed up twice, three seconds apart.
   useEffect(() => {
     if (!liveSessionId) return;
-    if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
-    countPushDebounceRef.current = setTimeout(() => {
-      countPushDebounceRef.current = null;
+    if (progressPushDebounceRef.current) clearTimeout(progressPushDebounceRef.current);
+    progressPushDebounceRef.current = setTimeout(() => {
+      progressPushDebounceRef.current = null;
       const liveCount = countAnswered(questions, answers, essayAnswers, workAnswers);
       // Never write below the server-known count from session init — prevents a page refresh
       // on a new device from briefly resetting the count to 0 in the admin monitor.
@@ -513,39 +514,21 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       if (paperLoaded || liveCount >= minAnswersCountRef.current) minAnswersCountRef.current = 0;
       supabase.from('live_sessions').update({
         answers_count: safeCount,
-        updated_at: new Date()
-      }).eq('id', liveSessionId).then(({ error }) => {
-        if (error) console.error('Count push failed:', error.message);
-      });
-    }, 2000);
-    return () => {
-      if (countPushDebounceRef.current) clearTimeout(countPushDebounceRef.current);
-    };
-  }, [answers, essayAnswers, workAnswers, questions, liveSessionId, reconnects]);
-
-  // --- JSON PROGRESS PUSHER (5s debounce) — writes full answers for cross-device resume.
-  // Requires answers_json, essay_answers_json, exam_set columns in live_sessions.
-  useEffect(() => {
-    if (!liveSessionId) return;
-    if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
-    livePushDebounceRef.current = setTimeout(() => {
-      livePushDebounceRef.current = null;
-      supabase.from('live_sessions').update({
         answers_json: answers,
         essay_answers_json: essayAnswers,
         work_answers_json: workAnswers,
         exam_set: examSet,
         updated_at: new Date()
       }).eq('id', liveSessionId).then(({ error }) => {
-        if (error) console.warn('JSON progress save skipped (run DB migration if cross-device resume is needed):', error.message);
+        if (error) console.error('Progress push failed:', error.message);
       });
-    }, 5000);
+    }, 2000);
     return () => {
-      if (livePushDebounceRef.current) clearTimeout(livePushDebounceRef.current);
+      if (progressPushDebounceRef.current) clearTimeout(progressPushDebounceRef.current);
     };
     // `reconnects` re-sends on coming back online: a push made with no signal
     // fails, and nothing else would try again until the next answer changed.
-  }, [answers, essayAnswers, workAnswers, liveSessionId, reconnects]);
+  }, [answers, essayAnswers, workAnswers, questions, liveSessionId, reconnects]);
 
   // --- LOCK STATUS PUSHER (only writes when student auto-locks, never overrides instructor) ---
   useEffect(() => {

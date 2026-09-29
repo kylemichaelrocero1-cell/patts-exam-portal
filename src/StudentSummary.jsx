@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
 import AnswerReview from './components/AnswerReview';
-import { supabase } from './supabase';
 import {
   selectAssessments, availabilityState, formatWindow, KIND_LABEL,
 } from './lib/assessments';
@@ -9,6 +8,7 @@ import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
 import { fetchAnswerReview } from './lib/answerReview';
 import { combinedScore } from './lib/workedShape.js';
+import { homeReads } from './lib/studentHome';
 
 // A student's landing page: what needs doing, what has been done, how they did.
 // Everything here is derived from data the other tabs already load — this is a
@@ -44,26 +44,21 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     let cancelled = false;
     (async () => {
       try {
-        const [assessments, resultsRes, lessonsRes, progressRes, attemptsRes] = await Promise.all([
-          selectAssessments(q => q.eq('is_open', true)),
-          supabase.from('results')
-            .select('exam_id, score, total_items, points_earned, points_total, work_marks, work_total, submitted_at')
-            .eq('student_id', student.id),
-          supabase.from('lessons')
-            .select('id, title, target_section, is_published')
-            .eq('is_published', true),
-          supabase.from('lesson_progress')
-            .select('lesson_id, completed_at')
-            .eq('student_id', student.id),
+        // The copy the home tabs share (src/lib/studentHome.js): coming back
+        // here from Exams or Lessons does not ask the database again.
+        const [openRes, resultsRes, lessonsRes, progressRes, attemptsRes] = await Promise.all([
+          homeReads.openAssessments(),
+          homeReads.results(student.id),
+          homeReads.lessons(),
+          homeReads.lessonProgress(student.id),
           // Practice retakes are not in results, so without this a student who
           // had sat five mock exams saw "0 submitted" and an empty list.
-          supabase.from('review_attempts')
-            .select('assessment_id, attempt_no, score, total_items, points_earned, points_total, work_marks, work_total, submitted_at')
-            .eq('student_id', student.id),
+          homeReads.attempts(student.id),
         ]);
         if (cancelled) return;
+        if (openRes.error) throw openRes.error;
 
-        const mine = assessments.filter(a =>
+        const mine = (openRes.data || []).filter(a =>
           (a.target_section || '').split(',').map(s => s.trim()).includes(selectedSection)
         );
         const graded = resultsRes.data || [];

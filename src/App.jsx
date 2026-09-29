@@ -6,6 +6,7 @@ import ExamBoard from './ExamBoard';
 import SectionSelector from './SectionSelector';
 import AdminDashboard from './AdminDashboard';
 import { clearAllGates } from './lib/examGateKeys';
+import { forgetStudentHome } from './lib/studentHome';
 import './index.css';
 
 export default function App() {
@@ -86,6 +87,7 @@ export default function App() {
     // next student inherits the tab — so a logout has to take the unlocks with
     // it. The keys are student-scoped as well; this is the second lock.
     clearAllGates();
+    forgetStudentHome();
     setStudent(null);
     setSelectedSection(null);
     setSelectedExam(null);
@@ -147,7 +149,9 @@ export default function App() {
       exam={selectedExam}
       examSet={examSet}
       student={student}
-      onFinish={() => { setSelectedExam(null); setExamSet(null); }}
+      // What was just sat has to show on the home tabs, so their shared copy
+      // goes — see src/lib/studentHome.js.
+      onFinish={() => { forgetStudentHome(); setSelectedExam(null); setExamSet(null); }}
     />
   );
 }

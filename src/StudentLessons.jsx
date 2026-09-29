@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
 import LessonContent from './components/LessonContent';
 import { supabase } from './supabase';
+import { homeReads } from './lib/studentHome';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import {
   LESSON_COLUMNS_STUDENT, makeLessonReader, isPdfLesson, formatFileSize,
@@ -82,6 +83,8 @@ export default function StudentLessons({ student, selectedSection }) {
     const { error } = await supabase.from('lesson_progress')
       .upsert([row], { onConflict: 'student_id,lesson_id' });
     if (error) console.error('progress save failed:', error.message);
+    // The Summary counts finished lessons from a shared copy; this changed it.
+    homeReads.forget(`lesson-progress:${student.id}`);
   };
 
   if (isLoading) {

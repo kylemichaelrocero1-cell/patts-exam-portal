@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import {
-  selectAssessments, isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
+  isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
   fetchAssessmentById, isMissingFunctionError,
 } from './lib/assessments';
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors';
@@ -11,6 +11,10 @@ import {
   readinessKey as gateReadinessKey,
 } from './lib/examGateKeys';
 import ExamReadinessModal from './components/ExamReadinessModal';
+import { homeReads } from './lib/studentHome';
+
+// What the realtime listener asks for: no spinner, and past the shared copy.
+const LIVE_REFRESH = { silent: true, fresh: true };
 
 export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
@@ -36,9 +40,13 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
   const [recoveryMsg, setRecoveryMsg] = useState('');
 
-  // On login, scan localStorage for saved exam progress and recover any unscored results
+  // On login, scan localStorage for saved exam progress and recover any unscored results.
+  // Once per arrival on the home screen (after login, after a paper), not on
+  // every tab switch: a paper that was opened and never handed in keeps its key,
+  // and used to cost a read each time either list was opened.
   useEffect(() => {
     if (!student?.id) return;
+    if (!homeReads.claim(`recovery-scan:${student.id}`)) return;
 
     const recover = async () => {
       const prefix = `exam_progress_${student.id}_`;
@@ -131,9 +139,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   }, [student?.id]);
 
   useEffect(() => {
-    fetchExams(false);
+    fetchExams();
 
     // Silent refresh — no spinner so students aren't disrupted when instructor opens/closes an exam.
+    // Fresh, too: it replaces the copy every home tab shares (src/lib/studentHome.js).
     // Filter by is_open changes only — avoids re-fetching on unrelated exam edits.
     // Watch BOTH tables during the transition. The dashboard now writes new
     // exams and seatworks to `assessments`, and the exams -> assessments sync
@@ -141,41 +150,31 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     // mean a freshly opened seatwork never reaches a student's screen until
     // they reloaded. Drop the `exams` half at cutover.
     const channel = supabase.channel('examlist-realtime')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exams', filter: 'is_open=eq.true' }, () => fetchExams(true))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exams' }, () => fetchExams(true))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assessments', filter: 'is_open=eq.true' }, () => fetchExams(true))
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assessments' }, () => fetchExams(true))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'exams', filter: 'is_open=eq.true' }, () => fetchExams(LIVE_REFRESH))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'exams' }, () => fetchExams(LIVE_REFRESH))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assessments', filter: 'is_open=eq.true' }, () => fetchExams(LIVE_REFRESH))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assessments' }, () => fetchExams(LIVE_REFRESH))
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [selectedSection, kind]);
 
-  const fetchExams = async (silent = false) => {
+  const fetchExams = async ({ silent = false, fresh = false } = {}) => {
     if (!silent) setIsLoading(true);
     setFetchError(false);
     try {
-      // Fetch exams + completed results + active live sessions in parallel
+      // Exams + completed results + active live sessions, from the copy the
+      // home tabs share — switching between Seatwork, Exams and Summary does
+      // not ask the database again.
       const [examsRes, resultsRes, liveRes, attemptsRes] = await Promise.all([
         // Reads assessments (exams + seatworks + schedule) and transparently
         // falls back to exams if the migration has not been run yet.
-        selectAssessments(q => q.eq('is_open', true).order('created_at', { ascending: false }))
-          .then(data => ({ data, error: null }), error => ({ data: null, error })),
-        supabase
-          .from('results')
-          .select('exam_id')
-          .eq('student_id', student.id),
-        supabase
-          .from('live_sessions')
-          .select('exam_id, exam_set, answers_count, status, created_at')
-          .eq('student_id', student.id)
-          .in('status', ['active', 'locked']),
+        homeReads.openAssessments({ fresh }),
+        homeReads.results(student.id, { fresh }),
+        homeReads.liveSittings(student.id, { fresh }),
         // Retakes live here, not in results — without this a student saw no
         // trace of the mock exams they had already sat.
-        supabase
-          .from('review_attempts')
-          .select('assessment_id, attempt_no, score, total_items, submitted_at')
-          .eq('student_id', student.id)
-          .order('attempt_no', { ascending: false }),
+        homeReads.attempts(student.id, { fresh }),
       ]);
 
       if (examsRes.error) throw examsRes.error;
@@ -472,7 +471,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         {fetchError ? (
           <div style={{ background: 'var(--danger-bg)', padding: '32px', borderRadius: 'var(--r-lg)', textAlign: 'center', border: '1px solid var(--danger-bd)' }}>
             <p style={{ color: 'var(--danger)', fontSize: '16px', fontWeight: 600, margin: '0 0 16px' }}>⚠️ Could not load exams. Please check your internet connection.</p>
-            <button onClick={fetchExams} style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '10px 24px' }}>Retry</button>
+            <button onClick={() => fetchExams({ fresh: true })} style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '10px 24px' }}>Retry</button>
           </div>
         ) : exams.length === 0 ? (
           <div style={{ background: 'var(--white)', padding: '52px 32px', borderRadius: 'var(--r-xl)', textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)' }}>

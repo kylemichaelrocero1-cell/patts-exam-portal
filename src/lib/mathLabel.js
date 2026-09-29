@@ -21,21 +21,23 @@
 // agree or saving a script from the dashboard would overturn the database's
 // mark. sql/test/labels.test.mjs runs both over one list of cases.
 
+import { dropSpaces } from './mathNormalize.js';
+
 // Tidied the way sql/032's math_label() tidies, CASE KEPT: F is not f.
 function tidy(latex) {
   let t = String(latex ?? '');
-  t = t.replace(/\\[,;:!]|\\quad|\\qquad|\\ /g, '');
+  // Every kind of space LaTeX has, and the keyboard's empty ^{} / _{} —
+  // sql/037's math_drop_spaces(), shared with mathNormalize.js.
+  t = dropSpaces(t);
   t = t.replace(/\\left|\\right/g, '');
   t = t.replace(/\\[dt]frac/g, '\\frac');
   t = t.replace(/\\(mathrm|operatorname)\{d\}|\\differentialD/g, 'd');
   t = t.replace(/\s+/g, '');
-  // The editor writes ^{\prime}; a person writes '. Longest first.
-  t = t.split('^{\\prime\\prime\\prime}').join("'''")
-       .split('^{\\prime\\prime}').join("''")
-       .split('^{\\prime}').join("'")
-       .split('\\doubleprime').join("''")
-       .split('^\\prime').join("'")
-       .split('\\prime').join("'");
+  // The editor writes ^{\prime\prime…}; a person writes '. ANY number of
+  // them — a list of three missed the fourth derivative (sql/036's
+  // math_primes()).
+  t = t.split('\\doubleprime').join("''").split('\\prime').join("'");
+  t = t.replace(/\^\{('+)\}/g, '$1').replace(/\^(')/g, '$1');
   t = t.split('^{}').join('');
   t = t.replace(/\{([A-Za-z0-9])\}/g, '$1').replace(/\{([A-Za-z0-9])\}/g, '$1');
   return t;

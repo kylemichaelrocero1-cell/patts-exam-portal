@@ -18,7 +18,7 @@ import {
 } from '../mathCheck.js';
 import {
   markWork, markAnswer, milestonesOf, totalMarks, isWorkedSolution, linesOf, hasWork,
-  acceptedFormVerdict,
+  acceptedFormVerdict, sameValueAs,
 } from '../workedSolution.js';
 
 useEngine(new ComputeEngine());
@@ -233,8 +233,34 @@ console.log('\n=== answer only, all or nothing ===');
   check('the key itself is still right', m('3y^2\\frac{dy}{dx}').marks === 2);
   check("but not y'' or a missing y'",
     m("3y^2y''").marks === 0 && m('3y^2').marks === 0 && m("2y^2y'").marks === 0);
-  check('without it in the accept list, it is not right',
-    markAnswer(["3y^2y'"], { ...q23, accept: [] }).marks === 0);
+  // Since dy/dx and y' became unknowns of their own (derivAsUnknown), the
+  // engine sees this without the list; the database still needs the entry.
+  check("the dashboard now sees y' as dy/dx on its own",
+    markAnswer(["3y^2y'"], { ...q23, accept: [] }).marks === 2);
+  check('and still not 2y^2 dy/dx, which the engine used to call equal',
+    markAnswer(['2y^2\\frac{dy}{dx}'], q23).marks === 0 && markAnswer(['2y^2y^{\\prime}'], q23).marks === 0);
+  check('nor d/dx(3y^2), an unworked derivative that came out "equal" as 0 = 0',
+    markAnswer(['\\frac{d}{dx}\\left(3y^2\\right)'], q23).marks === 0);
+}
+{
+  // "Write the expression for f'(x) … Do not simplify": the value of the
+  // limit is not what was asked, however many students write it.
+  const q3 = { variable: 'x', marks: 4, steps: [{ latex: "f'(x)=\\lim_{h\\to 0}\\frac{(x+h)^3-x^3}{h}", marks: 4 }],
+    accept: ['\\lim_{h\\to 0}\\frac{(x+h)^3-(x)^3}{h}'] };
+  check("a key that is a written-out limit does not take its value: f'(x) = 3x^2 is wrong",
+    markAnswer(['f^{\\prime}\\left(x\\right)=3x^2'], q3, { given: 'f(x)=x^3' }).marks === 0);
+  check('the limit written out, as the editor writes it, is right',
+    markAnswer(['f^{\\prime}\\left(x\\right)=\\lim_{h\\to0}\\frac{\\left(x+h\\right)^3-x^3}{h}'], q3, { given: 'f(x)=x^3' }).marks === 4);
+  const lim = { variable: 'x', marks: 2, steps: [{ latex: '10', marks: 2 }] };
+  check('copying a limit question back is not its answer',
+    markAnswer(['\\lim_{x\\to 5}\\frac{x^2-25}{x-5}'], lim, { given: '\\lim_{x\\to 5}\\frac{x^2-25}{x-5}' }).marks === 0);
+  // The dashboard marked k^{(4)}(s) = 0 wrong once it had read the problem
+  // k(s) = …; the database had it right.
+  const q4 = { variable: 's', marks: 2, steps: [{ latex: '0', marks: 2 }] };
+  check('k^{(4)}(s) = 0 is right, with the problem read first',
+    markAnswer(['k^{\\left(4\\right)}\\left(s\\right)=0'], q4, { given: 'k(s)=s^3+4s^2-1', variable: 's' }).marks === 2);
+  check("but k^4(s) = 0 is not — without brackets it is a power",
+    markAnswer(['k^4\\left(s\\right)=0'], q4, { given: 'k(s)=s^3+4s^2-1', variable: 's' }).marks === 0);
 }
 {
   // The question editor's warning on an accepted form. It flagged Q23's
@@ -257,6 +283,23 @@ console.log('\n=== answer only, all or nothing ===');
     && v('x^{-2}', '\\frac{1}{x}') === 'different');
   check('and a minus on the numerator is the same answer',
     v('\\frac{-6}{(2u+1)^4}', '-\\frac{6}{(2u+1)^4}') === 'equal');
+}
+{
+  // sameValueAs: the instructor's rule — any form of the right value, with
+  // no demand that it be simplified.
+  check('the product rule applied and left unsimplified is the same value',
+    sameValueAs('s^{\\prime}\\left(t\\right)=\\left(t+2\\right)^{\\frac12}+\\frac12t\\left(t+2\\right)^{-\\frac12}',
+      "s'(t)=\\frac{3t+4}{2\\sqrt{t+2}}"));
+  check('a negative exponent for a fraction',
+    sameValueAs('g^{\\prime}\\left(x\\right)=x\\left(x^2+4\\right)^{-\\frac12}', "g'(x)=\\frac{x}{\\sqrt{x^2+4}}"));
+  check('dy/dx written first', sameValueAs('\\frac{dy}{dx}4y^3', '4y^3\\frac{dy}{dx}'));
+  check('but not k^4(s) = 0 — a power, not a label', !sameValueAs('k^4\\left(s\\right)=0', '0'));
+  check('nor 3y^3 dy/dx', !sameValueAs('3y^3\\frac{dy}{dx}', '4y^3\\frac{dy}{dx}'));
+  check('nor an unworked d/dx', !sameValueAs('\\frac{d}{dx}\\left(4y^3\\right)', '4y^3\\frac{dy}{dx}'));
+  check("nor 3x^2 for a key that is a written-out limit",
+    !sameValueAs('f^{\\prime}\\left(x\\right)=3x^2', "f'(x)=\\lim_{h\\to 0}\\frac{(x+h)^3-x^3}{h}"));
+  check('nor a wrong sign', !sameValueAs('q^{\\prime}\\left(w\\right)=\\frac{w^2-4}{\\left(w^2+4\\right)^2}',
+    "q'(w)=\\frac{4-w^2}{(w^2+4)^2}"));
 }
 {
   const solve = { variable: 'x', marks: 3, steps: [{ latex: 'x=3', marks: 3, label: 'Final answer' }] };

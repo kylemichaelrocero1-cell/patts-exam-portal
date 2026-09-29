@@ -32,10 +32,11 @@
 //     no student's browser ever computes the mark it is graded on.
 // That split is why the rubric column is revoked from anon in sql/024.
 
-import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent,
+import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent, freshEngine,
          indefiniteIntegrand, antiderivativeTarget, derivativeSubjectOf,
          differentiate } from './mathCheck.js';
 import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
+import { mathAnswersMatch } from './mathNormalize.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -151,6 +152,8 @@ function round2(n) {
  * still mark correctly.
  */
 export function markAnswer(lines, rubric, opts = {}) {
+  // Nothing the engine learned from the last answer carries into this one.
+  freshEngine();
   const total = totalMarks(rubric);
   const milestones = milestonesOf(rubric);
   const key = milestones.length ? milestones[milestones.length - 1].latex : null;
@@ -183,23 +186,41 @@ export function markAnswer(lines, rubric, opts = {}) {
   const target = given ? antiderivativeTarget(given) : null;
 
   // THE LABEL IS JUDGED ON ITS OWN (mathLabel.js, and sql/032 in the
-  // database, which must agree). So when the key has one, the value is
-  // compared with both labels off: isFinalForm's own subject check took
-  // f'(x) for f''(x) and g''(x) for f''(x), and would overrule the stricter
-  // rule the database applies.
+  // database, which must agree), so the value is compared with the labels
+  // off: isFinalForm's own subject check took f'(x) for f''(x) and g''(x)
+  // for f''(x), and would overrule the stricter rule the database applies.
   const accepted = [key, ...(Array.isArray(rubric?.accept) ? rubric.accept : [])]
     .map(a => String(a ?? '').trim()).filter(Boolean);
-  const keyHasLabel = accepted.some(a => labelOf(a));
 
   // Against EVERY accepted answer, not just the key — the database does, and
   // the engine cannot always see what the instructor can: 3y^2y' is
   // 3y^2 dy/dx, but to the engine y' and dy/dx are two unrelated things, so a
   // key-only check re-marked it wrong and saving overturned the database.
+  //
+  // The VALUE is compared with every label off, whether or not the key has
+  // one — as the database does (sql/032: a key with no label judges none,
+  // and the label is judged separately below when it has one). Handing the
+  // engine the label as well made the answer mean whatever the engine had
+  // last seen: k^{(4)}(s) = 0 read as "s times k to the fourth" on a fresh
+  // engine and as a fourth derivative after the problem k(s) = … had been
+  // parsed, so a right answer on "find the fourth derivative" was marked
+  // wrong on the dashboard while the database had it right.
   const isRight = line => {
     if (!target) {
-      return accepted.some(acc => (keyHasLabel
-        ? isFinalForm(withoutLabel(line), withoutLabel(acc))
-        : isFinalForm(line, acc)));
+      return accepted.some(acc => {
+        // Whatever the database would take, this takes — its own tidying,
+        // not the engine's reading of it (mathNormalize.js).
+        if (mathAnswersMatch(line, acc)) return true;
+        const a = derivAsUnknown(withoutLabel(line)), b = derivAsUnknown(withoutLabel(acc));
+        // Algebra only where it means something. An unworked limit, integral
+        // or d/dx is the question, not an answer, unless the key is one
+        // itself — "write the expression … do not simplify" wants the
+        // limit written out, and its value is not what was asked. And a
+        // derivative the engine cannot treat as an unknown it reads as a
+        // constant, making 2y^2 dy/dx "equal" to 3y^2 dy/dx.
+        if (UNWORKED.test(a) || UNWORKED.test(b) || HOLDS_DERIVATIVE.test(a) || HOLDS_DERIVATIVE.test(b)) return false;
+        return isFinalForm(a, b);
+      });
     }
     const p = parseLine(line);
     if (!p.valid) return false;
@@ -235,6 +256,47 @@ export function markAnswer(lines, rubric, opts = {}) {
 
 function equivalentToKey(work, key) {
   return work.some(line => latexEquivalent(line, key) === 'equal');
+}
+
+// The operation a question asks for, not yet carried out: a limit, an
+// integral, or d/dx (d^2/dx^2…) applied to something.
+const UNWORKED = /\\lim|\\int|\\frac\{(?:d|\\differentialD|\\mathrm\{d\})(?:\^\{?\d+\}?)?\}\{/;
+
+/**
+ * dy/dx and y' as unknowns of their own. In implicit differentiation that is
+ * what they are, and it is the only way the engine can compare them: left
+ * alone it reads dy/dx as a constant (y does not depend on x as far as it
+ * knows), so d/dx of anything came out equal to 3y^2 dy/dx. Second
+ * derivatives become a different unknown from first ones.
+ */
+export function derivAsUnknown(s) {
+  const D = String.raw`(?:d|\\differentialD|\\mathrm\{d\})`;
+  return String(s ?? '')
+    .replace(new RegExp(String.raw`\\frac\{${D}\s*\^\{?2\}?\s*y\}\{${D}\s*x\s*\^\{?2\}?\}`, 'g'), ' R ')
+    .replace(new RegExp(String.raw`\\frac\{${D}\s*y\}\{${D}\s*x\}`, 'g'), ' Q ')
+    .replace(/d\s*y\s*\/\s*\(?\s*d\s*x\s*\)?/g, ' Q ')
+    .replace(/y\s*(?:\^\{\\prime\\prime\}|'')/g, ' R ')
+    .replace(/y\s*(?:\^\{\\prime\}|\^\\prime|')/g, ' Q ');
+}
+
+/**
+ * Is `line` the same VALUE as `acc`, whatever its form — not simplified, a
+ * negative exponent for a fraction, factors in another order? Labels off,
+ * dy/dx and y' as unknowns, a clean engine, and never through an unworked
+ * limit, integral or d/dx. Unlike markAnswer() it does not ask whether the
+ * answer is written about as simply as the key: this is for an instructor
+ * whose rule is that an unsimplified answer is right unless the question
+ * asks for simplest form.
+ */
+export function sameValueAs(line, acc) {
+  const a = derivAsUnknown(withoutLabel(line)), b = derivAsUnknown(withoutLabel(acc));
+  if (UNWORKED.test(a) || UNWORKED.test(b) || HOLDS_DERIVATIVE.test(a) || HOLDS_DERIVATIVE.test(b)) return false;
+  // Still an equation once any label is off means its left side is not a
+  // label at all — m^4(v) = 0 is a power, not a fourth derivative — and an
+  // equation is not the same thing as a value.
+  if (a.includes('=') !== b.includes('=')) return false;
+  freshEngine();
+  try { return latexEquivalent(a, b) === 'equal'; } catch { return false; }
 }
 
 // A derivative written into an answer's value: y', \prime, \frac{dy}{dx},

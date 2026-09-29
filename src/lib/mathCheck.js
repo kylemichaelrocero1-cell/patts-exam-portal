@@ -40,10 +40,12 @@
 // all, so it is never in the initial bundle. Everything below needs ready()
 // to have been awaited once; the UI does that when a maths item first opens.
 let engine = null;
+let EngineClass = null;
 
 export async function ready() {
   if (!engine) {
     const { ComputeEngine } = await import('@cortex-js/compute-engine');
+    EngineClass = ComputeEngine;
     engine = new ComputeEngine();
   }
   return engine;
@@ -57,6 +59,21 @@ export function isReady() {
 /** For tests, which build their own engine rather than importing twice. */
 export function useEngine(ce) {
   engine = ce;
+  EngineClass = ce?.constructor ?? null;
+}
+
+/**
+ * A clean engine, with nothing a previous answer taught it.
+ *
+ * The engine REMEMBERS what it has parsed: read k(s) = s^3 + 4s^2 - 1 and
+ * it records k as a function, after which k^{(4)}(s) means a fourth
+ * derivative where on a clean engine it meant s times k to the fourth. One
+ * engine marking a whole script therefore judged each answer partly on the
+ * answers and problems before it. About 10 ms; called once per answer.
+ */
+export function freshEngine() {
+  if (EngineClass) engine = new EngineClass();
+  return engine;
 }
 
 // Sample points, fixed rather than random so a mark never changes between two
@@ -92,6 +109,24 @@ export function freeVars(box) {
 }
 
 /**
+ * What the maths keyboard writes, in a form the engine parses. The engine
+ * gives up on four primes in a superscript (k^{\prime\prime\prime\prime},
+ * a fourth derivative) and on spacing commands like \thinspace,
+ * so both are tidied first — the same way sql/036 tidies them, which keeps
+ * the dashboard's marker agreeing with the database's.
+ */
+function forEngine(src) {
+  return src
+    // Empty superscripts and subscripts are the keyboard's leftovers
+    // (y'''=^{}24x), and so is an answer typed inside one.
+    .replace(/[\^_]\{\s*\}/g, '')
+    .replace(/^\s*\^\{(.*)\}\s*$/s, '$1')
+    .replace(/\\[,;:!> ]|\\q?quad|\\(neg)?(thin|med|thick)space|\\enspace|\\hspace\*?\{[^}]*\}|~/g, ' ')
+    .split('\\doubleprime').join("''").split('\\prime').join("'")
+    .replace(/\^\{('+)\}/g, '$1').replace(/\^(')/g, '$1');
+}
+
+/**
  * One line of work, parsed.
  *
  * `isEquation` splits a line into the two sides of its `=`. That split is what
@@ -104,7 +139,7 @@ export function parseLine(latex) {
   if (!src) return { empty: true, valid: false, latex: src };
 
   let box;
-  try { box = engine.parse(src); } catch { return { valid: false, latex: src, error: 'parse' }; }
+  try { box = engine.parse(forEngine(src)); } catch { return { valid: false, latex: src, error: 'parse' }; }
   if (!box || box.isValid === false) return { valid: false, latex: src, error: 'syntax' };
 
   const json = box.json;

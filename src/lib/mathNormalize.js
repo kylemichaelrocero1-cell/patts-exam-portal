@@ -1,7 +1,7 @@
 // The database's way of comparing two typed answers, in JavaScript.
 //
 // The database marks by STRING after tidying both sides (sql/027, revised
-// by 030-033, 036 and 037): normalize_math(), math_as_number() and
+// by 030-033 and 036-038): normalize_math(), math_as_number() and
 // math_answers_match(). The dashboard re-marks a script when it is opened,
 // and saving overwrites the database's mark — so the dashboard has to be
 // able to say "the database would take this" for itself. This file is that,
@@ -11,13 +11,15 @@
 // It is deliberately NOT algebra. x^{-1} and 1/x differ here, as they do in
 // the database; the maths engine (mathCheck.js) is what sees them as equal.
 
-// math_drop_spaces() (037): every kind of LaTeX space, empty ^{} and _{},
-// and a superscript with no base wrapped round the whole answer.
+// math_drop_spaces() (038): every kind of LaTeX space, empty ^{} and _{},
+// a superscript with no base wrapped round the whole answer, and any arrow
+// (\rightarrow, \longrightarrow, an empty \overrightarrow{}) as \to.
 export function dropSpaces(p) {
   return String(p ?? '')
     .replace(/\\[,;:!> ]|\\q?quad|\\(neg)?(thin|med|thick)space|\\enspace|\\hspace\*?\{[^}]*\}|~/g, '')
     .replace(/[\^_]\{\s*\}/g, '')
-    .replace(/^\s*\^\{(.*)\}\s*$/s, '$1');
+    .replace(/^\s*\^\{(.*)\}\s*$/s, '$1')
+    .replace(/\\(long)?rightarrow(?![a-zA-Z])|\\overrightarrow\{\s*\}/g, '\\to');
 }
 
 // math_primes() (036): every \prime as ', however many.
@@ -39,7 +41,7 @@ const LABEL_LHS = new RegExp('^('
 
 const unwrap = t => t.replace(/\{([a-z0-9])\}/g, '$1');
 
-/** normalize_math() as of sql/037. */
+/** normalize_math() as of sql/038. */
 export function normalizeMath(p) {
   let t = dropSpaces(p);                                                   // s1
   t = t.replace(/\\left|\\right/g, '');                                    // s2
@@ -61,7 +63,7 @@ export function normalizeMath(p) {
   return t;
 }
 
-/** math_as_number() as of sql/036: the answer as a number, or null. */
+/** math_as_number() as of sql/038: the answer as a number, or null. */
 export function mathAsNumber(p) {
   let t = dropSpaces(p ?? '').replace(/\\left|\\right/g, '').replace(/\s+/g, '').toLowerCase();
   t = t.replace(/\\[dt]frac/g, '\\frac')

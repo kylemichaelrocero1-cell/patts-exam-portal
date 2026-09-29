@@ -5,6 +5,8 @@
 // string in a broad list: saving a script from the dashboard overwrites the
 // database's mark, so the two must never disagree about what matches.
 //
+// Also sql/038: any arrow in a limit is \\to.
+//
 //   npm run test:leftovers
 import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
@@ -83,6 +85,25 @@ for (const [a, acc, right, why] of [
   ['6x', ['5x'], false, 'a wrong answer is still wrong'],
 ]) ck(why, ((await verdict(a, acc)) === null) === right, String(await verdict(a, acc)));
 
+console.log('\n=== 038: any arrow in a limit is \\to ===');
+const LIM_KEY = ["f'(x)=\\lim_{h\\to 0}\\frac{(x+h)^3-x^3}{h}"];
+const ARROWS = [
+  ['\\rightarrow', 'f^{\\prime}\\left(x\\right)=\\lim_{h\\rightarrow0}\\frac{\\left(x+h\\right)^3-x^3}{h}'],
+  ['\\longrightarrow', 'f^{\\prime}\\left(x\\right)=\\lim_{h\\longrightarrow0}\\frac{\\left(x+h\\right)^3-x^3}{h}'],
+  ['an empty \\overrightarrow{}', 'f^{\\prime}\\left(x\\right)=\\lim_{h\\overrightarrow{}0}\\frac{\\left(x+h\\right)^3-x^3}{h}'],
+];
+for (const [what, a] of ARROWS) ck(`WRONG before 038: ${what}`, (await verdict(a, LIM_KEY)) !== null);
+const M38 = fs.readFileSync(P + '/sql/038_any_arrow_is_to.sql', 'utf8');
+await x(M38);
+await x(M38);
+ck('038 applies, twice', true);
+for (const [what, a] of ARROWS) ck(`right after 038: ${what}`, (await verdict(a, LIM_KEY)) === null);
+ck('a real vector is not an arrow', (await one(`SELECT public.normalize_math($1) n`, ['\\overrightarrow{v}'])).includes('overrightarrow'));
+ck('\\Rightarrow means "implies" and is left alone', (await one(`SELECT public.normalize_math($1) n`, ['a\\Rightarrow b'])).includes('rightarrow'));
+ck('a longer command that merely starts the same is not taken for an arrow',
+  (await one(`SELECT public.math_drop_spaces($1) n`, ['\\rightarrowtail'])) === '\\rightarrowtail');
+ck('the value still has to be right', (await verdict('f^{\\prime}(x)=\\lim_{h\\rightarrow0}\\frac{(x+h)^3+x^3}{h}', LIM_KEY)) !== null);
+
 console.log("\n=== the dashboard copy gives the database's answer on every string ===");
 // Deliberately NOT any paper's answers — the repo is public.
 const CORPUS = [
@@ -101,6 +122,8 @@ const CORPUS = [
   'f^{\\prime^{}\\prime}(x)=6x', '^{\\frac{dy}{dx}=\\frac{-2x}{y}}', 'x_{}+1', '1+-2', '1--2', '-1',
   '\\lim_{x\\to 3}(x+3)', '\\lim_{x\\rightarrow3}=6', '\\sqrt{x^2+4}', 'x(x^2+4)^{-1/2}', 'x\\left(x^2+4\\right)^{-\\frac12}',
   '', '   ', '\\text{2}', '=5', 'y=', "y'''=24x", "y^{\\prime}^{\\prime}^{\\prime}=^{}24x",
+  '\\lim_{h\\rightarrow0}', '\\lim_{h\\to 0}', '\\lim_{h\\overrightarrow{}0}', '\\lim_{h\\longrightarrow0}',
+  '\\overrightarrow{v}', 'a\\Rightarrow b', '\\rightarrowtail', 'x\\rightarrow\\infty',
 ];
 const nd = [], numd = [];
 for (const s of CORPUS) {

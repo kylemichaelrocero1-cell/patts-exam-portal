@@ -121,6 +121,9 @@ function forEngine(src) {
     // (y'''=^{}24x), and so is an answer typed inside one.
     .replace(/[\^_]\{\s*\}/g, '')
     .replace(/^\s*\^\{(.*)\}\s*$/s, '$1')
+    // Any arrow is \to (sql/038) — the engine does not read an empty
+    // \overrightarrow{} as one.
+    .replace(/\\(long)?rightarrow(?![a-zA-Z])|\\overrightarrow\{\s*\}/g, '\\to')
     .replace(/\\[,;:!> ]|\\q?quad|\\(neg)?(thin|med|thick)space|\\enspace|\\hspace\*?\{[^}]*\}|~/g, ' ')
     .split('\\doubleprime').join("''").split('\\prime').join("'")
     .replace(/\^\{('+)\}/g, '$1').replace(/\^(')/g, '$1');

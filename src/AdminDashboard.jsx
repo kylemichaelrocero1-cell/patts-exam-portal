@@ -12,6 +12,7 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
 import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
+import { rowsMissingWork, workPatchFrom } from './lib/workRecovery';
 import { submittedDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
@@ -892,6 +893,7 @@ const [targetSection, setTargetSection] = useState('');
 
   // --- RESCORE / REPAIR ZERO RESULTS ---
   const [isRescoring, setIsRescoring] = useState(false);
+  const [isRecoveringWork, setIsRecoveringWork] = useState(false);
   const [manualScoreModal, setManualScoreModal] = useState(null); // { student_id, exam_id, student_name, exam_title, total_items, weighted }
   const [manualScoreValue, setManualScoreValue] = useState('');
 
@@ -1085,11 +1087,61 @@ const [targetSection, setTargetSection] = useState('');
         `  ADD COLUMN IF NOT EXISTS answers_json jsonb,\n` +
         `  ADD COLUMN IF NOT EXISTS essay_answers_json jsonb,\n` +
         `  ADD COLUMN IF NOT EXISTS exam_set text;\n\n` +
-        `For these ${timeFixed} students, use the pencil (✏️) icon in the Results table to enter scores manually.`
+        `For these ${timeFixed} students, open the paper (the eye icon) and use Enter score.`
       );
     } else {
       alert(`Done: ${scoreFixed} re-scored, ${timeFixed} time fixed${failed > 0 ? `, ${failed} failed` : ''}.`);
     }
+  };
+
+  // Working refused at submit — save_worked_answers() checks the session
+  // token and submit_assessment() does not, so a second sign-in mid-paper
+  // leaves the picked items marked and the working behind in the live
+  // session (src/lib/workRecovery.js). Written into the result from there and
+  // marked by score_worked_answers(), as the student's own call would have.
+  const recoverMissingWork = async () => {
+    if (missingWork.length === 0) return;
+    setIsRecoveringWork(true);
+    let recovered = 0, blank = 0, failed = 0;
+    for (const row of missingWork) {
+      try {
+        const questions = await loadExamQuestions(row.exam_id);
+        const [{ data: sessions, error: liveErr }, { data: current, error: rowErr }] = await Promise.all([
+          supabase.from('live_sessions').select('work_answers_json')
+            .eq('student_id', row.student_id).eq('exam_id', row.exam_id)
+            .order('updated_at', { ascending: false }).limit(1),
+          supabase.from('results').select('answers_json')
+            .eq('student_id', row.student_id).eq('exam_id', row.exam_id).single(),
+        ]);
+        if (liveErr || rowErr) throw liveErr || rowErr;
+        const patch = workPatchFrom(sessions?.[0]?.work_answers_json, questions);
+        if (Object.keys(patch).length > 0) {
+          const { error } = await supabase.from('results')
+            .update({ answers_json: { ...(current?.answers_json || {}), ...patch } })
+            .eq('student_id', row.student_id).eq('exam_id', row.exam_id);
+          if (error) throw error;
+        }
+        // Run even with nothing written: a blank item is a real 0, and this is
+        // what records the marks available, so the row reads out of the full
+        // paper instead of the picked items alone.
+        const { data: scored, error: scoreErr } = await supabase.rpc('score_worked_answers', {
+          p_student_id: row.student_id, p_assessment_id: row.exam_id,
+        });
+        if (scoreErr) throw scoreErr;
+        const isRow = (r) => r.student_id === row.student_id && r.exam_id === row.exam_id;
+        const marks = { work_marks: Number(scored?.work_marks) || 0, work_total: Number(scored?.work_total) || 0, work_marked_at: new Date().toISOString() };
+        setResults(prev => prev.map(r => (isRow(r) ? { ...r, ...marks } : r)));
+        setAnswersJsonCache(prev => { const next = { ...prev }; delete next[`${row.student_id}_${row.exam_id}`]; return next; });
+        if (Object.keys(patch).length > 0) recovered++; else blank++;
+      } catch (err) {
+        console.error('Could not recover working:', err?.message || err);
+        failed++;
+      }
+    }
+    setIsRecoveringWork(false);
+    alert(`Working recovered and marked for ${recovered} paper${recovered === 1 ? '' : 's'}`
+      + (blank ? `; ${blank} had nothing written and ${blank === 1 ? 'is' : 'are'} now scored out of the full paper` : '')
+      + (failed ? `; ${failed} could not be recovered — try again, or mark ${failed === 1 ? 'it' : 'them'} by hand.` : '.'));
   };
 
   // --- QUESTION MANAGEMENT FUNCTIONS ---
@@ -2391,6 +2443,10 @@ const deleteResult = async (studentId, examId) => {
   // left out and counted separately.
   const resultStats = resultStatistics(filteredAndSortedResults);
 
+  // Sittings whose working never reached the result (src/lib/workRecovery.js).
+  const missingWork = rowsMissingWork(results.filter(r => instructorExamIdsRef.current.has(r.exam_id)));
+  const missingWorkKeys = new Set(missingWork.map(r => `${r.student_id}_${r.exam_id}`));
+
   const exportCSV = () => {
     // Same score as the table, plus when it was handed in (src/lib/resultsExport.js).
     const rows = filteredAndSortedResults.map(row => resultsCsvRow(
@@ -2738,6 +2794,31 @@ const deleteResult = async (studentId, examId) => {
               </div>
             )}
 
+            {/* Working that never reached the result (src/lib/workRecovery.js).
+                Without this the row just reads 3/9 on a paper worth 67. */}
+            {missingWork.length > 0 && (() => {
+              const missing = missingWork;
+              return (
+                <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Icon name="alert" size={16} color="#B8860B" />
+                    <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>
+                      {missing.length} paper{missing.length === 1 ? ' is' : 's are'} missing {missing.length === 1 ? 'its' : 'their'} worked answers
+                    </span>
+                    <span style={{ color: '#A07000', fontSize: 13 }}>— the working was kept in the live session and can be recovered and marked</span>
+                  </div>
+                  <button
+                    className="btn sm"
+                    onClick={recoverMissingWork}
+                    disabled={isRecoveringWork}
+                    style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                  >
+                    {isRecoveringWork ? 'Recovering…' : 'Recover working'}
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* Filters */}
             <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
@@ -2871,6 +2952,11 @@ const deleteResult = async (studentId, examId) => {
                                   script is waiting on them. Without it the
                                   pending-marks window is invisible from this
                                   side and nobody ever opens the paper. */}
+                              {missingWorkKeys.has(`${row.student_id}_${row.exam_id}`) && (
+                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--bad)', marginTop: 2, textAlign: 'right' }}>
+                                  working not saved
+                                </span>
+                              )}
                               {m.pending > 0 && (
                                 <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--warn)', marginTop: 2, textAlign: 'right' }}>
                                   {m.pending} mark{m.pending === 1 ? '' : 's'} to mark

@@ -769,6 +769,15 @@ const [targetSection, setTargetSection] = useState('');
         const isRetake = examAllowsRetakes(session.exam_id);
         const score = outcome?.score ?? 0;
         const mcTotal = outcome?.total_items ?? 0;
+        // What the paper is worth beyond the picked items. submit_assessment()
+        // files and marks the working from the live session since sql/039;
+        // before it, Force Submit filed none. Absent on a plain paper.
+        const filedMarks = {
+          points_earned: outcome?.points_earned ?? null,
+          points_total: outcome?.points_total ?? null,
+          work_marks: outcome?.work_marks ?? null,
+          work_total: outcome?.work_total ?? null,
+        };
 
         // Essays are not marked server-side (there is nothing to mark against),
         // so they are attached to the stored graded row separately. A
@@ -802,6 +811,7 @@ const [targetSection, setTargetSection] = useState('');
             attempt_no: outcome?.attempt_no ?? 1,
             score,
             total_items: mcTotal,
+            ...filedMarks,
             time_taken_seconds: timeTaken,
             submitted_at: new Date().toISOString(),
           }]);
@@ -814,6 +824,7 @@ const [targetSection, setTargetSection] = useState('');
                   exam_id: session.exam_id,
                   score,
                   total_items: mcTotal,
+                  ...filedMarks,
                   time_taken_seconds: timeTaken,
                   tab_switches: session.violation_count || 0,
                   violation_logs: session.violation_log || [],

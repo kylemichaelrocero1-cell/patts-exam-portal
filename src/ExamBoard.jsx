@@ -647,6 +647,21 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // itself and drops anything left blank.
       const mcAnswers = answersPayload(submittedAnswers);
 
+      // submit_assessment() files the working itself, from the live session
+      // (sql/039) — so a refused save_worked_answers() below, a second sign-in
+      // having replaced this device's token, no longer leaves the paper as
+      // its picked items alone. The progress pusher writes that copy 2s
+      // after the last change; send the one being handed in first.
+      const workTotal = workMarksAvailable(questions);
+      if (workTotal > 0) {
+        const flush = supabase.from('live_sessions')
+          .update({ work_answers_json: submittedWork, updated_at: new Date() });
+        const { error: flushError } = await (liveSessionId
+          ? flush.eq('id', liveSessionId)
+          : flush.eq('student_id', student?.id).eq('exam_id', exam.id));
+        if (flushError) console.error('Could not send working ahead of submit:', flushError.message);
+      }
+
       const { data: outcome, error: rpcError } = await supabase.rpc('submit_assessment', {
         p_student_id: student?.id,
         p_assessment_id: exam.id,
@@ -693,7 +708,6 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // disappearing the same way for far longer. save_worked_answers()
       // (sql/026) proves the session and writes on the student's behalf,
       // returns what it saved, and its failures are actual failures.
-      const workTotal = workMarksAvailable(questions);
       const workPayload = {};
       Object.entries(submittedWork).forEach(([qId, value]) => {
         const lines = (Array.isArray(value?.lines) ? value.lines : [])
@@ -758,11 +772,15 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // which only happens when the instructor has turned answers on. When
       // they have not, the score is left as pending rather than invented.
       if (workTotal > 0) {
-        // The server has already marked it. When the call failed the marks are
-        // shown as pending rather than invented — an instructor can still
-        // score the script from the dashboard.
-        const earned = Number(workOutcome?.work_marks);
-        const available = Number(workOutcome?.work_total) || workTotal;
+        // The server has already marked it — by save_worked_answers() when it
+        // got through, otherwise by submit_assessment() itself (sql/039).
+        // Only when neither did are the marks shown as pending rather than
+        // invented; an instructor can still recover and score the script.
+        const filed = workOutcome
+          ?? (outcome?.work_total !== null && outcome?.work_total !== undefined ? outcome : null);
+        const earned = filed?.work_marks !== null && filed?.work_marks !== undefined
+          ? Number(filed.work_marks) : NaN;
+        const available = Number(filed?.work_total) || workTotal;
         setScoreDisplay(Number.isFinite(earned)
           ? { score: picked.score + earned, total: picked.total + available }
           : { ...picked, workPending: workTotal });

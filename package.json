@@ -13,7 +13,7 @@
     "test:lessons": "node src/lib/__tests__/lessonMarkdown.test.mjs",
     "test:assessments": "node src/lib/__tests__/assessments.test.mjs",
     "test:material": "node src/lib/__tests__/lessonMaterial.test.mjs",
-    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions && npm run test:answers && npm run test:multi-select && npm run test:exam-password && npm run test:exam-gate && npm run test:retakes && npm run test:proctoring && npm run test:math && npm run test:worked && npm run test:worked-shape && npm run test:points && npm run test:question-csv && npm run test:session-errors && npm run test:worked-saved && npm run test:score-db && npm run test:worked-review && npm run test:csv-scored && npm run test:palette && npm run test:primes && npm run test:labels && npm run test:minus && npm run test:session-check && npm run test:session-current && npm run test:token-revoke && npm run test:exam-dates && npm run test:results-export && npm run test:math-display && npm run test:primes-brackets && npm run test:leftovers && npm run test:prime-typing && npm run test:student-home && npm run test:results-stats && npm run test:work-recovery",
+    "test": "npm run test:migration && npm run test:sections && npm run test:preboards && npm run test:lessons && npm run test:assessments && npm run test:material && npm run test:five-option && npm run test:sections-scope && npm run test:student-identity && npm run test:shared-ids && npm run test:archive && npm run test:unlimited-choices && npm run test:choices && npm run test:csv-template && npm run test:exam-order && npm run test:shuffle-questions && npm run test:answers && npm run test:multi-select && npm run test:exam-password && npm run test:exam-gate && npm run test:retakes && npm run test:proctoring && npm run test:math && npm run test:worked && npm run test:worked-shape && npm run test:points && npm run test:question-csv && npm run test:session-errors && npm run test:worked-saved && npm run test:score-db && npm run test:worked-review && npm run test:csv-scored && npm run test:palette && npm run test:primes && npm run test:labels && npm run test:minus && npm run test:session-check && npm run test:session-current && npm run test:token-revoke && npm run test:exam-dates && npm run test:results-export && npm run test:math-display && npm run test:primes-brackets && npm run test:leftovers && npm run test:prime-typing && npm run test:student-home && npm run test:results-stats && npm run test:work-recovery && npm run test:submit-working",
     "test:review": "node sql/test/review.test.mjs",
     "test:preboards": "node sql/test/preboards_review.test.mjs",
     "test:sections-scope": "node src/lib/__tests__/sectionScope.test.mjs",
@@ -57,7 +57,8 @@
     "test:leftovers": "node sql/test/keyboard_leftovers.test.mjs",
     "test:prime-typing": "node src/lib/__tests__/primeTyping.test.mjs",
     "test:results-stats": "node src/lib/__tests__/resultsStats.test.mjs",
-    "test:work-recovery": "node src/lib/__tests__/workRecovery.test.mjs"
+    "test:work-recovery": "node src/lib/__tests__/workRecovery.test.mjs",
+    "test:submit-working": "node sql/test/submit_files_working.test.mjs"
   },
   "dependencies": {
     "@cortex-js/compute-engine": "^0.133.0",

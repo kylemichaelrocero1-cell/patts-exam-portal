@@ -11,6 +11,7 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
+import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
 import { submittedDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
@@ -891,8 +892,15 @@ const [targetSection, setTargetSection] = useState('');
 
   // --- RESCORE / REPAIR ZERO RESULTS ---
   const [isRescoring, setIsRescoring] = useState(false);
-  const [manualScoreModal, setManualScoreModal] = useState(null); // { student_id, exam_id, student_name, exam_title, total_items }
+  const [manualScoreModal, setManualScoreModal] = useState(null); // { student_id, exam_id, student_name, exam_title, total_items, weighted }
   const [manualScoreValue, setManualScoreValue] = useState('');
+
+  // A score can be typed in only where one number means the same thing in
+  // both columns: a row from before points existed, or one where every item
+  // is worth a point. Where items carry different points, a count typed here
+  // would not be what the table shows.
+  const manualScoreFits = (row) => row.points_total === null || row.points_total === undefined
+    || Number(row.points_total) === Number(row.total_items);
 
   const saveManualScore = async () => {
     if (!manualScoreModal) return;
@@ -900,16 +908,17 @@ const [targetSection, setTargetSection] = useState('');
     if (isNaN(score) || score < 0 || score > manualScoreModal.total_items) {
       return alert(`Score must be between 0 and ${manualScoreModal.total_items}.`);
     }
+    // The table reads points_earned when the row has points (combinedScore),
+    // so writing only the count would change nothing anyone can see.
+    const patch = manualScoreModal.weighted ? { score, points_earned: score } : { score };
     const { error } = await supabase.from('results')
-      .update({ score })
+      .update(patch)
       .eq('student_id', manualScoreModal.student_id)
       .eq('exam_id', manualScoreModal.exam_id);
     if (error) return alert('Save failed: ' + error.message);
-    setResults(prev => prev.map(r =>
-      r.student_id === manualScoreModal.student_id && r.exam_id === manualScoreModal.exam_id
-        ? { ...r, score }
-        : r
-    ));
+    const isRow = (r) => r.student_id === manualScoreModal.student_id && r.exam_id === manualScoreModal.exam_id;
+    setResults(prev => prev.map(r => (isRow(r) ? { ...r, ...patch } : r)));
+    setViewingStudent(prev => (prev && isRow(prev) ? { ...prev, ...patch } : prev));
     setManualScoreModal(null);
     setManualScoreValue('');
   };
@@ -2352,15 +2361,11 @@ const deleteResult = async (studentId, examId) => {
       return matchesSection && matchesExam;
     })
     .sort((a, b) => {
-      if (resultSort === 'score_desc') {
-        const pctA = a.total_items > 0 ? a.score / a.total_items : 0;
-        const pctB = b.total_items > 0 ? b.score / b.total_items : 0;
-        return pctB - pctA;
-      }
-      if (resultSort === 'score_asc') {
-        const pctA = a.total_items > 0 ? a.score / a.total_items : 0;
-        const pctB = b.total_items > 0 ? b.score / b.total_items : 0;
-        return pctA - pctB;
+      // On the score the column shows (src/lib/resultsStats.js), not the
+      // picked-item count under it; equal scores fall back to the name.
+      if (resultSort === 'score_desc' || resultSort === 'score_asc') {
+        return compareByScore(a, b, resultSort === 'score_desc' ? 'desc' : 'asc')
+          || (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
       }
       if (resultSort === 'name') {
         const nameA = students[a.student_id]?.name || '';
@@ -2382,37 +2387,9 @@ const deleteResult = async (studentId, examId) => {
   )].sort()];
 
   // --- RESULTS STATISTICS ---
-  const resultStats = (() => {
-    const n = filteredAndSortedResults.length;
-    if (n === 0) return null;
-    const pcts = filteredAndSortedResults.map(r => r.total_items > 0 ? (r.score / r.total_items) * 100 : 0);
-    const sorted = [...pcts].sort((a, b) => a - b);
-    const sum = pcts.reduce((a, b) => a + b, 0);
-    const mean = sum / n;
-    const median = n % 2 === 0 ? (sorted[n / 2 - 1] + sorted[n / 2]) / 2 : sorted[Math.floor(n / 2)];
-    const variance = pcts.reduce((acc, p) => acc + Math.pow(p - mean, 2), 0) / n;
-    const stdDev = Math.sqrt(variance);
-    const highest = sorted[n - 1];
-    const lowest = sorted[0];
-    const passing = pcts.filter(p => p >= 75).length;
-    const passRate = (passing / n) * 100;
-    const brackets = [
-      { label: '0–49%', min: 0, max: 49, color: '#E74C3C' },
-      { label: '50–59%', min: 50, max: 59, color: '#E67E22' },
-      { label: '60–69%', min: 60, max: 69, color: '#F39C12' },
-      { label: '70–74%', min: 70, max: 74, color: '#F1C40F' },
-      { label: '75–79%', min: 75, max: 79, color: '#2ECC71' },
-      { label: '80–89%', min: 80, max: 89, color: '#27AE60' },
-      { label: '90–100%', min: 90, max: 100, color: '#1A8A4A' },
-    ];
-    const distribution = brackets.map(b => ({
-      ...b,
-      count: pcts.filter(p => p >= b.min && p <= b.max).length,
-    }));
-    const avgTimeSec = filteredAndSortedResults.reduce((a, r) => a + (r.time_taken_seconds || 0), 0) / n;
-    const avgViolations = filteredAndSortedResults.reduce((a, r) => a + (r.tab_switches || 0), 0) / n;
-    return { n, mean, median, stdDev, highest, lowest, passRate, distribution, avgTimeSec, avgViolations };
-  })();
+  // Over the scores the table shows; papers still waiting on worked marks are
+  // left out and counted separately.
+  const resultStats = resultStatistics(filteredAndSortedResults);
 
   const exportCSV = () => {
     // Same score as the table, plus when it was handed in (src/lib/resultsExport.js).
@@ -2622,7 +2599,7 @@ const deleteResult = async (studentId, examId) => {
                   { label: 'Live Now', value: liveSessions.length, color: liveSessions.length > 0 ? '#E74C3C' : 'var(--ink-3)', icon: 'activity', sub: 'active sessions' },
                   { label: 'Total Students', value: studentsList.length, color: '#2980B9', icon: 'users', sub: 'in your sections' },
                   { label: 'Total Results', value: results.length, color: '#27AE60', icon: 'bar-chart', sub: 'submissions' },
-                  { label: 'Pass Rate', value: (() => { const n = results.length; if (n === 0) return '–'; const p = results.filter(r => r.total_items > 0 && (r.score / r.total_items) >= 0.75).length; return `${Math.round((p / n) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: '≥75% passing' },
+                  { label: 'Pass Rate', value: (() => { const scored = results.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% passing` },
                   // Worked maths items can only be marked in this browser
                   // (sql/024), so scripts sit waiting until somebody opens
                   // them. This tile is the prompt; the Results table says which.
@@ -2804,7 +2781,12 @@ const deleteResult = async (studentId, examId) => {
             {resultStats && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, marginBottom: 16 }}>
                 <div className="card" style={{ padding: 18 }}>
-                  <h4 style={{ marginBottom: 12 }}>Quick stats</h4>
+                  <h4 style={{ marginBottom: resultStats.pending > 0 ? 2 : 12 }}>Quick stats</h4>
+                  {resultStats.pending > 0 && (
+                    <div style={{ fontSize: 11.5, color: 'var(--warn)', fontWeight: 600, marginBottom: 10 }}>
+                      {resultStats.pending} paper{resultStats.pending === 1 ? '' : 's'} still to mark — not counted yet
+                    </div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     {[
                       { label: 'Mean', value: `${resultStats.mean.toFixed(1)}%` },
@@ -2873,19 +2855,17 @@ const deleteResult = async (studentId, examId) => {
                             <td style={{ fontWeight: 600 }}>{student.name}</td>
                             <td><span className="px-pill brand">{student.section}</span></td>
                             <td style={{ color: 'var(--ink-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
-                            <td style={{ textAlign: 'right' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</span>
-                                <span style={{ color: percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
-                                {/* Manual edit pencil — shown when answers are missing (data lost from force-submit bug) */}
-                                {row.total_items > 0 && (!row.answers_json || Object.keys(row.answers_json).length === 0) && (
-                                  <button
-                                    title="Enter score manually"
-                                    onClick={() => { setManualScoreModal({ student_id: row.student_id, exam_id: row.exam_id, student_name: students[row.student_id]?.name || 'Student', exam_title: examsDict[row.exam_id] || 'Exam', total_items: row.total_items }); setManualScoreValue(String(row.score)); }}
-                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: 'var(--info)', fontSize: 13, lineHeight: 1 }}
-                                  >✏️</button>
-                                )}
-                              </div>
+                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              {/* The percentage has a fixed width so every
+                                  fraction lines up under the header, 9% or
+                                  100%. The manual-score pencil used to sit
+                                  here too, but its test read answers_json,
+                                  which this query never loads, so it showed
+                                  on every row and pushed the scores out of
+                                  line. It lives in the paper view now, where
+                                  the answers are actually fetched. */}
+                              <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</span>
+                              <span style={{ display: 'inline-block', minWidth: '5ch', marginLeft: 6, color: m.pending > 0 ? 'var(--ink-4)' : percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
                               {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2, textAlign: 'right' }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
                               {/* The only thing that tells an instructor a
                                   script is waiting on them. Without it the
@@ -4648,10 +4628,42 @@ const deleteResult = async (studentId, examId) => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <h2 style={{ margin: 0, color: 'white', fontSize: '18px' }}>{students[viewingStudent.student_id]?.name}'s Exam Paper</h2>
-                  <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span className="px-pill" style={{ background: 'rgba(255,255,255,.15)', color: 'white', borderColor: 'transparent', fontSize: '13px' }}>
-                      Score: <strong>{viewingStudent.score} / {viewingStudent.total_items}</strong>
-                    </span>
+                  <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {/* The same score as the Results row — points plus worked
+                        marks. This read score / total_items, the picked-item
+                        count alone, and said 9 / 9 on a 20 / 67 paper. */}
+                    {(() => {
+                      const m = combinedScore(viewingStudent);
+                      return (
+                        <span className="px-pill" style={{ background: 'rgba(255,255,255,.15)', color: 'white', borderColor: 'transparent', fontSize: '13px' }}>
+                          Score: <strong>{m.score} / {m.total}</strong>
+                          {m.pending > 0 ? ` · ${m.pending} to mark` : m.pct !== null ? ` · ${m.pct}%` : ''}
+                        </span>
+                      );
+                    })()}
+                    {/* Only for a paper whose answers never reached the server
+                        (the old force-submit loss) — known here because this
+                        view fetches answers_json; the Results list does not. */}
+                    {viewingStudent.total_items > 0
+                      && Object.keys(viewingStudent.answers_json || {}).length === 0
+                      && manualScoreFits(viewingStudent) && (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setManualScoreModal({
+                            student_id: viewingStudent.student_id, exam_id: viewingStudent.exam_id,
+                            student_name: students[viewingStudent.student_id]?.name || 'Student',
+                            exam_title: examsDict[viewingStudent.exam_id] || 'Exam',
+                            total_items: viewingStudent.total_items,
+                            weighted: viewingStudent.points_total !== null && viewingStudent.points_total !== undefined,
+                          });
+                          setManualScoreValue(String(viewingStudent.score ?? 0));
+                        }}
+                        style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}
+                      >
+                        <Icon name="edit" size={13} color="white" /> Enter score
+                      </button>
+                    )}
                   </div>
                 </div>
                 <button className="btn ghost sm" onClick={() => setViewingStudent(null)} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>

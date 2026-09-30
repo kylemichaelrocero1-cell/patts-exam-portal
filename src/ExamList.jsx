@@ -12,6 +12,8 @@ import {
 } from './lib/examGateKeys';
 import ExamReadinessModal from './components/ExamReadinessModal';
 import { homeReads } from './lib/studentHome';
+import { combinedScore } from './lib/workedShape.js';
+import { scoreFraction } from './lib/resultsStats.js';
 
 // What the realtime listener asks for: no spinner, and past the shared copy.
 const LIVE_REFRESH = { silent: true, fresh: true };
@@ -497,8 +499,12 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
               // Practice history for this paper, newest first.
               const myAttempts = attempts[exam.id] || [];
+              // Scored as the Summary scores them — points plus worked marks
+              // (combinedScore). These pills read score / total_items, the
+              // picked-item count alone, so a paper out of 67 said 9/9.
               const bestAttempt = myAttempts.reduce(
-                (b, a) => (!b || a.score > b.score ? a : b), null);
+                (b, a) => (!b || (scoreFraction(a) ?? -1) > (scoreFraction(b) ?? -1) ? a : b), null);
+              const bestScore = bestAttempt ? combinedScore(bestAttempt) : null;
               const lastAttempt = myAttempts[0] || null;
 
               return (
@@ -565,9 +571,9 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                       <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-lt, var(--border))' }}>
                         <div style={{ fontSize: 11, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-4)', fontWeight: 700, marginBottom: 6 }}>
                           Your attempts ({myAttempts.length})
-                          {bestAttempt && bestAttempt.total_items > 0 && (
+                          {bestScore && bestScore.total > 0 && bestScore.pending === 0 && (
                             <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--ok)', marginLeft: 8 }}>
-                              best {bestAttempt.score}/{bestAttempt.total_items}
+                              best {bestScore.score}/{bestScore.total}
                             </span>
                           )}
                         </div>
@@ -575,13 +581,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           {/* Newest first, capped — a student with 30 retakes
                               should not get a wall of pills. */}
                           {myAttempts.slice(0, 6).map(a => {
-                            const pct = a.total_items > 0 ? Math.round((a.score / a.total_items) * 100) : null;
+                            const m = combinedScore(a);
+                            const pct = m.pct;
                             const tone = pct === null ? 'var(--text-3)'
                               : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
                             return (
                               <span key={a.attempt_no} title={new Date(a.submitted_at).toLocaleString()}
                                 style={{ fontSize: 12, padding: '3px 9px', borderRadius: 'var(--r-full)', background: 'var(--surface-2)', border: '1px solid var(--line)', color: tone, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                                #{a.attempt_no} · {a.score}/{a.total_items}
+                                #{a.attempt_no} · {m.score}/{m.total}
                                 {pct !== null && <span style={{ opacity: .7 }}> · {pct}%</span>}
                               </span>
                             );

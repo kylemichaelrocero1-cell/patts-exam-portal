@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { submittedDateTime } from '../lib/examDates.js';
+import { combinedScore } from '../lib/workedShape.js';
+import { scoreFraction } from '../lib/resultsStats.js';
 
 // Every sitting on an unlimited-retake paper. These never reach `results` —
 // submit_assessment() routes them to review_attempts so practice cannot move a
@@ -13,8 +15,13 @@ import { submittedDateTime } from '../lib/examDates.js';
 
 const PASS = 75;
 
-function pct(score, total) {
-  return total > 0 ? (score / total) * 100 : null;
+// An attempt's percentage on its full score — points plus worked marks, as
+// the Results tab and the student's own screens show it. This read
+// score / total_items, the picked-item count alone. null while worked marks
+// are pending.
+function pct(row) {
+  const f = scoreFraction(row);
+  return f === null ? null : f * 100;
 }
 
 function toneFor(p) {
@@ -74,7 +81,7 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
       const rows = [...list].sort((x, y) => x.attempt_no - y.attempt_no);
       const first = rows[0];
       const latest = rows[rows.length - 1];
-      const best = rows.reduce((b, r) => (pct(r.score, r.total_items) ?? -1) > (pct(b.score, b.total_items) ?? -1) ? r : b, rows[0]);
+      const best = rows.reduce((b, r) => (pct(r) ?? -1) > (pct(b) ?? -1) ? r : b, rows[0]);
       const info = (students || {})[first.student_id] || {};
       return {
         key,
@@ -85,9 +92,9 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
         title: titleFor[first.assessment_id] || 'Untitled paper',
         rows,
         first, latest, best,
-        firstPct: pct(first.score, first.total_items),
-        latestPct: pct(latest.score, latest.total_items),
-        bestPct: pct(best.score, best.total_items),
+        firstPct: pct(first),
+        latestPct: pct(latest),
+        bestPct: pct(best),
         lastSat: latest.submitted_at,
       };
     });
@@ -140,12 +147,13 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
       'Date Taken', 'Time Submitted'];
     const lines = [head.join(',')];
     filtered.forEach(g => g.rows.forEach(r => {
-      const p = pct(r.score, r.total_items);
+      const p = pct(r);
+      const m = combinedScore(r);
       // Philippine time. This was an ISO timestamp in UTC, eight hours behind
       // the class — an attempt before 8 AM showed the previous day's date.
       const when = submittedDateTime(r.submitted_at);
       lines.push([
-        g.name, g.section, g.title, r.attempt_no, r.score, r.total_items,
+        g.name, g.section, g.title, r.attempt_no, m.score, m.total,
         p === null ? '' : p.toFixed(1), r.time_taken_seconds ?? '',
         when.date, when.time,
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -292,11 +300,12 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
                               </thead>
                               <tbody>
                                 {g.rows.map(r => {
-                                  const p = pct(r.score, r.total_items);
+                                  const p = pct(r);
+                                  const m = combinedScore(r);
                                   return (
                                     <tr key={r.attempt_no}>
                                       <td style={{ fontFamily: 'var(--font-mono)' }}>#{r.attempt_no}</td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{r.score}/{r.total_items}</td>
+                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</td>
                                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(p) }}>{fmtPct(p)}</td>
                                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ink-3)' }}>{fmtTime(r.time_taken_seconds)}</td>
                                       <td style={{ textAlign: 'right', color: 'var(--ink-3)', fontSize: 12.5, whiteSpace: 'nowrap' }}>{fmtDate(r.submitted_at)}</td>

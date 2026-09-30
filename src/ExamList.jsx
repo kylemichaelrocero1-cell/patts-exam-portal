@@ -163,14 +163,19 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     if (!silent) setIsLoading(true);
     setFetchError(false);
     try {
-      // Exams + completed results + active live sessions, from the copy the
-      // home tabs share — switching between Seatwork, Exams and Summary does
-      // not ask the database again.
+      // Exams + completed results + active live sessions. The open papers and
+      // what has been handed in are ALWAYS read fresh: they decide whether a
+      // paper is on this list and whether it can be started, and they change
+      // while the student is on another tab. An instructor opens the exam
+      // while the class sits on Summary; this list, mounted after that, never
+      // hears the event (its channel did not exist yet), so a copy from
+      // before would show no exam at all. The rest may come from the copy the
+      // home tabs share.
       const [examsRes, resultsRes, liveRes, attemptsRes] = await Promise.all([
         // Reads assessments (exams + seatworks + schedule) and transparently
         // falls back to exams if the migration has not been run yet.
-        homeReads.openAssessments({ fresh }),
-        homeReads.results(student.id, { fresh }),
+        homeReads.openAssessments({ fresh: true }),
+        homeReads.results(student.id, { fresh: true }),
         homeReads.liveSittings(student.id, { fresh }),
         // Retakes live here, not in results — without this a student saw no
         // trace of the mock exams they had already sat.

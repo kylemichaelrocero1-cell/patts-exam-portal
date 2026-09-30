@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { supabase } from './supabase';
 import { prepareQuestions } from './lib/examOrder';
-import { isMissingFunctionError } from './lib/assessments';
 import { fetchAnswerReview } from './lib/answerReview';
 import { clearPasswordGate } from './lib/examGateKeys';
 import Icon from './components/Icon';
@@ -940,43 +939,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // walked around by never clicking Start. get_exam_questions() checks who
       // is asking, that the paper is theirs and open, and that they are through
       // the password, before it hands over a single item.
-      const token = localStorage.getItem('local_session_token');
-      let data = null;
-      let error = null;
-
-      const rpc = await supabase.rpc('get_exam_questions', {
+      // The only way in: since sql/021 anon cannot read `questions` at all.
+      const { data, error } = await supabase.rpc('get_exam_questions', {
         p_assessment_id: exam.id,
         p_student_id: student?.id,
-        p_session_token: token,
+        p_session_token: localStorage.getItem('local_session_token'),
       });
-
-      if (!rpc.error) {
-        data = rpc.data;
-      } else if (isMissingFunctionError(rpc.error)) {
-        // This database has not had sql/020 yet. Fall back to the direct read
-        // so a deploy that lands before the migration cannot stop a class
-        // sitting an exam — and ONLY then. A refusal from the function is a
-        // refusal, never a reason to go round it.
-        // REMOVE THIS once 020 and 021 have both run everywhere.
-        //
-        // Explicit columns, never select('*'): anon is granted every column of
-        // questions EXCEPT correct_answer (sql/003), and a wildcard asks for the
-        // withheld column too, so PostgREST refuses the whole request and no
-        // student can load the paper at all.
-        const legacy = await supabase.from('questions')
-          .select('id, exam_id, assessment_id, question_number, question_text, ' +
-                  'question_type, category, choices, ' +
-                  'choice_a, choice_b, choice_c, choice_d, choice_e, image_url, created_at')
-          .eq('exam_id', exam.id)
-          // question_number, not id. It only ever served as a stable base for the
-          // shuffle, and a uuid order is arbitrary — but once the shuffle can be
-          // switched off (sql/017) the base order is what students actually see.
-          .order('question_number', { ascending: true });
-        data = legacy.data;
-        error = legacy.error;
-      } else {
-        error = rpc.error;
-      }
 
       if (error || !data || data.length === 0) {
         console.error("Error loading questions:", error);

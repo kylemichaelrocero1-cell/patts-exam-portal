@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import {
   isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
-  fetchAssessmentById, isMissingFunctionError,
+  fetchAssessmentById,
 } from './lib/assessments';
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors';
 import { isPaperFinished } from './lib/retakes';
@@ -314,29 +314,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       // before it will hand over the paper. Without that record the gate is
       // only a screen: the questions were readable straight from the table.
       setPasswordExpired(false);
-      let isValid;
       const unlock = await supabase.rpc('unlock_assessment', {
         p_assessment_id: pendingExam.id,
         p_password: enteredPassword,
         p_student_id: student.id,
         p_session_token: localStorage.getItem('local_session_token'),
       });
-
-      if (!unlock.error) {
-        isValid = unlock.data;
-      } else if (isMissingFunctionError(unlock.error)) {
-        // Pre-020 database: check the password the old way so a deploy ahead
-        // of the migration cannot lock a class out of an exam.
-        // REMOVE THIS once 020 has run everywhere.
-        const legacy = await supabase.rpc('verify_exam_password', {
-          p_exam_id: pendingExam.id,
-          p_password: enteredPassword,
-        });
-        if (legacy.error) throw legacy.error;
-        isValid = legacy.data;
-      } else {
-        throw unlock.error;
-      }
+      if (unlock.error) throw unlock.error;
+      const isValid = unlock.data;
 
       if (isValid) {
         try { sessionStorage.setItem(passwordKey(pendingExam.id), '1'); } catch { /* private mode */ }

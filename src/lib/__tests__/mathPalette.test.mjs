@@ -4,7 +4,7 @@
 //
 //   npm run test:palette
 
-import { fracToSlash, suggestVariants, MATH_PALETTE } from '../mathPalette.js';
+import { fracToSlash, suggestVariants, MATH_PALETTE, LOGIC_PALETTE, PALETTES, paletteFor } from '../mathPalette.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -74,6 +74,33 @@ check('it offers a limit, a fraction and a prime',
   MATH_PALETTE.some(s => s.label.includes('lim'))
   && MATH_PALETTE.some(s => s.label.includes('frac'))
   && MATH_PALETTE.some(s => s.title.toLowerCase().includes('prime')));
+
+console.log('\n=== the logic strip ===');
+check('every entry has a label, an insertion and a title',
+  LOGIC_PALETTE.every(s => s.label && s.insert && s.title));
+check('titles are unique in each strip, and across both (the editor shows both, keyed by title)',
+  new Set([...MATH_PALETTE, ...LOGIC_PALETTE].map(s => s.title)).size === MATH_PALETTE.length + LOGIC_PALETTE.length);
+check('it offers and, or, not, if-then and iff',
+  ['\\land', '\\lor', '\\sim', '\\to', '\\leftrightarrow'].every(c => LOGIC_PALETTE.some(s => s.insert.trim() === c.replace('\\\\', '\\'))));
+check('both strips are offered', eq(Object.keys(PALETTES), ['calculus', 'logic']));
+
+console.log('\n=== which strip a question opens on ===');
+const logicQs = [
+  'Evaluate: "2 < 5 and 7 is an even number." Use the ∧ ∨ ~ → ↔ buttons.',
+  'Write in symbols. Use ∧ for and.',
+  'Simplify \\neg(p \\land q).',
+  'Which is equivalent to p ↔ q?',
+];
+const calcQs = [
+  'Differentiate with respect to x.',
+  'Evaluate the limit.',
+  'Find the slope of the tangent line → at x = 2.',   // a lone arrow is not logic
+  'If y is a function of x, write the derivative.',
+  '', null,
+];
+for (const t of logicQs) check(`logic: ${t}`, paletteFor(t) === 'logic');
+for (const t of calcQs) check(`calculus: ${String(t)}`, paletteFor(t) === 'calculus');
+check('\\leftarrow is not \\land-family', paletteFor('\\leftarrow') === 'calculus');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

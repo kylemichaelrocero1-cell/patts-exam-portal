@@ -1147,6 +1147,20 @@ input:checked + .slider::before { transform: translateX(26px); }
 }
 .ws-sym:hover { border-color: var(--navy); background: var(--navy-tint); }
 
+/* Calculus | Logic switch above the symbol strip. */
+.ws-palette-tabs {
+  display: flex; gap: 4px; margin: 14px 0 0 34px;
+}
+.ws-palette-tabs + .ws-palette { margin-top: 6px; }
+.ws-palette-tab {
+  flex: 0 0 auto; width: auto; min-width: 0;
+  padding: 5px 14px; font-size: 12px; font-weight: 600;
+  background: var(--paper); color: var(--ink-3);
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+}
+.ws-palette-tab:hover { border-color: var(--navy); color: var(--navy); }
+.ws-palette-tab.is-active { background: var(--navy); border-color: var(--navy); color: var(--white); }
+
 .ws-hint {
   margin: 12px 0 0 34px;
   font-size: 12px; line-height: 1.5; color: var(--ink-4); max-width: 60ch;
@@ -1180,7 +1194,7 @@ input:checked + .slider::before { transform: translateX(26px); }
 
 @media (max-width: 700px) {
   .ws-line { grid-template-columns: 20px 1fr 24px 24px; gap: 5px; }
-  .ws-actions, .ws-palette, .ws-hint { margin-left: 0; }
+  .ws-actions, .ws-palette, .ws-palette-tabs, .ws-hint { margin-left: 0; }
   .math-field-host math-field { font-size: 17px; padding: 9px 10px; }
   .ws-rubric-step, .ws-rubric-head { grid-template-columns: 1fr; }
   .ws-rubric-head { display: none; }

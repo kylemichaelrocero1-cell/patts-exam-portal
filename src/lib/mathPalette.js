@@ -30,6 +30,43 @@ export const MATH_PALETTE = [
   { label: '\\infty', insert: '\\infty', title: 'Infinity' },
 ];
 
+// The strip for propositional logic (MATH 115). Every insertion here is a
+// spelling the item's accepted answers already carry: the database compares
+// answers as strings, so a button that wrote \wedge where the key says \land
+// would mark a right answer wrong. ~ is offered beside ¬ because the course
+// writes negation as ~p.
+export const LOGIC_PALETTE = [
+  { label: '\\land', insert: '\\land ', title: 'And (conjunction)' },
+  { label: '\\lor', insert: '\\lor ', title: 'Or (disjunction)' },
+  { label: '\\sim', insert: '\\sim ', title: 'Not (negation), written ~' },
+  { label: '\\neg', insert: '\\neg ', title: 'Not (negation), written ¬' },
+  { label: '\\to', insert: '\\to ', title: 'If … then (conditional)' },
+  { label: '\\leftrightarrow', insert: '\\leftrightarrow ', title: 'If and only if (biconditional)' },
+  { label: '(\\,)', insert: '(#0)', title: 'Brackets' },
+  { label: 'p', insert: 'p', title: 'p' },
+  { label: 'q', insert: 'q', title: 'q' },
+  { label: 'r', insert: 'r', title: 'r' },
+  { label: '\\mathrm{T}', insert: 'T', title: 'True' },
+  { label: '\\mathrm{F}', insert: 'F', title: 'False' },
+  { label: '=', insert: '=', title: 'Equals' },
+];
+
+export const PALETTES = {
+  calculus: { name: 'Calculus', symbols: MATH_PALETTE },
+  logic: { name: 'Logic', symbols: LOGIC_PALETTE },
+};
+
+/**
+ * Which strip a question should open on. Both are always one tap away, so
+ * this only has to be right most of the time: a question whose own wording
+ * uses a connective (∧ ∨ ¬ ~ → ↔, as plain text or LaTeX) is a logic item.
+ */
+export function paletteFor(questionText) {
+  const t = String(questionText || '');
+  return /[∧∨¬↔]|\\(land|lor|neg|lnot|wedge|vee|leftrightarrow|iff)(?![a-z])/i.test(t)
+    ? 'logic' : 'calculus';
+}
+
 // The field a symbol should go into. On a desktop that is whatever has focus,
 // but on a phone the field can lose focus to the button being pressed before
 // the handler runs, so the last focused field is remembered as a fallback.

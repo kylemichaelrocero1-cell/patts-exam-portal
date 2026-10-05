@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import MathField, { MathStatic } from '../components/MathField.jsx';
-import { MATH_PALETTE, insertIntoFocusedField, suggestVariants } from '../lib/mathPalette.js';
+import { MATH_PALETTE, LOGIC_PALETTE, insertIntoFocusedField, suggestVariants } from '../lib/mathPalette.js';
 
 // Authoring a maths question: the problem, the answer, and the other ways you
 // will accept that answer.
@@ -61,8 +61,10 @@ export default function WorkedRubricEditor({ value, onChange, marks: marksProp }
       </label>
 
       <div className="wr-palette" role="toolbar" aria-label="Maths symbols">
-        {MATH_PALETTE.map(sym => (
-          <button key={sym.label} type="button" className="wr-sym" title={sym.title}
+        {/* Both sets: the instructor writes calculus keys and logic keys
+            from the same editor. Keyed by title — 'p' and '=' could clash. */}
+        {[...MATH_PALETTE, ...LOGIC_PALETTE].map(sym => (
+          <button key={sym.title} type="button" className="wr-sym" title={sym.title}
                   aria-label={sym.title}
                   onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}>
             <MathStatic latex={sym.label} ariaLabel={sym.title} />

@@ -1,6 +1,6 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import MathField, { MathStatic } from './MathField.jsx';
-import { MATH_PALETTE, insertIntoFocusedField } from '../lib/mathPalette.js';
+import { PALETTES, paletteFor, insertIntoFocusedField } from '../lib/mathPalette.js';
 
 // The student's answer to a worked_solution item: ONE line of maths, typed the
 // way Google Docs or Symbolab let you type it.
@@ -31,6 +31,11 @@ export default function WorkedSolution({
 }) {
   const given = question?.work_given || '';
   const marks = Number(question?.marks) || 1;
+  // Calculus or logic symbols. The question's own wording picks the one it
+  // opens on; the other is always a tap away, so a guess that is wrong costs
+  // the student one tap rather than an answer they cannot type.
+  const [palette, setPalette] = useState(() => paletteFor(question?.question_text));
+  const isLogic = palette === 'logic';
 
   // The answer is the first line of the stored shape, so a paper answered
   // before this change still reads back correctly.
@@ -66,41 +71,71 @@ export default function WorkedSolution({
       </div>
 
       {!readOnly && showPalette && (
-        <div className="ws-palette" role="toolbar" aria-label="Maths symbols">
-          {MATH_PALETTE.map(sym => (
-            <button
-              key={sym.label}
-              type="button"
-              className="ws-sym"
-              title={sym.title}
-              aria-label={sym.title}
-              // pointerdown, not mousedown: it covers touch and mouse with
-              // ONE handler, so a phone cannot fire both and insert the symbol
-              // twice. preventDefault stops the button taking focus, which is
-              // what keeps the caret where the student left it.
-              onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
-            >
-              <MathStatic latex={sym.label} ariaLabel={sym.title} />
-            </button>
-          ))}
-        </div>
+        <>
+          <div className="ws-palette-tabs" role="tablist" aria-label="Symbol set">
+            {Object.entries(PALETTES).map(([id, p]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={palette === id}
+                className={`ws-palette-tab${palette === id ? ' is-active' : ''}`}
+                // Not pointerdown: switching tabs must not steal the caret,
+                // and preventDefault on mousedown keeps focus in the field.
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => setPalette(id)}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="ws-palette" role="toolbar" aria-label={`${PALETTES[palette].name} symbols`}>
+            {PALETTES[palette].symbols.map(sym => (
+              <button
+                key={sym.title}
+                type="button"
+                className="ws-sym"
+                title={sym.title}
+                aria-label={sym.title}
+                // pointerdown, not mousedown: it covers touch and mouse with
+                // ONE handler, so a phone cannot fire both and insert the symbol
+                // twice. preventDefault stops the button taking focus, which is
+                // what keeps the caret where the student left it.
+                onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
+              >
+                <MathStatic latex={sym.label} ariaLabel={sym.title} />
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
-      <p className="ws-hint">
-        Give the simplified answer. This question is worth{' '}
-        <strong>{marks} point{marks === 1 ? '' : 's'}</strong>, added to your final
-        score in full for a correct answer. Type <code>/</code> for a fraction,
-        <code>^</code> for a power, and <code>'</code> for a prime.
-      </p>
-      {/* sql/032 marks the label as part of the answer, so say so before
-          anyone is marked down for it. The examples are first derivatives on
-          purpose: which notation a higher derivative takes is what is being
-          tested, and the hint must not answer it. */}
-      <p className="ws-hint">
-        <strong>Write the notation, not just the value.</strong> When the question asks
-        for a derivative, begin with it — for example <code>f'(x) =</code> or{' '}
-        <code>dy/dx =</code>. A missing label, or the wrong one, is marked wrong.
-      </p>
+      {isLogic ? (
+        <p className="ws-hint">
+          This question is worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>.
+          Use the buttons for <strong>∧ ∨ ~ → ↔</strong>, and capital <code>T</code> and{' '}
+          <code>F</code> for true and false. From a keyboard you can also type{' '}
+          <code>and</code>, <code>or</code> and <code>not</code>.
+        </p>
+      ) : (
+        <>
+          <p className="ws-hint">
+            Give the simplified answer. This question is worth{' '}
+            <strong>{marks} point{marks === 1 ? '' : 's'}</strong>, added to your final
+            score in full for a correct answer. Type <code>/</code> for a fraction,
+            <code>^</code> for a power, and <code>'</code> for a prime.
+          </p>
+          {/* sql/032 marks the label as part of the answer, so say so before
+              anyone is marked down for it. The examples are first derivatives on
+              purpose: which notation a higher derivative takes is what is being
+              tested, and the hint must not answer it. */}
+          <p className="ws-hint">
+            <strong>Write the notation, not just the value.</strong> When the question asks
+            for a derivative, begin with it — for example <code>f'(x) =</code> or{' '}
+            <code>dy/dx =</code>. A missing label, or the wrong one, is marked wrong.
+          </p>
+        </>
+      )}
     </div>
   );
 }

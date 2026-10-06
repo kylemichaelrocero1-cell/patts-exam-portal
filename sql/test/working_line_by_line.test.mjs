@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { markWorking } from '../../src/lib/stepMarking.js';
+import { unbracket, normalizeMath } from '../../src/lib/mathNormalize.js';
 import { markAnswer } from '../../src/lib/workedSolution.js';
 const P = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const db = new PGlite();
@@ -186,6 +187,68 @@ ck('without "partial", 042\'s marks are unchanged: function + answer is still 3'
   ck('400 random solutions with "partial": SQL and JS agree on all', agree === 400, JSON.stringify(firstBad));
 }
 
+// ── 045: brackets that change nothing ───────────────────────────────────
+console.log('\n=== 045: brackets that change nothing ===');
+const M045 = fs.readFileSync(P + '/sql/045_brackets_that_change_nothing.sql', 'utf8');
+await x(M045);
+await x(M045);
+ck('045 applies, twice', true);
+{
+  const [v] = await q(M045.slice(M045.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck('045\'s VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
+}
+// The screenshot (2026-10-06), as MathLive writes it.
+const SHOT = ['y=\\sin^2\\left(x^2\\right)',
+  "y'=2\\sin\\left(x^2\\right)\\left(\\cos\\left(x^2\\right)\\right)\\left(2x\\right)",
+  "y'=4x\\left(\\sin\\left(x^2\\right)\\right)\\left(\\cos\\left(x^2\\right)\\right)"];
+{
+  const sm = await sqlMarkP(SHOT), j = markWorking(SHOT, PARTIAL), am = markAnswer(SHOT, { ...PARTIAL, marks: 5 });
+  ck('the screenshot\'s three lines: 5/5 in the database, the twin and markAnswer',
+    Number(sm.marks) === 5 && j.marks === 5 && am.marks === 5 && JSON.stringify(sm.line_steps) === '[1,2,3]',
+    `sql ${JSON.stringify(sm)} js ${JSON.stringify(j)}`);
+  const one = await q(`SELECT public.working_verdict($1, ARRAY[$2]) AS v`, ["y'=5\\left(\\cos\\left(5x\\right)\\right)", "y'=5\\cos(5x)"]);
+  ck('a one-line item takes 5(cos(5x)) too', one[0].v === null);
+}
+const STILL_WRONG = [
+  ["y'=(4x\\sin(x^2))^2", "y'=4x\\sin(x^2)"],             // a bracket that is raised
+  ["y'=1/(2x)\\cos(x)", "y'=1/2x\\cos(x)"],               // a bracket that is divided by
+  ["y'=x^3(-\\sin(x))", "y'=x^3-\\sin(x)"],               // a sign inside
+  ["y'=(x+1)(x-1)", "y'=x+1x-1"],                          // a sum inside
+  ["y'=(2)(3)x", "y'=23x"],                                // digits would run together
+  ["y'=\\sin(x^2)", "y'=\\sin x^2"],                       // a function's argument
+  ["4x(\\sin(x^2))(\\cos(x^2))", "y'=4x\\sin(x^2)\\cos(x^2)"], // no label: still judged
+];
+for (const [line, key] of STILL_WRONG) {
+  const [{ v }] = await q(`SELECT public.working_verdict($1, ARRAY[$2]) AS v`, [line, key]);
+  const js = markAnswer([line], { steps: [{ latex: key, marks: 1 }] }).correct;
+  ck(`still wrong: ${line} against ${key}`, v !== null && !js, `db ${v}, js ${js}`);
+}
+{
+  const CORPUS = ['2\\sin(x^2)(\\cos(x^2))(2x)', '4x(\\sin(x^2))(\\cos(x^2))', '[2\\sin(x^2)][\\cos(x^2)](2x)',
+    '\\lbrack 2\\rbrack \\lbrack 3\\cos^2(2x)\\rbrack \\lbrack -\\sin(2x)\\rbrack', '(\\sin(x))^2', '1/(2x)', '(2x)/3',
+    'x^3(-\\sin(x))', '(2)(3)', 'x^2(3)', '(x^2)(3x)', 'f\'(x)=(2x)', '\\sin^{-1}(3x)(2)', '\\frac{1}{\\sqrt{1-(x^2)^2}}(2x)',
+    '(\\sec(x)\\tan(x))(\\tan(x))+(\\sec(x))(\\sec^2(x))', '((x))', '(((2x)))(\\cos(x))', 'e^{(2x)}(3)', '(a+b)', '()'];
+  let agree = 0, bad = null;
+  for (const c of CORPUS) {
+    const [{ u }] = await q(`SELECT public.math_unbracket(public.normalize_math($1)) AS u`, [c]);
+    if (u === unbracket(normalizeMath(c))) agree++; else if (!bad) bad = { c, sql: u, js: unbracket(normalizeMath(c)) };
+  }
+  ck(`math_unbracket and its JS twin agree on all ${CORPUS.length} test strings`, agree === CORPUS.length, JSON.stringify(bad));
+}
+{
+  const POOL = [...SHOT, S1, S2, S3, "y'=4x\\sin(x^2)", "y'=(4x)(\\sin(x^2))", "y'=[4x][\\sin(x^2)][\\cos(x^2)]", "y'=0", ''];
+  let seed = 23;
+  const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  let agree = 0, firstBad = null;
+  for (let t = 0; t < 400; t++) {
+    const lines = Array.from({ length: rnd(6) }, () => POOL[rnd(POOL.length)]);
+    const sm = await sqlMarkP(lines), j = markWorking(lines, PARTIAL);
+    if (Number(sm.marks) === j.marks && sm.reason === j.reason && JSON.stringify(sm.line_steps) === JSON.stringify(j.lineSteps)) agree++;
+    else if (!firstBad) firstBad = { lines, sm, j };
+  }
+  ck('400 random solutions with brackets: SQL and JS agree on all', agree === 400, JSON.stringify(firstBad));
+}
+
 // ── A paper: one full solution, one one-line item, one multiple choice ──
 console.log('\n=== a whole sitting ===');
 const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b33';
@@ -274,6 +337,27 @@ await x(`UPDATE public.assessments SET review_shows_key = true WHERE id = '${PAP
 }
 await x(`UPDATE public.assessments SET show_answers = false WHERE id = '${PAPER}'`);
 ck('with review off, nothing at all', typeof (await review()) === 'string');
+
+console.log('\n=== 045 re-marks what was submitted, raise-only ===');
+{
+  await x(`UPDATE public.assessments SET show_answers = true WHERE id = '${PAPER}'`);
+  await q(`UPDATE public.questions SET work_rubric = $1::jsonb WHERE exam_id = $2 AND question_number = 1`, [JSON.stringify(PARTIAL), PAPER]);
+  const r5 = await sit({ [qid(1)]: { lines: SHOT }, [qid(2)]: { lines: ["y'=5"] } }, { [qid(3)]: 2 });
+  ck('a new sitting with the screenshot\'s lines scores 5 + 2', Number(r5.work_marks) === 7, JSON.stringify(r5));
+  const n5 = r5.attempt_no;
+  // As it stood before 045: marked 0 for those lines.
+  await q(`UPDATE public.review_attempts SET work_marks = 2 WHERE student_id = $1 AND attempt_no = $2`, [STU, n5]);
+  // And an attempt an instructor marked by hand.
+  const r6 = await sit({ [qid(1)]: { lines: SHOT } }, {});
+  await q(`UPDATE public.review_attempts SET work_marks = 1,
+             answers_json = jsonb_set(answers_json, $1::text[], '"Marked by instructor. x"') WHERE student_id = $2 AND attempt_no = $3`,
+    [`{${qid(1)},reason}`, STU, r6.attempt_no]);
+  await x(M045);
+  const got = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE student_id = $1`, [STU]))
+    .map(r => [r.attempt_no, Number(r.work_marks)]));
+  ck('the attempt marked 2 before 045 is re-marked to 7', got[n5] === 7, JSON.stringify(got));
+  ck('the hand-marked attempt is left at 1', got[r6.attempt_no] === 1, JSON.stringify(got));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -89,3 +89,52 @@ export function mathAnswersMatch(a, b) {
   if ((na === null) !== (nb === null)) return false;
   return normalizeMath(a) === normalizeMath(b);
 }
+
+// math_unbracket() (045): brackets that cannot change the meaning, removed
+// so that 4x(\sin(x^2))(\cos(x^2)) and 4x\sin(x^2)\cos(x^2) are one answer.
+// Run on normalised text, from both sides. A bracket stays if it holds a
+// top-level + − or =, starts with a sign, is a function's argument, is
+// raised, subscripted, primed or divided, or would run two digits together.
+function unbracketOk(before, inside, after) {
+  if (inside === '' || inside[0] === '-' || inside[0] === '+') return false;
+  let d = 0;
+  for (const c of inside) {
+    if (c === '(' || c === '{') d++;
+    else if (c === ')' || c === '}') d--;
+    else if (d === 0 && (c === '+' || c === '-' || c === '=')) return false;
+  }
+  if (/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(before)) return false;
+  if (['^', '_', '/', "'"].includes(before.slice(-1))) return false;
+  if (['^', '_', '/', "'", '!'].includes(after.slice(0, 1))) return false;
+  if (/[0-9]$/.test(before) && /^[0-9]/.test(inside)) return false;
+  if (/[0-9]$/.test(inside) && /^[0-9]/.test(after)) return false;
+  return true;
+}
+
+export function unbracket(p) {
+  let s = String(p ?? '').split('\\lbrack').join('(').split('\\rbrack').join(')')
+    .split('[').join('(').split(']').join(')');
+  for (let guard = 0; guard < 200; guard++) {
+    let changed = false;
+    for (let i = 0; i < s.length && !changed; i++) {
+      if (s[i] !== '(') continue;
+      let d = 0, j = -1;
+      for (let k = i; k < s.length; k++) {
+        if (s[k] === '(') d++;
+        else if (s[k] === ')' && --d === 0) { j = k; break; }
+      }
+      if (j > 0 && unbracketOk(s.slice(0, i), s.slice(i + 1, j), s.slice(j + 1))) {
+        s = s.slice(0, i) + s.slice(i + 1, j) + s.slice(j + 1);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return s;
+}
+
+/** The value part of working_verdict() (045): equal once those brackets go. */
+export function sameUnbracketed(a, b) {
+  if (a == null || b == null || !String(a).trim() || !String(b).trim()) return false;
+  return unbracket(normalizeMath(a)) === unbracket(normalizeMath(b));
+}

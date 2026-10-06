@@ -13,7 +13,7 @@
 //     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
-import { mathAnswersMatch } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
 import { labelProblem } from './mathLabel.js';
 
 /** Is a rubric marked line by line? */
@@ -28,13 +28,15 @@ export function stepAccepted(step) {
 }
 
 /**
- * worked_answer_verdict() (sql/032) in JS: null when the line is one of the
+ * working_verdict() (sql/045) in JS — worked_answer_verdict() (032) plus a
+ * second look past brackets that change nothing: null when the line is one of the
  * accepted answers with an acceptable label, otherwise the reason.
  */
 export function answerVerdict(line, accepted) {
   const s = String(line ?? '');
   if (!s.trim()) return 'Not an accepted answer.';
-  if (!(accepted || []).some(acc => mathAnswersMatch(s, acc))) return 'Not an accepted answer.';
+  // working_verdict() (045): a second look past brackets that change nothing.
+  if (!(accepted || []).some(acc => mathAnswersMatch(s, acc) || sameUnbracketed(s, acc))) return 'Not an accepted answer.';
   return labelProblem(s, accepted);
 }
 

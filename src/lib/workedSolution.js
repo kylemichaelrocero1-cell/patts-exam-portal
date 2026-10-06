@@ -36,7 +36,7 @@ import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent, freshEn
          indefiniteIntegrand, antiderivativeTarget, derivativeSubjectOf,
          differentiate } from './mathCheck.js';
 import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
-import { mathAnswersMatch } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
 import { isLineByLine, markWorking } from './stepMarking.js';
 
 // Re-exported so a caller that already holds the marking code need not know
@@ -227,6 +227,8 @@ export function markAnswer(lines, rubric, opts = {}) {
         // Whatever the database would take, this takes — its own tidying,
         // not the engine's reading of it (mathNormalize.js).
         if (mathAnswersMatch(line, acc)) return true;
+        // …including past brackets that change nothing (sql/045).
+        if (sameUnbracketed(line, acc)) return true;
         const a = derivAsUnknown(withoutLabel(line)), b = derivAsUnknown(withoutLabel(acc));
         // Algebra only where it means something. An unworked limit, integral
         // or d/dx is the question, not an answer, unless the key is one

@@ -9,6 +9,8 @@
 //   * any step before the last, found on any line — that step's marks;
 //   * the last step, on the LAST line, with every earlier step found on
 //     earlier lines in order — its marks, the item's full marks;
+//   * the last step on the last line with SOME of that working before it —
+//     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
 import { mathAnswersMatch } from './mathNormalize.js';
@@ -51,6 +53,8 @@ export function markWorking(lines, rubric) {
   }
   const full = Number(steps[n - 1]?.marks) || 0;
   const alone = Number(steps[n - 1]?.alone) || 0;
+  const partialRaw = steps[n - 1]?.partial;
+  const partial = partialRaw === undefined || partialRaw === null ? alone : (Number(partialRaw) || 0);
   if (work.length === 0) {
     return { marks: 0, of: full, correct: false, reason: 'Nothing was written.', lineSteps: [] };
   }
@@ -81,7 +85,11 @@ export function markWorking(lines, rubric) {
       prev = at;
     }
     const shown = 'The final answer is right, but the working that leads to it is not all shown.';
+    const some = first.slice(0, n - 1).some(at => at > 0 && at < work.length);
     if (chain && full >= best) { best = full; reason = 'Correct, with the working shown.'; }
+    else if (!chain && some && partial >= best && partial > alone) {
+      best = partial; reason = 'The final answer is right, but a step of the working is missing.';
+    }
     else if (!chain && alone > best) { best = alone; reason = shown; }
     else if (!chain && alone >= best) { reason = shown; }
   }

@@ -71,6 +71,15 @@ const M042 = fs.readFileSync(P + '/sql/042_working_marked_line_by_line.sql', 'ut
 await x(M042);
 await x(M042);
 ck('042 applies, twice', true);
+const M043 = fs.readFileSync(P + '/sql/043_partial_working_earns_more.sql', 'utf8');
+await x(M043);
+await x(M043);
+ck('043 applies, twice', true);
+{
+  const [v] = await q(M043.slice(M043.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck('043\'s VERIFY row reads 4, 3, 5', Number(v.function_and_answer_4) === 4 && Number(v.answer_alone_3) === 3
+    && Number(v.everything_5) === 5, JSON.stringify(v));
+}
 
 // ── The scheme, as asked: y = sin^2(x^2) ─────────────────────────────────
 // 5 for the working and the simplified answer, 3 for the derivative left
@@ -138,6 +147,43 @@ console.log('\n=== 400 random solutions: the two markers agree on everything ===
     else if (!firstBad) firstBad = { lines, s, j };
   }
   ck('all 400 agree', agree === 400, JSON.stringify(firstBad));
+}
+
+// ── 043: the answer with some of the working (Kyle, 2026-10-06) ─────────
+console.log('\n=== 043: the answer with SOME of the working — database and dashboard ===');
+const PARTIAL = { ...RUBRIC, steps: RUBRIC.steps.map((st, i) => i === 2 ? { ...st, partial: 4 } : st) };
+const sqlMarkP = async lines => (await q(`SELECT public.mark_working($1::jsonb, $2::jsonb) AS m`,
+  [JSON.stringify(lines), JSON.stringify(PARTIAL)]))[0].m;
+const CASES_P = [
+  ['everything', [S1, S2, S3], 5],
+  ['the function and the answer', [S1, S3], 4],
+  ['the derivative and the answer, no function', [S2, S3], 4],
+  ['the answer alone', [S3], 3],
+  ['the derivative left unsimplified', [S1, S2], 3],
+  ['working out of order still shows some of it', [S2, S1, S3], 4],
+  ['the function after the answer is not working before it', [S3, S1], 0],
+  ['the function alone', [S1], 0],
+];
+for (const [name, lines, want] of CASES_P) {
+  const sm = await sqlMarkP(lines), j = markWorking(lines, PARTIAL), am = markAnswer(lines, { ...PARTIAL, marks: 5 });
+  ck(`${name}: ${want}/5, SQL = JS = markAnswer`, Number(sm.marks) === want && j.marks === want && am.marks === want
+    && sm.reason === j.reason && JSON.stringify(sm.line_steps) === JSON.stringify(j.lineSteps),
+    `sql ${JSON.stringify(sm)} js ${JSON.stringify(j)}`);
+}
+ck('without "partial", 042\'s marks are unchanged: function + answer is still 3', Number((await sqlMark([S1, S3])).marks) === 3);
+{
+  const POOL = [S1, S2, S2b, S3, S3b, '\\sin^2(x^2)', "y'=4x\\sin(x^2)", "y'=0", 'y=x', ''];
+  let seed = 11;
+  const rnd = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  let agree = 0, firstBad = null;
+  for (let t = 0; t < 400; t++) {
+    const lines = Array.from({ length: rnd(6) }, () => POOL[rnd(POOL.length)]);
+    const sm = await sqlMarkP(lines), j = markWorking(lines, PARTIAL);
+    if (Number(sm.marks) === j.marks && sm.reason === j.reason && sm.correct === j.correct
+        && JSON.stringify(sm.line_steps) === JSON.stringify(j.lineSteps)) agree++;
+    else if (!firstBad) firstBad = { lines, sm, j };
+  }
+  ck('400 random solutions with "partial": SQL and JS agree on all', agree === 400, JSON.stringify(firstBad));
 }
 
 // ── A paper: one full solution, one one-line item, one multiple choice ──

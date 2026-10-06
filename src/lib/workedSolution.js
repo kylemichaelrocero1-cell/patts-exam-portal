@@ -37,6 +37,7 @@ import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent, freshEn
          differentiate } from './mathCheck.js';
 import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
 import { mathAnswersMatch } from './mathNormalize.js';
+import { isLineByLine, markWorking } from './stepMarking.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -152,6 +153,21 @@ function round2(n) {
  * still mark correctly.
  */
 export function markAnswer(lines, rubric, opts = {}) {
+  // A full solution marked step by step (sql/042) is marked exactly as the
+  // database marks it — by matching, with no algebra — so a re-mark here
+  // can never overturn the database's mark.
+  if (isLineByLine(rubric)) {
+    // The item is worth its LAST step — the steps are levels reached, not
+    // parts added up — unless the item states its own total.
+    const stated = Number(rubric?.marks);
+    const total = Number.isFinite(stated) && stated > 0 ? stated
+      : (Number(rubric?.steps?.[rubric.steps.length - 1]?.marks) || 1);
+    const work = (lines || []).map(l => String(l ?? '').trim()).filter(Boolean);
+    const m = markWorking(work, rubric);
+    const marks = Math.min(m.marks, total);
+    return { marks, total, correct: marks >= total && total > 0, blank: work.length === 0,
+             answer: work[work.length - 1] || '', reason: m.reason, lineSteps: m.lineSteps };
+  }
   // Nothing the engine learned from the last answer carries into this one.
   freshEngine();
   const total = totalMarks(rubric);

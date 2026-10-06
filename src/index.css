@@ -1373,3 +1373,12 @@ button.card { color: var(--ink-1); background: var(--surface); }
   font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink-4);
 }
+
+/* A full solution, written line by line (sql/042). No verdict column: nothing
+   is checked while the student writes, only after the paper is handed in. */
+.ws-line.ws-line-plain { grid-template-columns: 26px 1fr 28px; }
+@media (max-width: 700px) {
+  .ws-line.ws-line-plain { grid-template-columns: 20px 1fr 24px; }
+}
+/* Instructions keep the paragraphs they were written in. */
+.q-text, .ar-question-text { white-space: pre-line; }

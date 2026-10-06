@@ -1269,7 +1269,12 @@ const [targetSection, setTargetSection] = useState('');
       marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)),
       work_given: isWorked ? (qForm.work?.given || null) : null,
       work_variable: isWorked ? (qForm.work?.variable || 'x') : null,
-      work_rubric: isWorked ? {
+      // A full solution marked line by line (sql/042) carries a scheme this
+      // editor cannot show — per-step accept lists and the marks for the
+      // answer alone — so it is written back exactly as it was loaded. The
+      // text, the problem and the marks stay editable.
+      work_rubric: isWorked && editingQ?.work_rubric?.mode === 'lines' ? editingQ.work_rubric
+        : isWorked ? {
         steps: (qForm.work?.steps || [])
           .filter(st => String(st?.latex || '').trim())
           .map(st => ({
@@ -4259,6 +4264,15 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 )}
 
+                {qForm.question_type === 'worked_solution' && editingQ?.work_rubric?.mode === 'lines' && (
+                  <div style={{ padding: '12px 14px', marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                    <strong>Marked line by line.</strong> Students write the whole solution and each step
+                    earns marks ({editingQ.work_rubric.steps.map(st => Number(st.marks) || 0).join(' → ')} points,
+                    {' '}{Number(editingQ.work_rubric.steps.at(-1)?.alone) || 0} for the final answer alone). That
+                    scheme came from the paper's loader and is kept exactly as it is when you save here —
+                    the steps below are shown for reference and changes to them are not saved.
+                  </div>
+                )}
                 {qForm.question_type === 'worked_solution' && (
                   <Suspense fallback={<div style={{ padding: 16, fontSize: 13, color: 'var(--ink-4)' }}>Loading the maths editor…</div>}>
                     <WorkedRubricEditor

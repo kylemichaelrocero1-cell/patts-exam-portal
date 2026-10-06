@@ -78,9 +78,17 @@ export default function WorkedMarking({
     Object.entries(marked || {}).forEach(([qId, r]) => {
       const override = overrides[qId];
       const final = override === '' || override === undefined ? r.marks : Number(override);
+      const marks = Math.max(0, Math.min(r.total, Number.isFinite(final) ? final : r.marks));
       items[qId] = {
-        marks: Math.max(0, Math.min(r.total, Number.isFinite(final) ? final : r.marks)),
+        marks,
         total: r.total,
+        // What the student's review reads: whether the item was fully right
+        // (which also decides whether a kept-back key may be shown, sql/042),
+        // and for a full solution which line was which step. A save replaces
+        // the stored item whole, so anything left out here is lost.
+        of: r.total,
+        correct: marks >= r.total && r.total > 0,
+        ...(Array.isArray(r.lineSteps) ? { line_steps: r.lineSteps } : {}),
         reason: override === '' || override === undefined
           ? r.reason
           : `Marked by instructor. Checker said: ${r.reason}`,
@@ -148,6 +156,26 @@ export default function WorkedMarking({
               <p style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ink-4)', margin: 0 }}>
                 Nothing was written.
               </p>
+            ) : q.work_rubric?.mode === 'lines' ? (
+              // A full solution: every line, ticked where it was a step of
+              // the solution (sql/042, marked by stepMarking.js here).
+              <ol className="ws-lines" style={{ marginBottom: 10 }}>
+                {lines.map((l, k) => {
+                  const step = r?.lineSteps?.[k];
+                  const counted = step !== null && step !== undefined;
+                  return (
+                    <li key={k} className={`ws-answer-shown ${r ? (counted ? 'ws-ok' : 'ws-broken') : ''}`} style={{ marginBottom: 0 }}>
+                      <span className="ws-step-no">{k + 1}</span>
+                      <span style={{ fontSize: 18 }}><MathStatic latex={l} /></span>
+                      {r && (
+                        <span className="ws-given-label" style={{ marginLeft: 'auto' }}>
+                          {counted ? `step ${step}` : 'not a step'}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
             ) : (
               <div className={`ws-answer-shown ${r ? (r.correct ? 'ws-ok' : 'ws-broken') : ''}`}>
                 <span className="ws-given-label">Answered</span>

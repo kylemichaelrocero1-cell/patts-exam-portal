@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Icon from '../components/Icon';
 import { supabase } from '../supabase';
 
@@ -40,6 +40,27 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   // rewritten; nothing in the dashboard reads it any more.
   const policy = a.score_policy || 'latest';
   const [busy, setBusy] = useState(false);
+  // Whether the review shows the key for items a student missed (sql/042).
+  // Read here rather than in the paper lists, so a build deployed before the
+  // migration still loads every list; null = not known (column absent or
+  // still loading), and then it is neither shown nor saved.
+  const [showKey, setShowKey] = useState(null);
+  const [keyColumnMissing, setKeyColumnMissing] = useState(false);
+  useEffect(() => {
+    let live = true;
+    supabase.from('assessments').select('review_shows_key').eq('id', a.id).maybeSingle()
+      .then(({ data, error }) => {
+        if (!live) return;
+        // Only a MISSING column is tolerated; any other error stays an error.
+        if (error && (error.code === '42703' || error.code === 'PGRST204'
+                      || /review_shows_key.*(does not exist|could not find)|could not find.*review_shows_key/i.test(error.message || ''))) {
+          setKeyColumnMissing(true); return;
+        }
+        if (error) { console.error('Could not read review settings:', error.message); return; }
+        setShowKey(data?.review_shows_key !== false);
+      });
+    return () => { live = false; };
+  }, [a.id]);
 
   const [dupOpen, setDupOpen] = useState(false);
   const [dupTitle, setDupTitle] = useState(`Mock Exam — ${a.title}`);
@@ -53,12 +74,14 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
       .update({
         allow_retakes: retakes, show_answers: answers, score_policy: policy,
         shuffle_questions: shufQ, shuffle_choices: shufC,
+        ...(showKey === null ? {} : { review_shows_key: showKey }),
       })
       .eq('id', a.id);
     setBusy(false);
     if (error) return alert('Could not save: ' + error.message);
     onSaved?.({ ...a, allow_retakes: retakes, show_answers: answers, score_policy: policy,
-                shuffle_questions: shufQ, shuffle_choices: shufC });
+                shuffle_questions: shufQ, shuffle_choices: shufC,
+                ...(showKey === null ? {} : { review_shows_key: showKey }) });
     onClose();
   };
 
@@ -117,6 +140,22 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
           label="Let students review their answers"
           hint="Students see which questions they got right and what the correct answer was, from the Summary tab of their portal. It reaches everyone who has already submitted, so the usual way to use it is to leave it off through the sitting and switch it on once the class is finished — they do not have to be mid-exam, and the paper does not have to stay open."
         />
+        {answers && showKey !== null && (
+          <div style={{ marginLeft: 26 }}>
+            <ToggleRow
+              on={showKey} set={setShowKey}
+              label="Show the correct answer for questions they missed"
+              hint={showKey
+                ? 'On: the review shows the answer to every question. Off: students still see each answer of theirs marked right or wrong, and why, but the answer to anything they missed is kept back — so on a paper with retakes they cannot fail on purpose, copy the key and resubmit.'
+                : 'Off: students see each answer of theirs marked right or wrong, and why, but not the answer to anything they missed. The database withholds it, not just the screen.'}
+            />
+          </div>
+        )}
+        {answers && keyColumnMissing && (
+          <p style={{ margin: '-4px 0 10px 26px', fontSize: 12.5, color: 'var(--ink-4)', lineHeight: 1.5 }}>
+            Hiding the answers to missed questions needs sql/042 to be run in Supabase.
+          </p>
+        )}
 
         <div style={{ borderTop: '1px solid var(--line)', margin: '16px 0 12px', paddingTop: 14 }}>
           <h4 style={{ margin: '0 0 2px', fontSize: 14 }}>Randomisation</h4>

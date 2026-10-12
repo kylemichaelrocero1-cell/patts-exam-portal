@@ -13,6 +13,7 @@ import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
+import { createFocusLossWatcher, isTypingTarget } from './lib/focusLoss.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -166,7 +167,6 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   const [liveSessionId, setLiveSessionId] = useState(null);
 
   // Refs for anti-cheat deduplication (prevent blur+visibilitychange double-counting)
-  const pendingBlurRef = useRef(null);
   const alertActiveRef = useRef(false);
   // Tracks the count at mount so the lock only fires on NEW violations, not restored ones
   const prevViolationCountRef = useRef(initialState.tabSwitchCount);
@@ -834,14 +834,19 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       setTabSwitchCount(tabSwitchCountRef.current);
     };
 
+    // A blur counts only if focus stays gone: a phone's keyboard takes it for
+    // a moment as it slides up (lib/focusLoss.js).
+    const focusLoss = createFocusLossWatcher({
+      onLoss: () => logViolation("Screen lost focus (Split-screen or notifications opened)"),
+      hasFocus: () => document.hasFocus(),
+      isHidden: () => document.hidden,
+    });
+
     const handleVisibilityChange = () => {
       if (!document.hidden) { visibilityViolationRef.current = false; return; }
       visibilityViolationRef.current = true; // mark so beforeunload doesn't double-count
       // Cancel any pending blur log — visibilitychange is the authoritative tab-switch event
-      if (pendingBlurRef.current) {
-        clearTimeout(pendingBlurRef.current);
-        pendingBlurRef.current = null;
-      }
+      focusLoss.cancel();
       logViolation("Tab hidden or switched to another app");
       // Counted either way; only a real exam interrupts the student for it.
       if (!isPractice) {
@@ -884,16 +889,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     const handleBlur = () => {
       // Ignore blur caused by our own alert dialogs
       if (alertActiveRef.current) return;
-      // Wait 250ms — if visibilitychange fires first it cancels this, preventing double-count
-      if (pendingBlurRef.current) clearTimeout(pendingBlurRef.current);
-      pendingBlurRef.current = setTimeout(() => {
-        pendingBlurRef.current = null;
-        // Only log if tab is still visible (genuine split-screen / notification focus loss)
-        if (!document.hidden) {
-          logViolation("Screen lost focus (Split-screen or notifications opened)");
-        }
-      }, 250);
+      focusLoss.blur();
     };
+    const handleFocus = () => focusLoss.cancel();
+    // An answer box gaining or losing focus, or the screen resizing around a
+    // keyboard: a keyboard is coming or going.
+    const handleTyping = (e) => { if (isTypingTarget(e.target)) focusLoss.typing(); };
+    const handleViewport = () => focusLoss.typing();
 
     const handleKeyDown = (e) => {
       const forbidden = e.key === 'PrintScreen'
@@ -908,18 +910,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("focusin", handleTyping);
+    document.addEventListener("focusout", handleTyping);
+    window.visualViewport?.addEventListener("resize", handleViewport);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("focusin", handleTyping);
+      document.removeEventListener("focusout", handleTyping);
+      window.visualViewport?.removeEventListener("resize", handleViewport);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      if (pendingBlurRef.current) {
-        clearTimeout(pendingBlurRef.current);
-        pendingBlurRef.current = null;
-      }
+      focusLoss.cancel();
     };
   }, [scoreDisplay, isSubmitting, examStatus, endedByInstructor]);
 

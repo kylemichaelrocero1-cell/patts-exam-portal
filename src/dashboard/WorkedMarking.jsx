@@ -179,7 +179,9 @@ export default function WorkedMarking({
             ) : (
               <div className={`ws-answer-shown ${r ? (r.correct ? 'ws-ok' : 'ws-broken') : ''}`}>
                 <span className="ws-given-label">Answered</span>
-                <span style={{ fontSize: 19 }}><MathStatic latex={lines[lines.length - 1]} /></span>
+                {q.work_rubric?.mode === 'text'
+                  ? <span className="ws-text-shown">{lines[lines.length - 1]}</span>
+                  : <span style={{ fontSize: 19 }}><MathStatic latex={lines[lines.length - 1]} /></span>}
                 {r && (
                   <span className={`ws-mark ${r.correct ? 'ws-mark-ok' : 'ws-mark-bad'}`}>
                     {r.correct ? '✓' : '✗'}

@@ -35,6 +35,11 @@ const WorkedRubricEditor = lazy(() => import('./dashboard/WorkedRubricEditor'));
 // maths chunk, so a paper of plain multiple choice never fetches KaTeX.
 const MathStatic = lazy(() => import('./components/MathField.jsx')
   .then(m => ({ default: m.MathStatic })));
+// A typed answer as it was meant: a word for a text item (sql/046), set in
+// upright type, and maths for everything else.
+const TypedShown = ({ q, value }) => (q?.work_rubric?.mode === 'text'
+  ? <span className="ws-text-shown">{value}</span>
+  : <MathStatic latex={value} />);
 const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
@@ -208,6 +213,9 @@ const [targetSection, setTargetSection] = useState('');
     // beside it, only when the type says worked_solution.
     work: { given: '', variable: 'x', marks: 3,
             steps: [{ latex: '', marks: 1, label: '' }], accept: [] },
+    // A text answer (sql/046): the word, and the other words accepted, one
+    // per line. Written as a worked_solution rubric with mode 'text'.
+    text: { answer: '', accept: '' },
   };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
@@ -1197,6 +1205,9 @@ const [targetSection, setTargetSection] = useState('');
   const saveQuestion = async () => {
     if (!qExamId) return;
     if (!qForm.question_text.trim()) return alert('Question text is required.');
+    if (qForm.question_type === 'text_answer' && !String(qForm.text?.answer || '').trim()) {
+      return alert('Type the answer students must give. Capital letters and spaces are ignored when it is compared.');
+    }
     if (qForm.question_type === 'worked_solution') {
       const steps = (qForm.work?.steps || []).filter(s => String(s?.latex || '').trim());
       if (steps.length === 0) {
@@ -1208,10 +1219,13 @@ const [targetSection, setTargetSection] = useState('');
     }
     const isEssay = qForm.question_type === 'essay';
     const isMulti = qForm.question_type === 'multi_select';
-    const isWorked = qForm.question_type === 'worked_solution';
+    const isText = qForm.question_type === 'text_answer';
+    const isWorked = qForm.question_type === 'worked_solution' || isText;
     const keySet = indexSet(qForm.correct_answers) || [];
 
-    if (!isEssay) {
+    // Typed items have no choices to check — a worked item used to be refused
+    // here for having fewer than two.
+    if (!isEssay && !isWorked) {
       const filled = choicesPatch(qForm.choice_list).choices;
       if (filled.length < 2)
         return alert('A multiple choice question needs at least two choices.');
@@ -1253,7 +1267,7 @@ const [targetSection, setTargetSection] = useState('');
     const payload = {
       exam_id: qExamId,
       question_text: qForm.question_text.trim(),
-      question_type: qForm.question_type,
+      question_type: QUESTION_TYPES.find(t => t.value === qForm.question_type)?.stores ?? qForm.question_type,
       // Only `choices` is written; the trigger in sql/016 mirrors the first
       // five into choice_a..choice_e for clients still on the old build.
       ...((isEssay || isWorked) ? { choices: [] } : choicesPatch(qForm.choice_list)),
@@ -1267,13 +1281,17 @@ const [targetSection, setTargetSection] = useState('');
       // at 1, which is what keeps a sum of marks equal to the old count of
       // items for every paper that already exists.
       marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)),
-      work_given: isWorked ? (qForm.work?.given || null) : null,
-      work_variable: isWorked ? (qForm.work?.variable || 'x') : null,
+      work_given: isWorked && !isText ? (qForm.work?.given || null) : null,
+      work_variable: isWorked && !isText ? (qForm.work?.variable || 'x') : null,
       // A full solution marked line by line (sql/042) carries a scheme this
       // editor cannot show — per-step accept lists and the marks for the
       // answer alone — so it is written back exactly as it was loaded. The
       // text, the problem and the marks stay editable.
-      work_rubric: isWorked && editingQ?.work_rubric?.mode === 'lines' ? editingQ.work_rubric
+      work_rubric: isText ? {
+        mode: 'text',
+        steps: [{ latex: String(qForm.text.answer).trim(), marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)) }],
+        accept: String(qForm.text?.accept || '').split('\n').map(v => v.trim()).filter(Boolean),
+      } : isWorked && editingQ?.work_rubric?.mode === 'lines' ? editingQ.work_rubric
         : isWorked ? {
         steps: (qForm.work?.steps || [])
           .filter(st => String(st?.latex || '').trim())
@@ -1351,7 +1369,7 @@ const [targetSection, setTargetSection] = useState('');
       choice_list: (() => { const c = choicesOf(q); return c.length ? c : ['', '', '', '']; })(),
       correct_answer: Number(q.correct_answer || 0),
       correct_answers: indexSet(q.correct_answers) || [],
-      question_type: q.question_type || 'multiple_choice',
+      question_type: q.work_rubric?.mode === 'text' ? 'text_answer' : (q.question_type || 'multiple_choice'),
       image_url: q.image_url || null,
       marks: Number(q.marks) || 1,
       // A worked item's rubric comes back as stored; anything else gets a
@@ -1366,6 +1384,10 @@ const [targetSection, setTargetSection] = useState('');
           : [{ latex: '', marks: 1, label: '' }],
         accept: Array.isArray(q.work_rubric?.accept) ? q.work_rubric.accept : [],
       },
+      text: q.work_rubric?.mode === 'text'
+        ? { answer: q.work_rubric.steps?.at(-1)?.latex || '',
+            accept: (Array.isArray(q.work_rubric.accept) ? q.work_rubric.accept : []).join('\n') }
+        : { answer: '', accept: '' },
     });
     setQImageFile(null);
     setQImagePreview(q.image_url || null);
@@ -4100,7 +4122,7 @@ const deleteResult = async (studentId, examId) => {
                 {/* Question Type Toggle */}
                 <div style={{ marginBottom: '16px' }}>
                   <label className="label">Question Type</label>
-                  <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {QUESTION_TYPES.map(({ value, label }) => (
                       <button key={value} type="button" className={`btn sm ${qForm.question_type === value ? '' : 'ghost'}`} onClick={() => setQForm(f => ({ ...f, question_type: value }))} style={{ width: 'auto' }}>
                         {label}
@@ -4165,7 +4187,7 @@ const deleteResult = async (studentId, examId) => {
                   )}
                 </div>
 
-                {qForm.question_type !== 'essay' && qForm.question_type !== 'worked_solution' && (
+                {qForm.question_type !== 'essay' && qForm.question_type !== 'worked_solution' && qForm.question_type !== 'text_answer' && (
                   <>
                     {/* One row per choice, added and removed freely. The radio
                         lives on the row, so marking the correct one and typing
@@ -4261,6 +4283,35 @@ const deleteResult = async (studentId, examId) => {
                 {qForm.question_type === 'essay' && (
                   <div style={{ padding: '12px 16px', background: 'var(--warn-bg)', border: '1px solid var(--warn-bd)', borderRadius: 'var(--r-sm)', marginBottom: '16px', fontSize: '13px', color: 'var(--warn)' }}>
                     Students will type a free-form written answer. This question will not be auto-graded. Review answers in the Results tab.
+                  </div>
+                )}
+
+                {qForm.question_type === 'text_answer' && (
+                  <div style={{ marginBottom: 16 }}>
+                    <label className="label" htmlFor="q-text-answer">Answer</label>
+                    <input
+                      id="q-text-answer"
+                      className="input"
+                      value={qForm.text?.answer || ''}
+                      onChange={e => setQForm(f => ({ ...f, text: { ...f.text, answer: e.target.value } }))}
+                      placeholder="e.g. aileron"
+                      style={{ marginBottom: 12 }}
+                    />
+                    <label className="label" htmlFor="q-text-accept">Also accept <span style={{ fontWeight: 400, color: 'var(--ink-4)' }}>— one per line, optional</span></label>
+                    <textarea
+                      id="q-text-accept"
+                      className="input"
+                      rows={3}
+                      value={qForm.text?.accept || ''}
+                      onChange={e => setQForm(f => ({ ...f, text: { ...f.text, accept: e.target.value } }))}
+                      placeholder={'e.g. flaperon'}
+                      style={{ resize: 'vertical' }}
+                    />
+                    <p style={{ margin: '8px 0 0', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+                      Students type into a plain text box. Capital letters, spaces, and a full stop or
+                      quotes at either end are ignored when the answer is compared, so <code>Aileron.</code>{' '}
+                      counts for <code>aileron</code>. Any other spelling must be listed above.
+                    </p>
                   </div>
                 )}
 
@@ -4362,7 +4413,7 @@ const deleteResult = async (studentId, examId) => {
                               <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
                               {q.question_text}
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
-                              {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>Maths</span>}
+                              {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>{q.work_rubric?.mode === 'text' ? 'Text' : 'Maths'}</span>}
                               <InlinePoints
                                 value={Number(q.marks) || 1}
                                 busy={savingPointsFor === q.id}
@@ -4387,7 +4438,7 @@ const deleteResult = async (studentId, examId) => {
                                   {q.work_rubric?.steps?.[q.work_rubric.steps.length - 1]?.latex && (
                                     <span className="q-maths-part">
                                       <span className="q-maths-tag">Answer</span>
-                                      <MathStatic latex={q.work_rubric.steps[q.work_rubric.steps.length - 1].latex} />
+                                      <TypedShown q={q} value={q.work_rubric.steps[q.work_rubric.steps.length - 1].latex} />
                                     </span>
                                   )}
                                   {(q.work_rubric?.accept?.length > 0) && (
@@ -4977,7 +5028,7 @@ const deleteResult = async (studentId, examId) => {
                     <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
                         {idx + 1}. {q.question_text}
-                        <span className="px-pill info" style={{ marginLeft: 8 }}>Type your answer</span>
+                        <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : 'Type your answer'}</span>
                         <span className="px-pill muted" style={{ marginLeft: 6 }}>
                           {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
                         </span>
@@ -4996,7 +5047,7 @@ const deleteResult = async (studentId, examId) => {
                           {key.model && (
                             <span className="q-maths-part">
                               <span className="q-maths-tag">Answer</span>
-                              <MathStatic latex={key.model} />
+                              <TypedShown q={q} value={key.model} />
                             </span>
                           )}
                           {key.accepted.length > 0 && (
@@ -5004,7 +5055,7 @@ const deleteResult = async (studentId, examId) => {
                               <span className="q-maths-tag">Also accepted</span>
                               {key.accepted.map(a => (
                                 <span key={a} style={{ padding: '1px 7px', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', background: 'var(--white)' }}>
-                                  <MathStatic latex={a} />
+                                  <TypedShown q={q} value={a} />
                                 </span>
                               ))}
                             </span>
@@ -5045,7 +5096,7 @@ const deleteResult = async (studentId, examId) => {
                                 <div key={g.latex} style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', background: tone ? `var(--${tone}-bg)` : 'var(--surface-2)', border: `1.5px solid ${tone ? `var(--${tone}-bd)` : 'var(--line)'}` }}>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 6 }}>
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, minWidth: 0, fontSize: 15, color: 'var(--ink-1)', overflowX: 'auto' }}>
-                                      <Suspense fallback={<code>{g.latex}</code>}><MathStatic latex={g.latex} /></Suspense>
+                                      <Suspense fallback={<code>{g.latex}</code>}><TypedShown q={q} value={g.latex} /></Suspense>
                                       <span className={`px-pill ${tone || 'muted'}`} style={{ fontSize: '11px' }}>
                                         {right ? 'Correct' : wrong ? 'Wrong'
                                           : g.pending === g.count ? 'Not marked yet' : 'Mixed marks'}

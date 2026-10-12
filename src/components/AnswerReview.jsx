@@ -120,7 +120,9 @@ export default function AnswerReview({ rows }) {
                     <span className="ws-given-label">You wrote</span>
                     {unanswered
                       ? <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>nothing</em>
-                      : <span style={{ fontSize: 18 }}><MathStatic latex={r.chosen} /></span>}
+                      : r.work_mode === 'text'
+                        ? <span className="ws-text-shown">{r.chosen}</span>
+                        : <span style={{ fontSize: 18 }}><MathStatic latex={r.chosen} /></span>}
                     <span className={`ws-mark ${r.is_correct ? 'ws-mark-ok' : 'ws-mark-bad'}`}>
                       {r.is_correct ? '✓' : '✗'}
                     </span>
@@ -142,7 +144,9 @@ export default function AnswerReview({ rows }) {
                 ) : r.correct_latex && !(r.is_correct && r.work_mode === 'lines') ? (
                   <div className="ws-answer-shown ws-ok" style={{ marginTop: 8 }}>
                     <span className="ws-given-label">Answer</span>
-                    <span style={{ fontSize: 18 }}><MathStatic latex={r.correct_latex} /></span>
+                    {r.work_mode === 'text'
+                      ? <span className="ws-text-shown">{r.correct_latex}</span>
+                      : <span style={{ fontSize: 18 }}><MathStatic latex={r.correct_latex} /></span>}
                   </div>
                 ) : r.key_hidden && (
                   <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontStyle: 'italic', marginTop: 4 }}>

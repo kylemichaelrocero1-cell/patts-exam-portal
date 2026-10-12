@@ -48,6 +48,9 @@ export default function WorkedSolution({
   // several lines; every other typed item takes one. The exam screen only
   // learns which from get_exam_questions().work_mode — never the rubric.
   const multi = question?.work_mode === 'lines';
+  // A word, not maths (sql/046): a plain text box, no maths keyboard and no
+  // symbol strip. The keyboard turns "and" into ∧ as it is typed.
+  const text = question?.work_mode === 'text';
 
   // The answer is the first line of the stored shape, so a paper answered
   // before this change still reads back correctly.
@@ -86,6 +89,38 @@ export default function WorkedSolution({
     writeRows(rows.filter((_, j) => j !== i)); setFocusIndex(Math.max(0, i - 1));
   };
   const written = rows.filter(l => l.trim()).length;
+
+  if (text) {
+    return (
+      <div className="worked-solution">
+        <label className="ws-answer-label" htmlFor={`ws-text-${question?.id}`}>
+          Your answer
+        </label>
+        <input
+          id={`ws-text-${question?.id}`}
+          className="input ws-text-answer"
+          type="text"
+          value={answer}
+          onChange={e => write(e.target.value)}
+          readOnly={readOnly}
+          placeholder="Type your answer…"
+          maxLength={200}
+          // A phone must not "correct" flaperon into something else,
+          // nor capitalise it — capitals do not matter, but a changed word does.
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          enterKeyHint="done"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+        />
+        <p className="ws-hint">
+          This question is worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>. Type the
+          word or letter the question asks for. Capital letters and spaces do not matter.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="worked-solution">

@@ -181,4 +181,8 @@ export const QUESTION_TYPES = [
   // in the instructor's browser rather than in Postgres, so it is handled
   // apart from the three above everywhere it appears.
   { value: 'worked_solution', label: 'Worked Solution (maths)' },
+  // sql/046. Stored as a worked_solution whose rubric says mode 'text', so it
+  // is saved, marked and reviewed down the same path; this value exists only
+  // in the editor, which maps it to and from that shape.
+  { value: 'text_answer', label: 'Text Answer (a word)', stores: 'worked_solution' },
 ];

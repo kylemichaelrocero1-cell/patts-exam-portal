@@ -1586,7 +1586,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           )}
 
           {worked ? (
-            <Suspense fallback={<div style={{ padding: 20, fontSize: 13, color: 'var(--ink-4)' }}>Loading the maths editor…</div>}>
+            <Suspense fallback={<div style={{ padding: 20, fontSize: 13, color: 'var(--ink-4)' }}>{currentQ?.work_mode === 'text' ? 'Loading…' : 'Loading the maths editor…'}</div>}>
               <WorkedSolution
                 question={currentQ}
                 value={workAnswers[currentQ.id]}

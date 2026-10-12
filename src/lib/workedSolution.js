@@ -38,6 +38,7 @@ import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent, freshEn
 import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
 import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
 import { isLineByLine, markWorking } from './stepMarking.js';
+import { isTextAnswer, markTextAnswer } from './textAnswer.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -153,6 +154,9 @@ function round2(n) {
  * still mark correctly.
  */
 export function markAnswer(lines, rubric, opts = {}) {
+  // A word, not maths (sql/046): compared as the database compares it, with
+  // capitals and spaces ignored and no algebra at all.
+  if (isTextAnswer(rubric)) return markTextAnswer(lines, rubric);
   // A full solution marked step by step (sql/042) is marked exactly as the
   // database marks it — by matching, with no algebra — so a re-mark here
   // can never overturn the database's mark.

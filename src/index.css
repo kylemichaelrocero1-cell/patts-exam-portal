@@ -1217,6 +1217,18 @@ input:checked + .slider::before { transform: translateX(26px); }
   padding: 14px 16px;
   min-height: 58px;
 }
+/* A word answer (sql/046). 18px, not the field's 14: below 16px iOS zooms
+   the whole page in when the box is tapped. Three classes deep so it outranks
+   the global input:not([type='checkbox']):not([type='radio']) rule. */
+.worked-solution .ws-text-answer.input {
+  font-size: 18px;
+  padding: 12px 14px;
+  min-height: 52px;
+  margin-bottom: 10px;
+}
+/* A word answer shown back: upright text, not maths italics, and a long
+   word wraps rather than pushing the card wider than a phone. */
+.ws-text-shown { font-size: 16px; font-weight: 600; color: var(--ink-1); overflow-wrap: anywhere; min-width: 0; }
 .ws-palette { max-height: 132px; overflow-y: auto; }
 .ws-sym {
   width: 44px; height: 38px; max-width: 44px; max-height: 38px;

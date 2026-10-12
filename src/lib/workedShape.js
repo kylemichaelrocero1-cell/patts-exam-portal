@@ -8,6 +8,8 @@
 // code the whole algebra system would be dragged into the main bundle and
 // downloaded by every student sitting a paper of plain multiple choice.
 
+import { isTextAnswer, textAnswerKey } from './textAnswer.js';
+
 /** Is this item worked rather than picked? */
 export function isWorkedSolution(q) {
   return (q?.question_type || 'multiple_choice') === 'worked_solution';
@@ -146,6 +148,9 @@ export function workedItemStats(q, answered) {
   const worth = Number(q?.marks) || 1;
   const stats = { sat: 0, blank: 0, pending: 0, full: 0, partial: 0, zero: 0, groups: [] };
   const byAnswer = new Map();
+  // A word answer is grouped as it is marked (sql/046): "Rudder" and "rudder"
+  // are one answer, shown as whichever was written first.
+  const groupKey = isTextAnswer(q?.work_rubric) ? textAnswerKey : line => line;
 
   (answered || []).forEach(aj => {
     stats.sat++;
@@ -160,10 +165,10 @@ export function workedItemStats(q, answered) {
     const verdict = pending ? 'pending' : earned >= outOf ? 'full' : earned > 0 ? 'partial' : 'zero';
     stats[verdict]++;
 
-    const g = byAnswer.get(line) || { latex: line, count: 0, full: 0, partial: 0, zero: 0, pending: 0 };
+    const g = byAnswer.get(groupKey(line)) || { latex: line, count: 0, full: 0, partial: 0, zero: 0, pending: 0 };
     g.count++;
     g[verdict]++;
-    byAnswer.set(line, g);
+    byAnswer.set(groupKey(line), g);
   });
 
   stats.groups = [...byAnswer.values()].sort((a, b) => b.count - a.count);

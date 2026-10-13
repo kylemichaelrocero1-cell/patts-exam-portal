@@ -13,7 +13,7 @@
 //     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
-import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket } from './mathNormalize.js';
 import { labelProblem } from './mathLabel.js';
 
 /** Is a rubric marked line by line? */
@@ -27,17 +27,30 @@ export function stepAccepted(step) {
     .map(v => String(v ?? '').trim()).filter(Boolean);
 }
 
-/**
- * working_verdict() (sql/045) in JS — worked_answer_verdict() (032) plus a
- * second look past brackets that change nothing: null when the line is one of the
- * accepted answers with an acceptable label, otherwise the reason.
- */
-export function answerVerdict(line, accepted) {
+/** working_verdict_as_written() (sql/050; 045's working_verdict) in JS. */
+function verdictAsWritten(line, accepted) {
   const s = String(line ?? '');
   if (!s.trim()) return 'Not an accepted answer.';
-  // working_verdict() (045): a second look past brackets that change nothing.
+  // A second look past brackets that change nothing (045).
   if (!(accepted || []).some(acc => mathAnswersMatch(s, acc) || sameUnbracketed(s, acc))) return 'Not an accepted answer.';
   return labelProblem(s, accepted);
+}
+
+/**
+ * working_verdict() (sql/050) in JS: null when the line is one of the
+ * accepted answers with an acceptable label — as written, or once the line
+ * and every accepted answer are respelt (respell(), mathNormalize.js) —
+ * otherwise the reason.
+ */
+export function answerVerdict(line, accepted) {
+  const v = verdictAsWritten(line, accepted);
+  if (v === null || !String(line ?? '').trim()) return v;
+  const r = respell(line);
+  // Respelling changed nothing the comparison reads: no third look.
+  if (unbracket(normalizeMath(r)) === unbracket(normalizeMath(line))) return v;
+  const v2 = verdictAsWritten(r, (accepted || []).map(respell));
+  if (v2 === null) return null;
+  return v === 'Not an accepted answer.' ? v2 : v;
 }
 
 /**

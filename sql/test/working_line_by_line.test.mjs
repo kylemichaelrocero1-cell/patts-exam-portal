@@ -215,7 +215,7 @@ const STILL_WRONG = [
   ["y'=x^3(-\\sin(x))", "y'=x^3-\\sin(x)"],               // a sign inside
   ["y'=(x+1)(x-1)", "y'=x+1x-1"],                          // a sum inside
   ["y'=(2)(3)x", "y'=23x"],                                // digits would run together
-  ["y'=\\sin(x^2)", "y'=\\sin x^2"],                       // a function's argument
+  ["y'=\\sin(x)^2", "y'=\\sin(x^2)"],                      // a function's argument
   ["4x(\\sin(x^2))(\\cos(x^2))", "y'=4x\\sin(x^2)\\cos(x^2)"], // no label: still judged
 ];
 for (const [line, key] of STILL_WRONG) {
@@ -224,6 +224,10 @@ for (const [line, key] of STILL_WRONG) {
   ck(`still wrong: ${line} against ${key}`, v !== null && !js, `db ${v}, js ${js}`);
 }
 {
+  // The dashboard copy follows normalize_math() as of sql/050 (s11 strips
+  // only a real outer pair: (2)(3) stays (2)(3)); bring the database's up to it.
+  const M050 = fs.readFileSync(P + '/sql/050_answers_as_the_keyboard_spells_them.sql', 'utf8');
+  await x(M050.slice(M050.indexOf('-- 1. Where a bracket closes'), M050.indexOf('-- 3. An answer as the keyboard')));
   const CORPUS = ['2\\sin(x^2)(\\cos(x^2))(2x)', '4x(\\sin(x^2))(\\cos(x^2))', '[2\\sin(x^2)][\\cos(x^2)](2x)',
     '\\lbrack 2\\rbrack \\lbrack 3\\cos^2(2x)\\rbrack \\lbrack -\\sin(2x)\\rbrack', '(\\sin(x))^2', '1/(2x)', '(2x)/3',
     'x^3(-\\sin(x))', '(2)(3)', 'x^2(3)', '(x^2)(3x)', 'f\'(x)=(2x)', '\\sin^{-1}(3x)(2)', '\\frac{1}{\\sqrt{1-(x^2)^2}}(2x)',

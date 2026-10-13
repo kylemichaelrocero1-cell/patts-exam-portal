@@ -37,7 +37,7 @@ import { checkWork, latexEquivalent, isFinalForm, parseLine, equivalent, freshEn
          differentiate } from './mathCheck.js';
 import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js';
 import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
-import { isLineByLine, markWorking } from './stepMarking.js';
+import { answerVerdict, isLineByLine, markWorking } from './stepMarking.js';
 import { isTextAnswer, markTextAnswer } from './textAnswer.js';
 
 // Re-exported so a caller that already holds the marking code need not know
@@ -254,10 +254,13 @@ export function markAnswer(lines, rubric, opts = {}) {
     return !!d && equivalent(d, target) === 'equal';
   };
 
-  const valueRight = work.some(isRight);
+  // What the database takes is right here too, label and all — including a
+  // line typed the way a phone spells it (7cos(7x), \text{…}; sql/050).
+  const dbRight = !target && answerVerdict(answer, accepted) === null;
+  const valueRight = dbRight || work.some(isRight);
   // Only once the value is right: a wrong value with a wrong label is wrong
   // for its value, and saying so is the more useful reason.
-  const labelWrong = valueRight ? labelProblem(answer, accepted) : null;
+  const labelWrong = valueRight && !dbRight ? labelProblem(answer, accepted) : null;
   const correct = valueRight && !labelWrong;
   return {
     marks: correct ? total : 0,

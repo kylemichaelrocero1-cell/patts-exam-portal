@@ -13,7 +13,7 @@
 //     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
-import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket, unbracketSigns } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket, unbracketSigns, tidyTerms } from './mathNormalize.js';
 import { labelProblem } from './mathLabel.js';
 
 /** Is a rubric marked line by line? */
@@ -58,15 +58,17 @@ function answerVerdictStrict(line, accepted) {
 /**
  * working_verdict_by_signs() (sql/061) in JS: the sign comparison alone —
  * null when the line (as written, or respelt) equals an accepted answer once
- * a minus is taken out of a bracket, with an acceptable label. Only a line
- * holding a bracket that opens with a minus is looked at.
+ * a minus is taken out of a bracket, or (066) with its zero terms dropped,
+ * with an acceptable label. Only a line holding a bracket that opens with a
+ * minus, or one tidyTerms() changes, is looked at.
  */
 function answerVerdictBySigns(line, accepted) {
   if (!String(line ?? '').trim()) return 'Not an accepted answer.';
   for (const l of [String(line), respell(line)]) {
     const nl = normalizeMath(l);
-    if (!/[([]-|\\lbrack-/.test(nl)) continue;
-    const u = unbracketSigns(nl);
+    const tl = tidyTerms(nl);
+    if (tl === nl && !/[([]-|\\lbrack-/.test(nl)) continue;
+    const u = unbracketSigns(tl);
     if ((accepted || []).some(a => String(a ?? '').trim() && unbracketSigns(normalizeMath(a)) === u)) {
       return labelProblem(l, accepted);
     }

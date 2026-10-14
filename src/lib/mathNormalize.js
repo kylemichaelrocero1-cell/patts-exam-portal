@@ -54,12 +54,14 @@ export function closeOf(s, i) {
   return -1;
 }
 
-/** normalize_math() as of sql/050. */
+/** normalize_math() as of sql/066. */
 export function normalizeMath(p) {
   let t = dropSpaces(p);                                                   // s1
   t = t.replace(/\\left|\\right/g, '');                                    // s2
   t = t.replace(/\\[dt]frac/g, '\\frac')                                   // s3
     .replace(/\\(mathrm|operatorname)\{d\}|\\differentialD/g, 'd');
+  // s4n (066): between two numbers a times sign leaves a bracket: 3\cdot5 is 3(5).
+  t = t.replace(/(?<=[0-9])\s*(?:\\cdot|\\times|\*)\s*([0-9]+(?:\.[0-9]+)?)/g, '($1)');
   t = t.replace(/\\cdot|\\times|\*/g, '');                                 // s4
   t = t.replace(/\s+/g, '');                                               // s5
   t = t.toLowerCase();                                                     // s6
@@ -315,6 +317,56 @@ export function respell(p) {
   const open = [...s].filter(c => c === '(').length - [...s].filter(c => c === ')').length;
   if (open > 0) s += ')'.repeat(open);
   return s;
+}
+
+// math_term_is_zero() (066): a term (no sign in front) with a factor of 0 —
+// 0 at its front, 0 at its end, or (0) as a factor; never a function's
+// argument (\cos(0) is 1), never a 0 raised, divided by or in a decimal.
+function termIsZero(body) {
+  if (/^0([^0-9.!^]|$)/.test(body)) return true;
+  if (/[)}]0$/.test(body)) return true;
+  let d = 0;
+  for (let k = 0; k < body.length; k++) {
+    const c = body[k];
+    if (c === '(' && d === 0 && body.slice(k, k + 3) === '(0)' && !['!', '^'].includes(body[k + 3])) {
+      const pre = body.slice(0, k);
+      if (!/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(pre) && !['^', '_', '/', "'"].includes(pre.slice(-1))) return true;
+    }
+    if (c === '(' || c === '{') d++; else if (c === ')' || c === '}') d--;
+  }
+  return false;
+}
+
+/**
+ * math_tidy_terms() (066): a normalised line with its zero terms dropped —
+ * (0)(\cos(5x))+3(-\sin(5x))(5) is 3(-\sin(5x))(5) — and (5)3 read as 5(3);
+ * the line unchanged, exactly, when neither applies.
+ */
+export function tidyTerms(p) {
+  let s = String(p ?? '');
+  if (!/0|\)[0-9]/.test(s) || s.includes('=')) return p;
+  s = s.split('\\lbrack').join('(').split('\\rbrack').join(')').split('[').join('(').split(']').join(')');
+  const s2 = s.replace(/(^|[-+(){])\(([0-9]+(?:\.[0-9]+)?)\)([0-9]+(?:\.[0-9]+)?)/g, '$1$2($3)');
+  const terms = [];
+  let d = 0, start = 0;
+  for (let k = 0; k < s2.length; k++) {
+    const c = s2[k];
+    if (c === '(' || c === '{') d++;
+    else if (c === ')' || c === '}') d--;
+    else if (d === 0 && (c === '+' || c === '-') && k > start && !['^', '_'].includes(s2[k - 1])) {
+      terms.push(s2.slice(start, k));
+      start = k;
+    }
+  }
+  terms.push(s2.slice(start));
+  let out = '', dropped = false;
+  for (const t of terms) {
+    if (termIsZero(t[0] === '+' || t[0] === '-' ? t.slice(1) : t)) dropped = true;
+    else out += t;
+  }
+  if (!dropped) return s2 === s ? p : s2;
+  if (out === '') return '0';
+  return out[0] === '+' ? out.slice(1) : out;
 }
 
 /** math_unbracket_signs() (061): unbracket() that also takes a minus out of a factor's bracket. */

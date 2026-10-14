@@ -21,7 +21,7 @@ import { ComputeEngine } from '@cortex-js/compute-engine';
 import { useEngine } from '../../src/lib/mathCheck.js';
 import { markAnswer } from '../../src/lib/workedSolution.js';
 import { markWorking, answerVerdict } from '../../src/lib/stepMarking.js';
-import { respell, normalizeMath, unbracketSigns } from '../../src/lib/mathNormalize.js';
+import { respell, normalizeMath, unbracketSigns, tidyTerms } from '../../src/lib/mathNormalize.js';
 useEngine(new ComputeEngine());
 const P = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const db = new PGlite();
@@ -156,6 +156,13 @@ for (const [a, acc, why] of WRONG) {
   ck('…and the dashboard says the same', answerVerdict('\\text{y=7sin(7x)}', K_SIN) === w);
 }
 
+// normalizeMath() is 066's: a times sign between two numbers leaves a
+// bracket. Its SQL twin is section 1 of 066; the rest of 066 comes later.
+{
+  const M066 = fs.readFileSync(P + '/sql/066_times_between_numbers_and_zero_terms.sql', 'utf8');
+  await x(M066.slice(M066.indexOf('-- 1. A times sign between two numbers --'), M066.indexOf('-- 2. Terms that are zero')));
+}
+
 console.log('\n=== math_respell() and respell(), normalize_math() and normalizeMath() agree ===');
 const CORPUS = [...RIGHT, ...WRONG].flatMap(([a, acc]) => [a, ...acc]).concat([
   '', 'x', '\\cosec x', 'arc\\tan x', 'arc\\tangent', '\\left.x\\right|', '1.5x', 'x.5', '.5x', '=.5', '5x.',
@@ -167,6 +174,8 @@ const CORPUS = [...RIGHT, ...WRONG].flatMap(([a, acc]) => [a, ...acc]).concat([
   '\\textasciicircum', '\\text{a\\textasciicircum\\textbraceleft 2\\textbraceright}', 'sinh x', 'cosecant',
   '\\left(\\csc x\\left(\\csc^2x\\right)\\right.', '3\\left(x\\right))\\left(2\\right.\\right)', '(3x)\\sin(x^3+2)',
   '(x+1)', '(x+1)(x-1)', '((x+1)(x-1))', 'y\'=(6x)(\\tan(x)(\\sec(x)))', '\\frac{-\\left(x\\right)}{2}',
+  '3\\cdot5', '3 \\cdot 5x', '2\\times3', '2*3', 'x^2\\cdot3', '2.5\\cdot4', '3\\cdot4\\cdot5', '\\frac{1}{2}\\cdot3',
+  '3\\cdot\\sin(x)\\cdot5', 'x^{2\\cdot3}', '7\\cdot0', '0\\cdot\\cos(5x)+3\\cdot5\\sin(5x)', '3.\\left(5\\right)',
 ]);
 let same = 0, sameN = 0;
 for (const s of CORPUS) {
@@ -247,6 +256,72 @@ console.log('\n=== 061: a minus in a bracket of its own ===');
   await x(M062);
   const c62 = (await q(M062.slice(M062.lastIndexOf('SELECT\n'))))[0];
   ck('062 runs', c62.graded_left !== undefined, JSON.stringify(c62));
+}
+
+console.log('\n=== 066: a times sign between numbers, and terms that are zero ===');
+{
+  const M066 = fs.readFileSync(P + '/sql/066_times_between_numbers_and_zero_terms.sql', 'utf8');
+  const K = ["y'=3(-\\sin(5x))(5)", "y'=3(5)(-\\sin(5x))", "y'=3(-5\\sin(5x))"];
+  const zero = 'y^{\\prime}=\\left(0\\right)\\left(\\cos\\left(5x\\right)\\right)+3\\left(-\\sin\\left(5x\\right)\\right)\\left(5\\right)';
+  ck('before 066: a 0 term makes it wrong', (await verdict(zero, K)) !== null);
+  await x(M066); await x(M066);
+  ck('066 applies, twice', true);
+  const v = (await q(M066.slice(M066.lastIndexOf('SELECT\n'))))[0];
+  ck('066\'s VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
+  const SEC = ["y'=7(2)\\sec^2(2x)", "y'=7(2\\sec^2(2x))"];
+  for (const [a, acc, want, why] of [
+    [zero, K, true, '(0)(\\cos(5x)) in front'],
+    ["y'=3(-5\\sin(5x))+\\cos(5x)\\cdot0", K, true, '\\cos(5x)\\cdot0 behind'],
+    ["y'=\\cos(5x)(0)+(3)(-5\\sin(5x))", K, true, '\\cos(5x)(0)'],
+    ["y'=0\\cdot\\cos(5x)+3\\cdot5(-\\sin(5x))", K, true, '0\\cdot\\cos(5x) and 3\\cdot5'],
+    ["y'=3\\cdot5(-\\sin(5x))", K, true, '3\\cdot5 is 3 times 5'],
+    ['y^{\\prime}=\\left(7\\right)\\left(2sec^22x\\right)+\\left(0\\right)\\left(tan2x\\right)', SEC, true, 'letters, no brackets, the 0 term last'],
+    ['y^{\\prime}=\\left(0\\right)\\tan\\left(2x\\right)+\\left(7\\right)2sec^2\\left(2x\\right)', SEC, true, '(7)2 is 7 times 2'],
+    ['y^{\\prime}=0\\sec\\left(2x\\right)+7\\cdot2\\sec^2\\left(2x\\right)', SEC, true, '0\\sec(2x) with no times sign'],
+    ["y'=35\\sin(5x)", ["y'=3\\cdot5\\sin(5x)"], false, '35 is not 3 times 5'],
+    ["y'=\\cos(0)+3(-5\\sin(5x))", K, false, '\\cos(0) is 1, not 0'],
+    ["y'=0.5x+3(-5\\sin(5x))", K, false, '0.5x is not 0'],
+    ["y'=x^0+3(-5\\sin(5x))", K, false, 'x^0 is 1'],
+    ["y'=(0)!+3(-5\\sin(5x))", K, false, '0! is 1'],
+    ["y'=\\frac{1}{0}+3(-5\\sin(5x))", K, false, 'a 0 under a fraction is not a 0 term'],
+    ["y'=(0)(\\cos(5x))+3(-5\\sin(4x))", K, false, 'the rest still has to be right'],
+    ["y=(0)(\\cos(5x))+3(-5\\sin(5x))", K, false, 'the label still has to be right'],
+  ]) {
+    ck(`database: ${want ? 'right' : 'wrong'} — ${why}`, ((await verdict(a, acc)) === null) === want, `${a} → ${await verdict(a, acc)}`);
+    ck(`dashboard: ${want ? 'right' : 'wrong'} — ${why}`, (answerVerdict(a, acc) === null) === want, `${a} → ${answerVerdict(a, acc)}`);
+  }
+  // A full solution: the line with a 0 term is step 2, the answer step 3.
+  const R = { mode: 'lines', steps: [
+    { latex: 'y=3\\cos(5x)', marks: 1 },
+    { latex: K[0], marks: 3, accept: K.slice(1) },
+    { latex: "y'=-15\\sin(5x)", marks: 5, alone: 3, partial: 4 }] };
+  for (const [L, want, steps, why] of [
+    [['y=3\\cos\\left(5x\\right)', 'y^{\\prime}=\\left(3\\right)\\left(-5\\sin5x\\right)+\\left(0\\right)\\left(\\cos5x\\right)', 'y^{\\prime}=-15\\sin5x'], 5, '[1,2,3]', 'with a 0 term'],
+    [['y=3\\cos(5x)', "y'=0\\cdot\\cos(5x)-15\\sin(5x)", "y'=-15\\sin(5x)"], 4, '[1,3,3]', 'a 0 term beside the answer is the answer, not step 2'],
+  ]) {
+    const d = (await q(`SELECT public.mark_working($1::jsonb, $2::jsonb) m`, [JSON.stringify(L), JSON.stringify(R)]))[0].m;
+    ck(`database: a full solution ${why} — ${want}`, Number(d.marks) === want && JSON.stringify(d.line_steps) === steps, JSON.stringify(d));
+    const j = markWorking(L, R);
+    ck(`dashboard: the same`, j.marks === want && JSON.stringify(j.lineSteps) === steps && markAnswer(L, R).marks === want, JSON.stringify(j));
+  }
+  let same = 0;
+  const T = CORPUS.concat(['0', '(0)', '0x+1', '1+0x', 'a-(0)b', 'a(0)', 'a0', '\\sin(0)', '\\sin^2(0)x', 'x^(0)', 'x/(0)', '(0)^2+a',
+    "a'(0)", '0.5+a', '05+a', '(4)2x', '(4)(2)x', '\\sin(4)2', '3(4)2', 'a+(0)', '-(0)a+b', 'e^-0', '\\lbrack0\\rbrack x+a', '(2.5)3']);
+  for (const c of T) {
+    const n = normalizeMath(c);
+    const r = (await q(`SELECT public.math_tidy_terms($1) t`, [n]))[0].t;
+    if (r === tidyTerms(n)) same++; else console.log(`        tidy differs: ${JSON.stringify(c)} sql ${r} js ${tidyTerms(n)}`);
+  }
+  ck(`math_tidy_terms and tidyTerms agree on all ${T.length}`, same === T.length);
+  ck('tidy: what it does', tidyTerms('(0)(\\cos(5x))+3(5)') === '3(5)' && tidyTerms('a-(0)b') === 'a'
+    && tidyTerms('-(0)a+b') === 'b' && tidyTerms('(4)2x') === '4(2)x' && tidyTerms('0') === '0' && tidyTerms('a(0)') === '0',
+    JSON.stringify(['(0)(\\cos(5x))+3(5)', 'a-(0)b', '-(0)a+b', '(4)2x', 'a(0)'].map(tidyTerms)));
+  ck('tidy: what it leaves', ['\\sin(0)', 'x^(0)', 'x/(0)', '0.5+a', "a'(0)", '\\sin(4)2', '3(4)2', 'x+1'].every(c => tidyTerms(c) === c));
+  // 067 is 059 for 066: it runs, and finishes.
+  const M067 = fs.readFileSync(P + '/sql/067_remark_in_batches_after_066.sql', 'utf8');
+  await x(M067);
+  const c67 = (await q(M067.slice(M067.lastIndexOf('SELECT\n'))))[0];
+  ck('067 runs', c67.graded_left !== undefined, JSON.stringify(c67));
 }
 
 console.log('\n=== 059 re-marks what was submitted, in batches, raise-only ===');

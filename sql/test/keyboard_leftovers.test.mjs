@@ -105,12 +105,14 @@ ck('a longer command that merely starts the same is not taken for an arrow',
 ck('the value still has to be right', (await verdict('f^{\\prime}(x)=\\lim_{h\\rightarrow0}\\frac{(x+h)^3+x^3}{h}', LIM_KEY)) !== null);
 
 console.log("\n=== the dashboard copy gives the database's answer on every string ===");
-// The dashboard copy follows normalize_math() as of sql/050 (s11 strips only
+// The dashboard copy follows normalize_math() as of sql/066 (050: s11 strips only
 // a real outer pair), so bring the database's up to it first. Only that part
-// of 050: the rest needs migrations this test does not load.
+// of 050 and 066: the rest needs migrations this test does not load.
 {
   const M050 = fs.readFileSync(P + '/sql/050_answers_as_the_keyboard_spells_them.sql', 'utf8');
   await x(M050.slice(M050.indexOf('-- 1. Where a bracket closes'), M050.indexOf('-- 3. An answer as the keyboard')));
+  const M066 = fs.readFileSync(P + '/sql/066_times_between_numbers_and_zero_terms.sql', 'utf8');
+  await x(M066.slice(M066.indexOf('-- 1. A times sign between two numbers --'), M066.indexOf('-- 2. Terms that are zero')));
 }
 // Deliberately NOT any paper's answers — the repo is public.
 const CORPUS = [

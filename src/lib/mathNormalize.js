@@ -175,6 +175,8 @@ export function respell(p) {
   }
   s = s.split('\\textasciicircum').join('^').split('\\textbraceleft').join('{')
     .split('\\textbraceright').join('}');
+  // r2b. \ast (a star) is a times sign (058).
+  s = s.replace(/\\ast(?![a-zA-Z])/g, '\\cdot ');
   // r3. A superscript with no base at the very start: the label typed raised.
   {
     const t = s.replace(/^\s+/, '');

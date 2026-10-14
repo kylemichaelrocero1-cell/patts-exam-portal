@@ -37,10 +37,12 @@ function verdictAsWritten(line, accepted) {
 }
 
 /**
- * working_verdict() (sql/050) in JS: null when the line is one of the
- * accepted answers with an acceptable label — as written, or once the line
- * and every accepted answer are respelt (respell(), mathNormalize.js) —
- * otherwise the reason.
+ * working_verdict() (sql/058) in JS: null when the line is one of the
+ * accepted answers with an acceptable label — as written, or once the
+ * student's line is respelt the way the keyboard should have spelt it
+ * (respell(), mathNormalize.js) — otherwise the reason. The accepted answers
+ * are compared as they are: they are written properly already, and
+ * respelling every one of them for every line made submitting too slow.
  */
 export function answerVerdict(line, accepted) {
   const v = verdictAsWritten(line, accepted);
@@ -48,7 +50,7 @@ export function answerVerdict(line, accepted) {
   const r = respell(line);
   // Respelling changed nothing the comparison reads: no third look.
   if (unbracket(normalizeMath(r)) === unbracket(normalizeMath(line))) return v;
-  const v2 = verdictAsWritten(r, (accepted || []).map(respell));
+  const v2 = verdictAsWritten(r, accepted);
   if (v2 === null) return null;
   return v === 'Not an accepted answer.' ? v2 : v;
 }

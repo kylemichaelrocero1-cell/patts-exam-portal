@@ -99,6 +99,7 @@ const RIGHT = [
   ['y^{\\prime}=arc\\sin\\left(x\\right)+\\frac{x}{\\sqrt{1-x^2}}', K_ARC, 'arc typed before \\sin'],
   ['y^{\\prime}=arcsin\\left(x\\right)+\\frac{x}{\\sqrt{1-x^2}}', K_ARC, 'arcsin typed as letters'],
   ['g^{\\prime}\\left(x\\right)=\\left(3x\\right)\\sin\\left(x^3\\right)', K_OUTER, 'a first and last bracket that are not a pair (s11)'],
+  ['y^{\\prime}=-7csc\\left(7x\\right)\\ast cot\\left(7x\\right)', K_CSC, '\\ast for a times sign (058)'],
   ['y^{\\prime}=0.5cos\\left(0.5x\\right)', K_DEC, 'letters beside a decimal'],
 ];
 // [student line, accepted, why] — wrong before AND after.
@@ -121,6 +122,17 @@ ck('050 applies, twice', true);
 {
   const v = (await q(M050.slice(M050.lastIndexOf('SELECT\n'))))[0];
   ck('its VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
+}
+// What is live: 053 switched 050's third look off, 058 brought it back
+// respelling only the student's line (and reading \ast as a times sign).
+await x(fs.readFileSync(P + '/sql/053_marking_fast_again.sql', 'utf8'));
+const M058 = fs.readFileSync(P + '/sql/058_keyboard_spellings_fast.sql', 'utf8');
+await x(M058);
+await x(M058);
+ck('053 then 058 apply, 058 twice', true);
+{
+  const v = (await q(M058.slice(M058.lastIndexOf('SELECT\n'))))[0];
+  ck('058\'s VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
 }
 
 console.log('\n=== after 050: right, in the database and the dashboard ===');
@@ -191,7 +203,7 @@ for (const [lines, want, why] of [[LETTERS, 5, 'every line typed in letters'], [
   ck(`dashboard: ${why} — ${want}`, markWorking(lines, RUBRIC).marks === want && markAnswer(lines, RUBRIC).marks === want);
 }
 
-console.log('\n=== 050 re-marks what was submitted, raise-only ===');
+console.log('\n=== 058 re-marks what was submitted, raise-only ===');
 {
   const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b50';
   await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,
@@ -213,21 +225,21 @@ console.log('\n=== 050 re-marks what was submitted, raise-only ===');
   const work = { [qid(1)]: { lines: LETTERS }, [qid(2)]: { lines: ['y^{\\prime}=7sin\\left(7x\\right)'] } };
   const r1 = await sit(work);
   ck('a sitting typed in letters scores 5 + 2 now', Number(r1.work_marks) === 7, JSON.stringify(r1));
-  // As it stood before 050: those lines earned nothing.
+  // As it stood before 058: those lines earned nothing.
   await q(`UPDATE public.review_attempts SET work_marks = 0 WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]);
   const r2 = await sit(work);
   await q(`UPDATE public.review_attempts SET work_marks = 1,
              answers_json = jsonb_set(answers_json, $1::text[], '"Marked by instructor. x"') WHERE student_id = $2 AND attempt_no = $3`,
     [`{${qid(1)},reason}`, STU, r2.attempt_no]);
-  await x(M050);
+  await x(M058);
   const got = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE student_id = $1`, [STU]))
     .map(r => [r.attempt_no, Number(r.work_marks)]));
-  ck('the attempt marked 0 before 050 is re-marked to 7', got[r1.attempt_no] === 7, JSON.stringify(got));
+  ck('the attempt marked 0 before 058 is re-marked to 7', got[r1.attempt_no] === 7, JSON.stringify(got));
   ck('the hand-marked attempt is left at 1', got[r2.attempt_no] === 1, JSON.stringify(got));
   // Raise-only: an attempt that would go down rolls the whole file back.
   await q(`UPDATE public.review_attempts SET work_marks = 9 WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]);
   let refused = '';
-  try { await x(M050); } catch (e) { refused = e.message; await x('ROLLBACK'); }
+  try { await x(M058); } catch (e) { refused = e.message; await x('ROLLBACK'); }
   ck('if any attempt would go down, nothing is changed', /would go DOWN/.test(refused), refused);
   const after = (await q(`SELECT work_marks FROM public.review_attempts WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]))[0];
   ck('…and that attempt keeps its mark', Number(after.work_marks) === 9);

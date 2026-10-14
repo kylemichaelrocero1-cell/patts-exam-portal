@@ -124,7 +124,27 @@ function unbracketOk(before, inside, after) {
   return true;
 }
 
-export function unbracket(p) {
+// math_sign_out() (061): the sign moved to the front of the term a bracket
+// sits in — what is left of it, `before` — when a bracket holding a minus
+// is removed: 5(-a)b is -5ab, 2-3(-a) is 2+3a, -(-a) is a.
+function signOut(before) {
+  let d = 0, k = before.length - 1;
+  for (; k >= 0; k--) {
+    const c = before[k];
+    if (c === ')' || c === '}') d++;
+    else if (c === '(' || c === '{') { if (d === 0) break; d--; }
+    else if (d === 0 && (c === '+' || c === '-' || c === '=')) break;
+  }
+  const at = k >= 0 ? before[k] : '';
+  if (at === '+') return before.slice(0, k) + '-' + before.slice(k + 1);
+  if (at === '-') {
+    const prev = k > 0 ? before[k - 1] : '';
+    return before.slice(0, k) + (k === 0 || '=({'.includes(prev) ? '' : '+') + before.slice(k + 1);
+  }
+  return before.slice(0, k + 1) + '-' + before.slice(k + 1);
+}
+
+export function unbracket(p, { signs = false } = {}) {
   let s = String(p ?? '').split('\\lbrack').join('(').split('\\rbrack').join(')')
     .split('[').join('(').split(']').join(')');
   for (let guard = 0; guard < 200; guard++) {
@@ -136,8 +156,16 @@ export function unbracket(p) {
         if (s[k] === '(') d++;
         else if (s[k] === ')' && --d === 0) { j = k; break; }
       }
-      if (j > 0 && unbracketOk(s.slice(0, i), s.slice(i + 1, j), s.slice(j + 1))) {
-        s = s.slice(0, i) + s.slice(i + 1, j) + s.slice(j + 1);
+      if (j < 0) continue;
+      const before = s.slice(0, i), inside = s.slice(i + 1, j), after = s.slice(j + 1);
+      if (unbracketOk(before, inside, after)) {
+        s = before + inside + after;
+        changed = true;
+      } else if (signs && inside.length > 1 && inside[0] === '-' && unbracketOk(before, inside.slice(1), after)
+                 && !/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(inside)) {
+        // A factor holding a minus (061, math_unbracket_signs): 5(-a)(b) is -5ab.
+        // Never a function with no argument of its own: (-\sin)(x^2) is not -\sin(x^2).
+        s = signOut(before) + inside.slice(1) + after;
         changed = true;
       }
     }
@@ -287,4 +315,9 @@ export function respell(p) {
   const open = [...s].filter(c => c === '(').length - [...s].filter(c => c === ')').length;
   if (open > 0) s += ')'.repeat(open);
   return s;
+}
+
+/** math_unbracket_signs() (061): unbracket() that also takes a minus out of a factor's bracket. */
+export function unbracketSigns(p) {
+  return unbracket(p, { signs: true });
 }

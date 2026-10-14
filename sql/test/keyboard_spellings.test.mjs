@@ -21,7 +21,7 @@ import { ComputeEngine } from '@cortex-js/compute-engine';
 import { useEngine } from '../../src/lib/mathCheck.js';
 import { markAnswer } from '../../src/lib/workedSolution.js';
 import { markWorking, answerVerdict } from '../../src/lib/stepMarking.js';
-import { respell, normalizeMath } from '../../src/lib/mathNormalize.js';
+import { respell, normalizeMath, unbracketSigns } from '../../src/lib/mathNormalize.js';
 useEngine(new ComputeEngine());
 const P = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const db = new PGlite();
@@ -201,6 +201,52 @@ for (const [lines, want, why] of [[LETTERS, 5, 'every line typed in letters'], [
   const d = (await q(`SELECT public.mark_working($1::jsonb, $2::jsonb) m`, [JSON.stringify(lines), JSON.stringify(RUBRIC)]))[0].m;
   ck(`database: ${why} — ${want}`, Number(d.marks) === want, JSON.stringify(d));
   ck(`dashboard: ${why} — ${want}`, markWorking(lines, RUBRIC).marks === want && markAnswer(lines, RUBRIC).marks === want);
+}
+
+console.log('\n=== 061: a minus in a bracket of its own ===');
+{
+  const M061 = fs.readFileSync(P + '/sql/061_minus_out_of_a_bracket.sql', 'utf8');
+  const K = ["y'=7(-\\csc(3x)\\cot(3x))(3)"];
+  const own = 'y^{\\prime}=7\\left(-\\csc\\left(3x\\right)\\right)\\left(\\cot\\left(3x\\right)\\right)\\left(3\\right)';
+  ck('before 061: wrong', (await verdict(own, K)) !== null);
+  await x(M061); await x(M061);
+  ck('061 applies, twice', true);
+  const v = (await q(M061.slice(M061.lastIndexOf('SELECT\n'))))[0];
+  ck('061\'s VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
+  ck('database: the minus in its own bracket is right', (await verdict(own, K)) === null);
+  ck('dashboard: the same', answerVerdict(own, K) === null
+    && markAnswer([own], { steps: [{ latex: K[0], marks: 2 }] }).marks === 2);
+  for (const [a, acc, why] of [
+    ["y'=7(-\\sin)(x^3)(3x^2)", ["y'=7(-\\sin(x^3))(3x^2)"], 'a bare (-\\sin) is not -\\sin(x^3)'],
+    ["y'=x^4(-\\cos(x))", ["y'=x^4-\\cos(x)"], 'a product is not a difference'],
+    ["y'=(-x)^2", ["y'=-x^2"], 'a raised bracket keeps its minus'],
+  ]) {
+    ck(`database: still wrong — ${why}`, (await verdict(a, acc)) !== null);
+    ck(`dashboard: still wrong — ${why}`, answerVerdict(a, acc) !== null);
+  }
+  // A full solution whose unsimplified step differs from the answer only by
+  // where the minus sits: each line must keep its own step.
+  const R = { mode: 'lines', steps: [
+    { latex: 'y=x^4\\cos(x)', marks: 1 },
+    { latex: "y'=4x^3\\cos(x)+x^4(-\\sin(x))", marks: 3 },
+    { latex: "y'=4x^3\\cos(x)-x^4\\sin(x)", marks: 5, alone: 3, partial: 4 }] };
+  const L = ['y=x^4\\cos\\left(x\\right)', 'y^{\\prime}=\\left(4x^3\\right)\\left(\\cos x\\right)+\\left(x^4\\right)\\left(-\\sin x\\right)',
+    'y^{\\prime}=4x^3\\cos x-x^4\\sin x'];
+  const d = (await q(`SELECT public.mark_working($1::jsonb, $2::jsonb) m`, [JSON.stringify(L), JSON.stringify(R)]))[0].m;
+  ck('database: a right solution keeps 5 — each line its own step', Number(d.marks) === 5 && JSON.stringify(d.line_steps) === '[1,2,3]', JSON.stringify(d));
+  const j = markWorking(L, R);
+  ck('dashboard: the same', j.marks === 5 && JSON.stringify(j.lineSteps) === '[1,2,3]', JSON.stringify(j));
+  let same = 0;
+  for (const c of CORPUS.concat(['5(-a)(b)', '2-3(-a)', '-(-a)', '(-a)(-b)', 'x(-\\sin)(x^2)', '\\frac{(-a)}{b}', '{(-a)b}', '=(-a)', '(-\\sin(x))^2', 'a+b(-c)d-e'])) {
+    const r = (await q(`SELECT public.math_unbracket_signs(public.normalize_math($1)) u`, [c]))[0].u;
+    if (r === unbracketSigns(normalizeMath(c))) same++; else console.log(`        signs differ: ${JSON.stringify(c)} sql ${r} js ${unbracketSigns(normalizeMath(c))}`);
+  }
+  ck(`math_unbracket_signs and its JS twin agree on all ${CORPUS.length + 10}`, same === CORPUS.length + 10);
+  // 062 is 059 for 061: it runs, and finishes.
+  const M062 = fs.readFileSync(P + '/sql/062_remark_in_batches_after_061.sql', 'utf8');
+  await x(M062);
+  const c62 = (await q(M062.slice(M062.lastIndexOf('SELECT\n'))))[0];
+  ck('062 runs', c62.graded_left !== undefined, JSON.stringify(c62));
 }
 
 console.log('\n=== 059 re-marks what was submitted, in batches, raise-only ===');

@@ -13,7 +13,7 @@
 //     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
-import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket, unbracketSigns } from './mathNormalize.js';
 import { labelProblem } from './mathLabel.js';
 
 /** Is a rubric marked line by line? */
@@ -37,14 +37,14 @@ function verdictAsWritten(line, accepted) {
 }
 
 /**
- * working_verdict() (sql/058) in JS: null when the line is one of the
- * accepted answers with an acceptable label — as written, or once the
- * student's line is respelt the way the keyboard should have spelt it
- * (respell(), mathNormalize.js) — otherwise the reason. The accepted answers
- * are compared as they are: they are written properly already, and
- * respelling every one of them for every line made submitting too slow.
+ * working_verdict_strict() (sql/061; 058's working_verdict) in JS: null when
+ * the line is one of the accepted answers with an acceptable label — as
+ * written, or once the student's line is respelt the way the keyboard should
+ * have spelt it (respell(), mathNormalize.js) — otherwise the reason. The
+ * accepted answers are compared as they are: respelling every one of them
+ * for every line made submitting too slow.
  */
-export function answerVerdict(line, accepted) {
+function answerVerdictStrict(line, accepted) {
   const v = verdictAsWritten(line, accepted);
   if (v === null || !String(line ?? '').trim()) return v;
   const r = respell(line);
@@ -53,6 +53,35 @@ export function answerVerdict(line, accepted) {
   const v2 = verdictAsWritten(r, accepted);
   if (v2 === null) return null;
   return v === 'Not an accepted answer.' ? v2 : v;
+}
+
+/**
+ * working_verdict_by_signs() (sql/061) in JS: the sign comparison alone —
+ * null when the line (as written, or respelt) equals an accepted answer once
+ * a minus is taken out of a bracket, with an acceptable label. Only a line
+ * holding a bracket that opens with a minus is looked at.
+ */
+function answerVerdictBySigns(line, accepted) {
+  if (!String(line ?? '').trim()) return 'Not an accepted answer.';
+  for (const l of [String(line), respell(line)]) {
+    const nl = normalizeMath(l);
+    if (!/[([]-|\\lbrack-/.test(nl)) continue;
+    const u = unbracketSigns(nl);
+    if ((accepted || []).some(a => String(a ?? '').trim() && unbracketSigns(normalizeMath(a)) === u)) {
+      return labelProblem(l, accepted);
+    }
+  }
+  return 'Not an accepted answer.';
+}
+
+/**
+ * working_verdict() (sql/061) in JS: strict, and failing that, the sign
+ * comparison: 5(-\csc(2x))(\cot(2x))(2) is 5(-\csc(2x)\cot(2x))(2).
+ */
+export function answerVerdict(line, accepted) {
+  const v = answerVerdictStrict(line, accepted);
+  if (v !== 'Not an accepted answer.' || !String(line ?? '').trim()) return v;
+  return answerVerdictBySigns(line, accepted);
 }
 
 /**
@@ -79,8 +108,12 @@ export function markWorking(lines, rubric) {
   // Which step each line is: the latest step it matches, so a line written
   // for step 3 is never read as step 2.
   const accepted = steps.map(stepAccepted);
+  // Strictly first (061): only a line that matches no step as written may
+  // match one with a minus taken out of a bracket — otherwise x^3(-\sin x),
+  // the unsimplified step, would read as -x^3\sin x, the simplified one.
   const lineSteps = work.map(line => {
-    for (let i = n; i >= 1; i--) if (answerVerdict(line, accepted[i - 1]) === null) return i;
+    for (let i = n; i >= 1; i--) if (answerVerdictStrict(line, accepted[i - 1]) === null) return i;
+    for (let i = n; i >= 1; i--) if (answerVerdictBySigns(line, accepted[i - 1]) === null) return i;
     return null;
   });
   const first = steps.map((_, i) => lineSteps.indexOf(i + 1) + 1); // 1-based, 0 = none

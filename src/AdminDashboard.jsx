@@ -912,6 +912,25 @@ const [targetSection, setTargetSection] = useState('');
 
   // --- RESCORE / REPAIR ZERO RESULTS ---
   const [isRescoring, setIsRescoring] = useState(false);
+  // The papers among this instructor's 0/0 results that have a picked item —
+  // the only ones rescoreZeroResults() can repair. A paper of typed or essay
+  // items is 0/0 by design, so it must not raise the banner.
+  // undefined = still looking (no banner); null = the lookup failed (banner).
+  const zeroExamKey = [...new Set(results
+    .filter(r => r.total_items === 0 && instructorExamIdsRef.current.has(r.exam_id))
+    .map(r => r.exam_id))].sort().join(',');
+  const [repairable, setRepairable] = useState({ key: '', ids: undefined });
+  const repairableExamIds = repairable.key === zeroExamKey ? repairable.ids : undefined;
+  useEffect(() => {
+    if (!zeroExamKey) return;
+    let live = true;
+    fetchAllRows(() => supabase.from('questions').select('id, exam_id')
+      .in('exam_id', zeroExamKey.split(','))
+      .or('question_type.is.null,question_type.not.in.(essay,worked_solution)'))
+      .then(rows => { if (live) setRepairable({ key: zeroExamKey, ids: new Set(rows.map(r => r.exam_id)) }); })
+      .catch(() => { if (live) setRepairable({ key: zeroExamKey, ids: null }); });
+    return () => { live = false; };
+  }, [zeroExamKey]);
   const [isRecoveringWork, setIsRecoveringWork] = useState(false);
   const [manualScoreModal, setManualScoreModal] = useState(null); // { student_id, exam_id, student_name, exam_title, total_items, weighted }
   const [manualScoreValue, setManualScoreValue] = useState('');
@@ -2813,12 +2832,14 @@ const deleteResult = async (studentId, examId) => {
               </div>
             </div>
 
-            {/* Rescore banner — only for 0/0 rows, which is exactly what
-                rescoreZeroResults() repairs. Do not widen this to 0/N: the
-                dashboard query does not select answers_json, so any test on it
-                is always true and the banner would never clear. */}
-            {results.some(r =>
+            {/* Rescore banner — only for 0/0 rows on a paper with picked
+                items, which is exactly what rescoreZeroResults() repairs. Do
+                not widen this to 0/N: the dashboard query does not select
+                answers_json, so any test on it is always true and the banner
+                would never clear. */}
+            {repairableExamIds !== undefined && results.some(r =>
               r.total_items === 0 && instructorExamIdsRef.current.has(r.exam_id)
+              && (repairableExamIds === null || repairableExamIds.has(r.exam_id))
             ) && (
               <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

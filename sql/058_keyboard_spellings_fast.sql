@@ -17,9 +17,10 @@
 -- JS twin: respell() and answerVerdict() (stepMarking.js);
 -- sql/test/keyboard_spellings.test.mjs checks they agree.
 --
--- RE-MARKS every submitted attempt and result on a paper with a
--- full-solution item, RAISE-ONLY: if any would go down, the whole file
--- rolls back. Anything marked by an instructor is skipped.
+-- Marks nothing already stored: run sql/059 afterwards, as many times as
+-- it asks, to re-mark what was submitted (raise-only). Run in one go the
+-- re-mark took longer than the SQL editor waits, and the whole file
+-- rolled back.
 -- =====================================================================
 
 BEGIN;
@@ -230,53 +231,20 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------
--- 3. Re-mark, raise-only: practice attempts, then graded results
+-- 3. When these rules went live, for sql/059's re-mark in batches
 -- ---------------------------------------------------------------------
+-- The re-mark is too long for one run of the SQL editor (it timed out),
+-- so 059 re-marks in batches everything last marked BEFORE this moment.
+-- Set once: running 058 again does not move it.
 DO $$
-DECLARE r record; v_new numeric; n_done int := 0; n_up int := 0; n_skip int := 0;
 BEGIN
-  FOR r IN
-    SELECT ra.student_id, ra.assessment_id, ra.attempt_no, coalesce(ra.work_marks, 0) AS old, ra.answers_json
-    FROM public.review_attempts ra
-    JOIN public.assessments a ON a.id = ra.assessment_id AND a.allow_retakes
-    WHERE EXISTS (SELECT 1 FROM public.questions q WHERE q.exam_id = ra.assessment_id
-                  AND q.work_rubric ->> 'mode' = 'lines')
-  LOOP
-    IF EXISTS (SELECT 1 FROM jsonb_each(coalesce(r.answers_json, '{}'::jsonb)) e
-               WHERE jsonb_typeof(e.value) = 'object' AND e.value ->> 'reason' LIKE 'Marked by instructor%') THEN
-      n_skip := n_skip + 1; CONTINUE;
-    END IF;
-    v_new := (public.score_worked_answers(r.student_id, r.assessment_id, r.attempt_no) ->> 'work_marks')::numeric;
-    IF v_new < r.old THEN
-      RAISE EXCEPTION 'An attempt would go DOWN from % to % (student %, attempt %). Nothing was changed.',
-        r.old, v_new, r.student_id, r.attempt_no;
-    END IF;
-    n_done := n_done + 1;
-    IF v_new > r.old THEN n_up := n_up + 1; END IF;
-  END LOOP;
-
-  FOR r IN
-    SELECT res.student_id, coalesce(res.assessment_id, res.exam_id) AS assessment_id,
-           coalesce(res.work_marks, 0) AS old, res.answers_json
-    FROM public.results res
-    JOIN public.assessments a ON a.id = coalesce(res.assessment_id, res.exam_id) AND NOT a.allow_retakes
-    WHERE EXISTS (SELECT 1 FROM public.questions q WHERE q.exam_id = a.id
-                  AND q.work_rubric ->> 'mode' = 'lines')
-  LOOP
-    IF EXISTS (SELECT 1 FROM jsonb_each(coalesce(r.answers_json, '{}'::jsonb)) e
-               WHERE jsonb_typeof(e.value) = 'object' AND e.value ->> 'reason' LIKE 'Marked by instructor%') THEN
-      n_skip := n_skip + 1; CONTINUE;
-    END IF;
-    v_new := (public.score_worked_answers(r.student_id, r.assessment_id) ->> 'work_marks')::numeric;
-    IF v_new < r.old THEN
-      RAISE EXCEPTION 'A result would go DOWN from % to % (student %). Nothing was changed.',
-        r.old, v_new, r.student_id;
-    END IF;
-    n_done := n_done + 1;
-    IF v_new > r.old THEN n_up := n_up + 1; END IF;
-  END LOOP;
-  RAISE NOTICE '% re-marked, % went up, % skipped (marked by hand).', n_done, n_up, n_skip;
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                 WHERE n.nspname = 'public' AND p.proname = 'remark_058_since') THEN
+    EXECUTE format('CREATE FUNCTION public.remark_058_since() RETURNS timestamptz '
+                   'LANGUAGE sql IMMUTABLE AS $f$ SELECT %L::timestamptz $f$', now());
+  END IF;
 END $$;
+REVOKE ALL ON FUNCTION public.remark_058_since() FROM public, anon, authenticated;
 
 COMMIT;
 

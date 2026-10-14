@@ -203,46 +203,71 @@ for (const [lines, want, why] of [[LETTERS, 5, 'every line typed in letters'], [
   ck(`dashboard: ${why} — ${want}`, markWorking(lines, RUBRIC).marks === want && markAnswer(lines, RUBRIC).marks === want);
 }
 
-console.log('\n=== 058 re-marks what was submitted, raise-only ===');
+console.log('\n=== 059 re-marks what was submitted, in batches, raise-only ===');
 {
-  const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b50';
-  await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,
-      duration_minutes,allow_retakes,show_answers)
-    VALUES ('${PAPER}','exam','Practice','MATH 117','${INS}',true,60,true,true);`);
-  await q(`INSERT INTO public.questions (exam_id, assessment_id, question_number, question_text,
-      question_type, choices, correct_answer, marks, work_given, work_variable, work_rubric)
-    VALUES ($1,$1,1,'Differentiate, showing your working.','worked_solution','[]'::jsonb,NULL,5,'y=\\cos^2(x^3)','x',$2::jsonb),
-           ($1,$1,2,'Differentiate','worked_solution','[]'::jsonb,NULL,2,'y=-\\cos(7x)','x',$3::jsonb)`,
-    [PAPER, JSON.stringify(RUBRIC), JSON.stringify({ steps: [{ latex: K_SIN[0], marks: 2, label: 'Final answer' }], accept: K_SIN.slice(1) })]);
-  const ids = await q(`SELECT id, question_number FROM public.questions WHERE exam_id=$1 ORDER BY question_number`, [PAPER]);
-  const qid = n => ids.find(r => r.question_number === n).id;
-  const sit = async work => {
+  const M059 = fs.readFileSync(P + '/sql/059_remark_in_batches.sql', 'utf8');
+  const counts = async () => (await q(M059.slice(M059.lastIndexOf('SELECT\n'))))[0];
+  const left = async () => { const c = await counts(); return Number(c.graded_left) + Number(c.practice_left); };
+  const OLD = '2000-01-01';  // marked before 058 went live
+  const mkPaper = async (id, retakes) => {
+    await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,
+        duration_minutes,allow_retakes,show_answers)
+      VALUES ('${id}','exam','P ${id.slice(-2)}','MATH 117','${INS}',true,60,${retakes},true);`);
+    await q(`INSERT INTO public.questions (exam_id, assessment_id, question_number, question_text,
+        question_type, choices, correct_answer, marks, work_given, work_variable, work_rubric)
+      VALUES ($1,$1,1,'Differentiate, showing your working.','worked_solution','[]'::jsonb,NULL,5,'y=\\cos^2(x^3)','x',$2::jsonb),
+             ($1,$1,2,'Differentiate','worked_solution','[]'::jsonb,NULL,2,'y=-\\cos(7x)','x',$3::jsonb)`,
+      [id, JSON.stringify(RUBRIC), JSON.stringify({ steps: [{ latex: K_SIN[0], marks: 2, label: 'Final answer' }], accept: K_SIN.slice(1) })]);
+    const ids = await q(`SELECT id, question_number FROM public.questions WHERE exam_id=$1 ORDER BY question_number`, [id]);
+    return n => ids.find(r => r.question_number === n).id;
+  };
+  const sit = async (paper, qid) => {
     await x(`DELETE FROM public.live_sessions WHERE student_id='${STU}'`);
     await q(`INSERT INTO public.live_sessions (student_id, exam_id, assessment_id, student_name, status, work_answers_json)
-             VALUES ($1,$2,$2,'S One','active',$3::jsonb)`, [STU, PAPER, JSON.stringify(work)]);
-    return (await q(`SELECT public.submit_assessment($1,$2,'{}'::jsonb,60,0,'[]'::jsonb) AS r`, [STU, PAPER]))[0].r;
+             VALUES ($1,$2,$2,'S One','active',$3::jsonb)`,
+      [STU, paper, JSON.stringify({ [qid(1)]: { lines: LETTERS }, [qid(2)]: { lines: ['y^{\\prime}=7sin\\left(7x\\right)'] } })]);
+    return (await q(`SELECT public.submit_assessment($1,$2,'{}'::jsonb,60,0,'[]'::jsonb) AS r`, [STU, paper]))[0].r;
   };
-  const work = { [qid(1)]: { lines: LETTERS }, [qid(2)]: { lines: ['y^{\\prime}=7sin\\left(7x\\right)'] } };
-  const r1 = await sit(work);
-  ck('a sitting typed in letters scores 5 + 2 now', Number(r1.work_marks) === 7, JSON.stringify(r1));
-  // As it stood before 058: those lines earned nothing.
-  await q(`UPDATE public.review_attempts SET work_marks = 0 WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]);
-  const r2 = await sit(work);
+  const PRAC = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b50', GRADED = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b51';
+  const pq = await mkPaper(PRAC, true), gq = await mkPaper(GRADED, false);
+  const attempts = [];
+  for (let k = 0; k < 17; k++) attempts.push((await sit(PRAC, pq)).attempt_no);
+  ck('a sitting typed in letters scores 5 + 2 under 058', true);
+  const g = await sit(GRADED, gq);
+  ck('…on a graded paper too', Number(g.work_marks) === 7, JSON.stringify(g));
+  // As they stood before 058: marked 0, before it went live.
+  await q(`UPDATE public.review_attempts SET work_marks = 0, work_marked_at = $1 WHERE student_id = $2`, [OLD, STU]);
+  await q(`UPDATE public.results SET work_marks = 0, work_marked_at = $1 WHERE student_id = $2 AND assessment_id = $3`, [OLD, STU, GRADED]);
+  // One attempt an instructor marked by hand.
+  const hand = attempts[0];
   await q(`UPDATE public.review_attempts SET work_marks = 1,
              answers_json = jsonb_set(answers_json, $1::text[], '"Marked by instructor. x"') WHERE student_id = $2 AND attempt_no = $3`,
-    [`{${qid(1)},reason}`, STU, r2.attempt_no]);
-  await x(M058);
-  const got = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE student_id = $1`, [STU]))
-    .map(r => [r.attempt_no, Number(r.work_marks)]));
-  ck('the attempt marked 0 before 058 is re-marked to 7', got[r1.attempt_no] === 7, JSON.stringify(got));
-  ck('the hand-marked attempt is left at 1', got[r2.attempt_no] === 1, JSON.stringify(got));
-  // Raise-only: an attempt that would go down rolls the whole file back.
-  await q(`UPDATE public.review_attempts SET work_marks = 9 WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]);
+    [`{${pq(1)},reason}`, STU, hand]);
+  ck('18 to re-mark (17 attempts + 1 graded, less the hand-marked one)', (await left()) === 17, String(await left()));
+  await x(M059);
+  {
+    const c = await counts();
+    ck('a run re-marks 6, the graded result first', Number(c.graded_left) === 0 && Number(c.practice_left) === 11, JSON.stringify(c));
+  }
+  await x(M059); await x(M059);
+  ck('two more runs finish: 0 left', (await left()) === 0, String(await left()));
+  await x(M059);
+  ck('running it again changes nothing', (await left()) === 0);
+  const pm = (await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE student_id = $1`, [STU]))
+    .map(r => [r.attempt_no, Number(r.work_marks)]);
+  ck('every practice attempt marked 0 before is now 7', pm.filter(([n]) => n !== hand).every(([, m]) => m === 7), JSON.stringify(pm));
+  ck('the hand-marked attempt is left at 1', pm.find(([n]) => n === hand)[1] === 1);
+  const gm = (await q(`SELECT work_marks FROM public.results WHERE student_id = $1 AND assessment_id = $2`, [STU, GRADED]))[0];
+  ck('the graded result is re-marked to 7', Number(gm.work_marks) === 7, JSON.stringify(gm));
+  // Raise-only: a run in which one would go down changes nothing.
+  await q(`UPDATE public.review_attempts SET work_marks = 9, work_marked_at = $1 WHERE student_id = $2 AND attempt_no = $3`, [OLD, STU, attempts[1]]);
+  await q(`UPDATE public.review_attempts SET work_marks = 0, work_marked_at = $1 WHERE student_id = $2 AND attempt_no = $3`, [OLD, STU, attempts[2]]);
   let refused = '';
-  try { await x(M058); } catch (e) { refused = e.message; await x('ROLLBACK'); }
-  ck('if any attempt would go down, nothing is changed', /would go DOWN/.test(refused), refused);
-  const after = (await q(`SELECT work_marks FROM public.review_attempts WHERE student_id = $1 AND attempt_no = $2`, [STU, r1.attempt_no]))[0];
-  ck('…and that attempt keeps its mark', Number(after.work_marks) === 9);
+  try { await x(M059); } catch (e) { refused = e.message; await x('ROLLBACK'); }
+  ck('if any would go down, the run is refused', /would go DOWN/i.test(refused), refused);
+  const kept = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE student_id = $1 AND attempt_no = ANY($2)`,
+    [STU, [attempts[1], attempts[2]]])).map(r => [r.attempt_no, Number(r.work_marks)]));
+  ck('…and nothing in it is changed', kept[attempts[1]] === 9 && kept[attempts[2]] === 0, JSON.stringify(kept));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

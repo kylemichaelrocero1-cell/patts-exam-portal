@@ -1009,11 +1009,16 @@ const [targetSection, setTargetSection] = useState('');
     const questionsByExam = {};
     await Promise.all(examIds.map(async id => { questionsByExam[id] = await loadExamQuestions(id); }));
 
+    // Only a paper with picked items can be 0/0 by mistake. On a paper of
+    // essays or typed (worked) items 0/0 is right — typed marks live in
+    // work_marks/work_total — and "repairing" it set total_items to the
+    // number of typed items and the time taken to the whole limit (sql/055).
+    const isPicked = q => !['essay', 'worked_solution'].includes(q.question_type || 'multiple_choice');
     const mcExamIds = new Set(
-      examIds.filter(id => (questionsByExam[id] || []).some(q => (q.question_type || 'multiple_choice') !== 'essay'))
+      examIds.filter(id => (questionsByExam[id] || []).some(isPicked))
     );
     const toFix = zeroResults.filter(r => mcExamIds.has(r.exam_id));
-    if (toFix.length === 0) { setIsRescoring(false); return alert('All 0/0 results are essay-only — nothing to fix.'); }
+    if (toFix.length === 0) { setIsRescoring(false); return alert('No 0/0 results to fix: the papers involved have no multiple-choice items, so 0/0 is correct for them.'); }
 
     // Fetch finished live_sessions to get answers + created_at for time calculation
     const sessionFetches = await Promise.all(
@@ -1057,7 +1062,7 @@ const [targetSection, setTargetSection] = useState('');
         if ((q.question_type || 'multiple_choice') === 'essay') {
           const text = rawEssays[qId];
           if (text?.trim()) formattedAnswers[qId] = { type: 'essay', text: text.trim() };
-        } else {
+        } else if (isPicked(q)) {
           mcTotal++;
           if (rawAnswers[qId] !== undefined) {
             // A multi-answer item is all or nothing (sql/018); a single-answer

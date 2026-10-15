@@ -74,19 +74,30 @@ export default function WorkedSolution({
   // caret and contents for a render.
   const [keys, setKeys] = useState(() => rows.map(() => nextKey()));
   const keyAt = i => (keys.length === rows.length ? keys[i] : `pos-${i}`);
-  const [focusIndex, setFocusIndex] = useState(null);
+  // Which line to put the caret in. A counter rides along so that asking for
+  // the same line twice still moves the caret (MathField refocuses when its
+  // `focus` prop changes, and a plain index would not change).
+  const [focusReq, setFocusReq] = useState({ i: null, n: 0 });
+  const focusLine = i => setFocusReq(f => ({ i, n: f.n + 1 }));
   const writeRows = next => onChange?.({ ...(value || {}), lines: next });
   const setRow = (i, latex) => { const next = [...rows]; next[i] = latex; writeRows(next); };
   const addRowAfter = i => {
     const next = [...rows]; next.splice(i + 1, 0, '');
     setKeys(k => { const n = k.length === rows.length ? [...k] : rows.map(() => nextKey());
                    n.splice(i + 1, 0, nextKey()); return n; });
-    writeRows(next); setFocusIndex(i + 1);
+    writeRows(next); focusLine(i + 1);
+  };
+  // Enter: on to the next line — a new one only when the next is not empty.
+  // The three blank lines a solution starts with are there to be filled, not
+  // pushed down by a new blank line each time.
+  const nextLine = i => {
+    if (i + 1 < rows.length && !rows[i + 1].trim()) focusLine(i + 1);
+    else addRowAfter(i);
   };
   const removeRow = i => {
     if (rows.length <= 1) { writeRows(['']); return; }
     setKeys(k => (k.length === rows.length ? k.filter((_, j) => j !== i) : rows.slice(1).map(() => nextKey())));
-    writeRows(rows.filter((_, j) => j !== i)); setFocusIndex(Math.max(0, i - 1));
+    writeRows(rows.filter((_, j) => j !== i)); focusLine(Math.max(0, i - 1));
   };
   const written = rows.filter(l => l.trim()).length;
 
@@ -142,10 +153,10 @@ export default function WorkedSolution({
                   <MathField
                     value={latex}
                     onChange={v => setRow(i, v)}
-                    onEnter={() => addRowAfter(i)}
+                    onEnter={() => nextLine(i)}
                     onBackspaceEmpty={() => removeRow(i)}
                     readOnly={readOnly}
-                    focus={focusIndex === i}
+                    focus={focusReq.i === i ? focusReq.n : 0}
                     ariaLabel={`Line ${i + 1} of your solution`}
                     placeholder={i === 0 ? 'Start from the function…' : i === rows.length - 1 ? 'Your final answer…' : 'Next step…'}
                   />

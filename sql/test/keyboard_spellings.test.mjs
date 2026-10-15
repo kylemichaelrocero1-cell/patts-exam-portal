@@ -324,6 +324,86 @@ console.log('\n=== 066: a times sign between numbers, and terms that are zero ==
   ck('067 runs', c67.graded_left !== undefined, JSON.stringify(c67));
 }
 
+console.log('\n=== 071: the maths keyboard\'s e is e ===');
+{
+  const M071 = fs.readFileSync(P + '/sql/071_the_keyboards_e_is_e.sql', 'utf8');
+  const K5 = ["y'=5e^{5x}"];
+  const KP = ["y'=2xe^{5x}+5x^2e^{5x}", "y'=xe^{5x}(2+5x)"];
+  const keyE = 'y^{\\prime}=5\\exponentialE^{5x}';
+  ck('before 071: the keyboard\'s e is wrong', (await verdict(keyE, K5)) !== null);
+  await x(M071); await x(M071);
+  ck('071 applies, twice', true);
+  const v = (await q(M071.slice(M071.lastIndexOf('SELECT\n'))))[0];
+  const { sittings_with_the_e_key: nE, ...flags } = v;
+  ck('071\'s VERIFY row is all true, and counts sittings with the e key', Object.values(flags).every(b => b === true) && Number(nE) === 0, JSON.stringify(v));
+  for (const [a, acc, want, why] of [
+    [keyE, K5, true, 'the e key'],
+    ['y^{\\prime}=5\\exponentialE^{5x}', K5, true, 'the e key, label raised'],
+    ["y'=2x\\exponentialE^{5x}+5x^2e^{5x}", KP, true, 'the e key for one e, the letter for the other'],
+    ["y'=x\\exponentialE^{5x}\\left(2+5x\\right)", KP, true, 'the e key, factored'],
+    ["y'=5\\exp\\left(5x\\right)", K5, true, 'the exp key'],
+    ["y'=5\\exp (5x)", K5, true, 'the exp key with a space'],
+    ["y'=\\left(2x\\right)\\left(\\exponentialE^{5x}\\right)+\\left(x^2\\right)\\left(5\\exponentialE^{5x}\\right)", ["y'=2xe^{5x}+x^2(5e^{5x})"], true, 'the e key, every factor bracketed'],
+    ["y'=5\\exponentialE^{4x}", K5, false, 'a wrong power stays wrong'],
+    ["y'=\\exponentialE^{5x}", K5, false, 'a missing factor stays wrong'],
+    ['5\\exponentialE^{5x}', K5, false, 'no label stays wrong'],
+    ["y'=5\\exp(4x)", K5, false, 'exp of the wrong power stays wrong'],
+  ]) {
+    ck(`database: ${want ? 'right' : 'wrong'} — ${why}`, ((await verdict(a, acc)) === null) === want, `${a} → ${await verdict(a, acc)}`);
+    ck(`dashboard: ${want ? 'right' : 'wrong'} — ${why}`, (answerVerdict(a, acc) === null) === want, `${a} → ${answerVerdict(a, acc)}`);
+  }
+  // A full solution typed with the e key: every line is its step.
+  const R = { mode: 'lines', steps: [
+    { latex: 'y=x^2e^{5x}', marks: 1 },
+    { latex: "y'=2xe^{5x}+x^2(5e^{5x})", marks: 3, accept: ["y'=2xe^{5x}+x^2e^{5x}(5)"] },
+    { latex: KP[0], marks: 5, alone: 3, partial: 4, accept: KP.slice(1) }] };
+  const L = ['y=x^2\\exponentialE^{5x}', 'y^{\\prime}=2x\\exponentialE^{5x}+x^2\\left(5\\exponentialE^{5x}\\right)', 'y^{\\prime}=2x\\exponentialE^{5x}+5x^2\\exponentialE^{5x}'];
+  const d = (await q(`SELECT public.mark_working($1::jsonb, $2::jsonb) m`, [JSON.stringify(L), JSON.stringify(R)]))[0].m;
+  ck('database: a full solution with the e key — 5', Number(d.marks) === 5 && JSON.stringify(d.line_steps) === '[1,2,3]', JSON.stringify(d));
+  ck('dashboard: the same', markWorking(L, R).marks === 5 && markAnswer(L, R).marks === 5);
+  const E = CORPUS.concat(['\\exponentialE', '\\exponentialE^x', 'x\\exponentialE^{2x}', '\\exp(x)', '\\exp (2x+1)', '\\exp\\left(x^2\\right)',
+    '\\exp(\\exp(x))', '\\exp(x', '\\exp x', '\\exponentialEx', '\\exponential', '\\sec\\exponentialE', '\\expo(x)', '3\\exp(x)\\cdot\\exponentialE']);
+  let same = 0;
+  for (const s of E) {
+    const r = (await q(`SELECT public.math_respell($1) r`, [s]))[0].r;
+    if (r === respell(s)) same++; else console.log(`        respell differs: ${JSON.stringify(s)}\n          sql ${JSON.stringify(r)}\n          js  ${JSON.stringify(respell(s))}`);
+  }
+  ck(`math_respell and respell agree on all ${E.length} strings after 071`, same === E.length, `${same}`);
+  ck('respell: what it does', respell('2\\exponentialE^{x}') === '2e^{x}' && respell('\\exp(\\exp(x))') === 'e^{e^{x}}'
+    && respell('\\exp\\left(x^2\\right)') === 'e^{x^2}', JSON.stringify(['2\\exponentialE^{x}', '\\exp(\\exp(x))', '\\exp\\left(x^2\\right)'].map(respell)));
+  ck('respell: what it leaves', respell('\\exponentialEx') === '\\exponentialEx' && respell('\\exp x') === '\\exp x');
+
+  // 072 re-marks only sittings holding the e key, raise-only.
+  const M072 = fs.readFileSync(P + '/sql/072_remark_in_batches_after_071.sql', 'utf8');
+  const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b71';
+  await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,duration_minutes,allow_retakes,show_answers)
+           VALUES ('${PAPER}','exam','P 71','MATH 117','${INS}',true,60,true,true);`);
+  await q(`INSERT INTO public.questions (exam_id, assessment_id, question_number, question_text, question_type, choices, correct_answer, marks,
+             work_given, work_variable, work_rubric)
+           VALUES ($1,$1,1,'Differentiate, showing your working.','worked_solution','[]'::jsonb,NULL,5,'y=x^2e^{5x}','x',$2::jsonb)`,
+    [PAPER, JSON.stringify(R)]);
+  const qid = (await q(`SELECT id FROM public.questions WHERE exam_id = $1`, [PAPER]))[0].id;
+  const sit = async lines => {
+    await x(`DELETE FROM public.live_sessions WHERE student_id='${STU}'`);
+    await q(`INSERT INTO public.live_sessions (student_id, exam_id, assessment_id, student_name, status, work_answers_json)
+             VALUES ($1,$2,$2,'S One','active',$3::jsonb)`, [STU, PAPER, JSON.stringify({ [qid]: { lines } })]);
+    return (await q(`SELECT public.submit_assessment($1,$2,'{}'::jsonb,60,0,'[]'::jsonb) AS r`, [STU, PAPER]))[0].r;
+  };
+  const withE = (await sit(L)).attempt_no;
+  const withoutE = (await sit(['y=x^2e^{5x}'])).attempt_no;
+  // As they stood before 071: marked 0, before it went live.
+  await q(`UPDATE public.review_attempts SET work_marks = 0, work_marked_at = '2000-01-01' WHERE assessment_id = $1`, [PAPER]);
+  const left = async () => { const c = (await q(M072.slice(M072.lastIndexOf('SELECT\n'))))[0]; return Number(c.graded_left) + Number(c.practice_left); };
+  ck('072 has only the sitting with the e key to re-mark', (await left()) === 1, String(await left()));
+  await x(M072);
+  const marks = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE assessment_id = $1`, [PAPER]))
+    .map(r => [r.attempt_no, Number(r.work_marks)]));
+  ck('…raises it to 5, and leaves the other alone', marks[withE] === 5 && marks[withoutE] === 0 && (await left()) === 0, JSON.stringify(marks));
+  // Out of the way of 059's counts below.
+  await x(`DELETE FROM public.review_attempts WHERE assessment_id = '${PAPER}'; DELETE FROM public.live_sessions WHERE assessment_id = '${PAPER}';
+           DELETE FROM public.questions WHERE exam_id = '${PAPER}'; DELETE FROM public.assessments WHERE id = '${PAPER}';`);
+}
+
 console.log('\n=== 059 re-marks what was submitted, in batches, raise-only ===');
 {
   const M059 = fs.readFileSync(P + '/sql/059_remark_in_batches.sql', 'utf8');

@@ -207,6 +207,16 @@ export function respell(p) {
     .split('\\textbraceright').join('}');
   // r2b. \ast (a star) is a times sign (058).
   s = s.replace(/\\ast(?![a-zA-Z])/g, '\\cdot ');
+  // r2c. The keyboard's e is e (071): \exponentialE is the letter, and
+  //      \exp(u) is e^{u}.
+  s = s.replace(/\\exponentialE(?![a-zA-Z])/g, 'e').replace(/\\exp\s+\(/g, '\\exp(');
+  for (let g = 0; g < 50; g++) {
+    const i = s.indexOf('\\exp(');
+    if (i < 0) break;
+    const k = closeOf(s, i + 4);
+    if (k < 0) break;
+    s = s.slice(0, i) + 'e^{' + s.slice(i + 5, k) + '}' + s.slice(k + 1);
+  }
   // r3. A superscript with no base at the very start: the label typed raised.
   {
     const t = s.replace(/^\s+/, '');

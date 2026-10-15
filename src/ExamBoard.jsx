@@ -14,6 +14,7 @@ import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
 import { createFocusLossWatcher, isTypingTarget } from './lib/focusLoss.js';
+import { isUpdateReload } from './lib/staleBuild.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -865,7 +866,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       let finalCount = tabSwitchCountRef.current;
       let finalLogs = violationLogsRef.current;
 
-      if (!visibilityViolationRef.current) {
+      // The portal reloading itself onto a new build (src/lib/staleBuild.js)
+      // is not the student refreshing.
+      if (!visibilityViolationRef.current && !isUpdateReload()) {
         // Refresh — not yet counted by visibilitychange
         const timeStr = new Date().toLocaleTimeString();
         finalCount += 1;

@@ -27,9 +27,13 @@ export function linesOf(value) {
   return [];
 }
 
-/** Has the student written anything at all? */
+// The law a proof line carries after its statement (sql/073; LAW_TAIL in
+// logicProof.js, kept out of this file so the main bundle stays small).
+const LAW_TAIL = /\\qquad\s*\\text\{\([^{}]*\)\}\s*$/;
+
+/** Has the student written anything at all? A law picked for an empty line is not an answer. */
 export function hasWork(value) {
-  return linesOf(value).some(l => l.trim() !== '');
+  return linesOf(value).some(l => l.replace(LAW_TAIL, '').trim() !== '');
 }
 
 /**

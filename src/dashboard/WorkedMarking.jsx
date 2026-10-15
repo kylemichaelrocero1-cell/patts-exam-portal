@@ -156,9 +156,11 @@ export default function WorkedMarking({
               <p style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ink-4)', margin: 0 }}>
                 Nothing was written.
               </p>
-            ) : q.work_rubric?.mode === 'lines' ? (
+            ) : q.work_rubric?.mode === 'lines' || q.work_rubric?.mode === 'proof' ? (
               // A full solution: every line, ticked where it was a step of
-              // the solution (sql/042, marked by stepMarking.js here).
+              // the solution (sql/042, marked by stepMarking.js here). A
+              // proof (sql/073, logicProof.js): ticked where the line and
+              // its law counted.
               <ol className="ws-lines" style={{ marginBottom: 10 }}>
                 {lines.map((l, k) => {
                   const step = r?.lineSteps?.[k];
@@ -169,7 +171,9 @@ export default function WorkedMarking({
                       <span style={{ fontSize: 18 }}><MathStatic latex={l} /></span>
                       {r && (
                         <span className="ws-given-label" style={{ marginLeft: 'auto' }}>
-                          {counted ? `step ${step}` : 'not a step'}
+                          {q.work_rubric?.mode === 'proof'
+                            ? (counted ? 'counted' : 'not counted')
+                            : (counted ? `step ${step}` : 'not a step')}
                         </span>
                       )}
                     </li>

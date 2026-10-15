@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import MathField, { MathStatic } from './MathField.jsx';
 import { PALETTES, paletteFor, insertIntoFocusedField } from '../lib/mathPalette.js';
+import { LOGIC_LAWS, isLogicMode, joinLine, splitLine } from '../lib/logicProof.js';
 
 // The student's answer to a worked_solution item: ONE line of maths, typed the
 // way Google Docs or Symbolab let you type it.
@@ -22,7 +23,10 @@ import { PALETTES, paletteFor, insertIntoFocusedField } from '../lib/mathPalette
 //
 // The item is marked all or nothing on this one line — unless it is a full
 // solution (work_mode 'lines', sql/042), which takes several lines and is
-// marked step by step in the database. Still nothing is checked here.
+// marked step by step in the database, or a proof by logical equivalence
+// (work_mode 'proof', sql/073), whose every line also carries the law that
+// gives it, picked from a list. A 'simplify' item is one such line. Still
+// nothing is checked here.
 
 // Keys for the lines of a solution. Module-level so they are unique across
 // every item on the paper and never read a ref during render.
@@ -41,16 +45,22 @@ export default function WorkedSolution({
   // Calculus or logic symbols. The question's own wording picks the one it
   // opens on; the other is always a tap away, so a guess that is wrong costs
   // the student one tap rather than an answer they cannot type.
-  const [palette, setPalette] = useState(() => paletteFor(question?.question_text));
+  const mode = question?.work_mode;
+  const [palette, setPalette] = useState(() => (isLogicMode(mode) ? 'logic' : paletteFor(question?.question_text)));
   const isLogic = palette === 'logic';
 
   // A full solution, marked line by line in the database (sql/042), takes
   // several lines; every other typed item takes one. The exam screen only
   // learns which from get_exam_questions().work_mode — never the rubric.
-  const multi = question?.work_mode === 'lines';
+  const multi = mode === 'lines' || mode === 'proof';
+  // A statement and its law on every line (sql/073): a proof takes several
+  // lines, a simplification one.
+  const proof = mode === 'proof';
+  const simplify = mode === 'simplify';
+  const withLaw = proof || simplify;
   // A word, not maths (sql/046): a plain text box, no maths keyboard and no
   // symbol strip. The keyboard turns "and" into ∧ as it is typed.
-  const text = question?.work_mode === 'text';
+  const text = mode === 'text';
 
   // The answer is the first line of the stored shape, so a paper answered
   // before this change still reads back correctly.
@@ -99,7 +109,61 @@ export default function WorkedSolution({
     setKeys(k => (k.length === rows.length ? k.filter((_, j) => j !== i) : rows.slice(1).map(() => nextKey())));
     writeRows(rows.filter((_, j) => j !== i)); focusLine(Math.max(0, i - 1));
   };
-  const written = rows.filter(l => l.trim()).length;
+  const written = rows.filter(l => (withLaw ? splitLine(l).statement : l).trim()).length;
+
+  // A line of a proof is stored as one string, the statement with its laws
+  // after it (joinLine), so the field edits one half and the list the other.
+  const setStatement = (i, latex) => setRow(i, joinLine(latex, splitLine(rows[i]).laws));
+  const setLaw = (i, k, name) => {
+    const laws = [...splitLine(rows[i]).laws];
+    laws[k] = name;
+    // Clearing the first law clears the second with it.
+    const kept = laws[0] ? laws.filter(Boolean).slice(0, 2) : [];
+    setRow(i, joinLine(splitLine(rows[i]).statement, kept));
+  };
+  // Lines whose second law list has been asked for. Most steps use one law,
+  // so the second list stays a link until it is wanted.
+  const [secondOpen, setSecondOpen] = useState(() => new Set());
+  const lawPicker = (i, first) => {
+    const laws = splitLine(rows[i]).laws;
+    const rowKey = keyAt(i);
+    const showSecond = !!laws[1] || secondOpen.has(rowKey);
+    const options = LOGIC_LAWS.filter(l => first || l.key !== 'given');
+    const label = l => (l.also ? `${l.name} (${l.also})` : l.name);
+    return (
+      <div className="ws-law">
+        <select
+          className="ws-law-select"
+          value={laws[0] || ''}
+          onChange={e => setLaw(i, 0, e.target.value)}
+          disabled={readOnly}
+          aria-label={`Law for line ${i + 1}`}
+        >
+          <option value="">Law…</option>
+          {options.map(l => <option key={l.key} value={l.name}>{label(l)}</option>)}
+        </select>
+        {laws[0] && laws[0] !== 'Given' && !showSecond && !readOnly && (
+          <button type="button" className="ws-law-more"
+            onClick={() => setSecondOpen(o => new Set(o).add(rowKey))}>
+            + second law
+          </button>
+        )}
+        {laws[0] && laws[0] !== 'Given' && showSecond && (
+          <select
+            className="ws-law-select ws-law-second"
+            value={laws[1] || ''}
+            onChange={e => setLaw(i, 1, e.target.value)}
+            disabled={readOnly}
+            aria-label={`Second law for line ${i + 1}, if the step uses two`}
+          >
+            <option value="">No second law</option>
+            {options.filter(l => l.key !== 'given' && l.name !== laws[0])
+              .map(l => <option key={l.key} value={l.name}>{label(l)}</option>)}
+          </select>
+        )}
+      </div>
+    );
+  };
 
   if (text) {
     return (
@@ -137,29 +201,34 @@ export default function WorkedSolution({
     <div className="worked-solution">
       {given && (
         <div className="ws-given">
-          <span className="ws-given-label">Given</span>
+          <span className="ws-given-label">{proof ? 'Prove' : simplify ? 'Simplify' : 'Given'}</span>
           <MathStatic latex={given} ariaLabel="The problem" />
         </div>
       )}
 
       {multi ? (
         <>
-          <span className="ws-answer-label">Your solution — one step on each line</span>
+          <span className="ws-answer-label">
+            {proof ? 'Your proof — one statement and its law on each line' : 'Your solution — one step on each line'}
+          </span>
           <ol className="ws-lines">
             {rows.map((latex, i) => (
               <li key={keyAt(i)} className="ws-line ws-line-plain">
                 <span className="ws-step-no" aria-hidden="true">{i + 1}</span>
                 <div className="ws-field">
                   <MathField
-                    value={latex}
-                    onChange={v => setRow(i, v)}
+                    value={proof ? splitLine(latex).statement : latex}
+                    onChange={v => (proof ? setStatement(i, v) : setRow(i, v))}
                     onEnter={() => nextLine(i)}
                     onBackspaceEmpty={() => removeRow(i)}
                     readOnly={readOnly}
                     focus={focusReq.i === i ? focusReq.n : 0}
-                    ariaLabel={`Line ${i + 1} of your solution`}
-                    placeholder={i === 0 ? 'Start from the function…' : i === rows.length - 1 ? 'Your final answer…' : 'Next step…'}
+                    ariaLabel={`Line ${i + 1} of your ${proof ? 'proof' : 'solution'}`}
+                    placeholder={proof
+                      ? (i === 0 ? 'Start from the left-hand side…' : i === rows.length - 1 ? '≡ the right-hand side…' : '≡ next statement…')
+                      : (i === 0 ? 'Start from the function…' : i === rows.length - 1 ? 'Your final answer…' : 'Next step…')}
                   />
+                  {proof && lawPicker(i, i === 0)}
                 </div>
                 {!readOnly && (
                   <button type="button" className="ws-remove" onClick={() => removeRow(i)}
@@ -184,12 +253,13 @@ export default function WorkedSolution({
           </label>
           <div className="ws-answer">
             <MathField
-              value={answer}
-              onChange={write}
+              value={simplify ? splitLine(answer).statement : answer}
+              onChange={v => (simplify ? write(joinLine(v, splitLine(answer).laws)) : write(v))}
               readOnly={readOnly}
-              ariaLabel="Your answer"
-              placeholder="Type your answer…"
+              ariaLabel={simplify ? 'Your simplified result' : 'Your answer'}
+              placeholder={simplify ? 'The simplified result…' : 'Type your answer…'}
             />
+            {simplify && lawPicker(0, false)}
           </div>
         </>
       )}
@@ -234,7 +304,28 @@ export default function WorkedSolution({
         </>
       )}
 
-      {multi ? (
+      {proof ? (
+        <>
+          <p className="ws-hint">
+            Write the proof <strong>one statement on each line</strong>, starting from the left-hand
+            side, and <strong>pick the law</strong> that gives each line from the line above it. You
+            may begin a line with <strong>≡</strong>. A step that uses two laws needs both picked.
+            Your last line must be the statement you are proving it equivalent to.
+          </p>
+          <p className="ws-hint">
+            This question is worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>. Any correct
+            route counts. A missing or wrong law costs 1 point, and a line that does not follow from
+            the one above it ends the work that counts. Use <code>t</code> for a tautology and{' '}
+            <code>c</code> for a contradiction.
+          </p>
+        </>
+      ) : simplify ? (
+        <p className="ws-hint">
+          Write the simplified result and pick the law used. This question is worth{' '}
+          <strong>{marks} point{marks === 1 ? '' : 's'}</strong>{marks === 2 ? ': one for the result and one for the law' : ''}.
+          Use <code>t</code> for a tautology and <code>c</code> for a contradiction.
+        </p>
+      ) : multi ? (
         <>
           <p className="ws-hint">
             Write the solution <strong>one step on each line</strong>, the way you would on paper:
@@ -248,6 +339,12 @@ export default function WorkedSolution({
             that leads to it. Begin each derivative line with its notation, e.g. <code>y' =</code>.
           </p>
         </>
+      ) : mode === 'logic' ? (
+        <p className="ws-hint">
+          This question is worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>.
+          Use the buttons for <strong>∧ ∨ ~ → ↔</strong> and brackets. From a keyboard you can
+          also type <code>and</code>, <code>or</code> and <code>not</code>.
+        </p>
       ) : isLogic ? (
         <p className="ws-hint">
           This question is worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>.

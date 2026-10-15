@@ -1235,7 +1235,9 @@ input:checked + .slider::before { transform: translateX(26px); }
 /* A word answer shown back: upright text, not maths italics, and a long
    word wraps rather than pushing the card wider than a phone. */
 .ws-text-shown { font-size: 16px; font-weight: 600; color: var(--ink-1); overflow-wrap: anywhere; min-width: 0; }
-.ws-palette { max-height: 132px; overflow-y: auto; }
+/* Room for three full rows of symbols: the logic strip is three rows on a
+   phone, and a row cut in half reads as broken rather than as "scroll". */
+.ws-palette { max-height: 150px; overflow-y: auto; }
 .ws-sym {
   width: 44px; height: 38px; max-width: 44px; max-height: 38px;
   padding: 0; overflow: hidden; flex: 0 0 auto;
@@ -1399,6 +1401,19 @@ button.card { color: var(--ink-1); background: var(--surface); }
 @media (max-width: 700px) {
   .ws-line.ws-line-plain { grid-template-columns: 20px 1fr 24px; }
 }
+/* The law beside a line of a proof (sql/073). 16px so a phone does not zoom
+   the page when the list is tapped; two lists share a row, or wrap. */
+.ws-law { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.worked-solution select.ws-law-select {
+  flex: 1 1 170px; width: auto; min-width: 0; max-width: 100%;
+  font-size: 16px; padding: 8px 10px;
+}
+.ws-answer .ws-law { margin-top: 8px; }
+.ws-law-more {
+  flex: 0 0 auto; width: auto; padding: 6px 4px; border: 0; background: none;
+  font-size: 13px; font-weight: 600; color: var(--navy); cursor: pointer;
+}
+.ws-law-more:hover:not(:disabled) { background: none; text-decoration: underline; color: var(--navy); }
 /* Instructions keep the paragraphs they were written in. */
 .q-text, .ar-question-text { white-space: pre-line; }
 

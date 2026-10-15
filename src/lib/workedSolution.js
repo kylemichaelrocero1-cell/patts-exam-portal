@@ -39,6 +39,7 @@ import { labelOf, labelProblem, labelsAgree, withoutLabel } from './mathLabel.js
 import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
 import { answerVerdict, isLineByLine, markWorking } from './stepMarking.js';
 import { isTextAnswer, markTextAnswer } from './textAnswer.js';
+import { isLogicMode, markLogic } from './logicProof.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -157,6 +158,14 @@ export function markAnswer(lines, rubric, opts = {}) {
   // A word, not maths (sql/046): compared as the database compares it, with
   // capitals and spaces ignored and no algebra at all.
   if (isTextAnswer(rubric)) return markTextAnswer(lines, rubric);
+  // Propositional logic (sql/073): statements read into trees and proofs
+  // checked law by law, exactly as the database does — no algebra engine.
+  if (isLogicMode(rubric)) {
+    const work = (lines || []).map(l => String(l ?? '')).filter(l => l.trim() !== '');
+    const m = markLogic(work, rubric);
+    return { marks: m.marks, total: m.of, correct: m.correct, blank: work.length === 0,
+             answer: work[work.length - 1] || '', reason: m.reason, lineSteps: m.lineSteps };
+  }
   // A full solution marked step by step (sql/042) is marked exactly as the
   // database marks it — by matching, with no algebra — so a re-mark here
   // can never overturn the database's mark.

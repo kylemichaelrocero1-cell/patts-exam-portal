@@ -1315,7 +1315,7 @@ const [targetSection, setTargetSection] = useState('');
         mode: 'text',
         steps: [{ latex: String(qForm.text.answer).trim(), marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)) }],
         accept: String(qForm.text?.accept || '').split('\n').map(v => v.trim()).filter(Boolean),
-      } : isWorked && editingQ?.work_rubric?.mode === 'lines' ? editingQ.work_rubric
+      } : isWorked && ['lines', 'proof', 'simplify', 'logic'].includes(editingQ?.work_rubric?.mode) ? editingQ.work_rubric
         : isWorked ? {
         steps: (qForm.work?.steps || [])
           .filter(st => String(st?.latex || '').trim())
@@ -4341,6 +4341,19 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 )}
 
+                {qForm.question_type === 'worked_solution' && ['proof', 'simplify', 'logic'].includes(editingQ?.work_rubric?.mode) && (
+                  <div style={{ padding: '12px 14px', marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
+                    <strong>{editingQ.work_rubric.mode === 'proof' ? 'A proof, marked line by line.'
+                      : editingQ.work_rubric.mode === 'simplify' ? 'A result and its law.' : 'A statement in symbols.'}</strong>{' '}
+                    {editingQ.work_rubric.mode === 'proof'
+                      ? 'Students write a statement and pick its law on each line; any correct route counts, and each missing or wrong law costs 1 point.'
+                      : editingQ.work_rubric.mode === 'simplify'
+                        ? 'Students write the simplified result and pick the law: a point for each.'
+                        : 'Any spelling of the connectives counts, but not a different statement that merely means the same.'}
+                    {' '}The answer key came from the paper's loader and is kept exactly as it is when you save
+                    here — the steps below are shown for reference and changes to them are not saved.
+                  </div>
+                )}
                 {qForm.question_type === 'worked_solution' && editingQ?.work_rubric?.mode === 'lines' && (
                   <div style={{ padding: '12px 14px', marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
                     <strong>Marked line by line.</strong> Students write the whole solution and each step

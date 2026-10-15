@@ -43,9 +43,15 @@ export const LOGIC_PALETTE = [
   { label: '\\to', insert: '\\to ', title: 'If … then (conditional)' },
   { label: '\\leftrightarrow', insert: '\\leftrightarrow ', title: 'If and only if (biconditional)' },
   { label: '(\\,)', insert: '(#0)', title: 'Brackets' },
+  { label: '[\\,]', insert: '[#0]', title: 'Square brackets' },
+  // ≡ begins a line of a proof by logical equivalence (sql/073). Proofs are
+  // read into trees, so it, t, c and [ ] need no matching accept list.
+  { label: '\\equiv', insert: '\\equiv ', title: 'Is equivalent to (≡)' },
   { label: 'p', insert: 'p', title: 'p' },
   { label: 'q', insert: 'q', title: 'q' },
   { label: 'r', insert: 'r', title: 'r' },
+  { label: 't', insert: 't', title: 'Tautology (t)' },
+  { label: 'c', insert: 'c', title: 'Contradiction (c)' },
   { label: '\\mathrm{T}', insert: 'T', title: 'True' },
   { label: '\\mathrm{F}', insert: 'F', title: 'False' },
   { label: '=', insert: '=', title: 'Equals' },
@@ -59,11 +65,11 @@ export const PALETTES = {
 /**
  * Which strip a question should open on. Both are always one tap away, so
  * this only has to be right most of the time: a question whose own wording
- * uses a connective (∧ ∨ ¬ ~ → ↔, as plain text or LaTeX) is a logic item.
+ * uses a connective (∧ ∨ ¬ ~ → ↔ ≡, as plain text or LaTeX) is a logic item.
  */
 export function paletteFor(questionText) {
   const t = String(questionText || '');
-  return /[∧∨¬↔]|\\(land|lor|neg|lnot|wedge|vee|leftrightarrow|iff)(?![a-z])/i.test(t)
+  return /[∧∨¬↔≡]|\\(land|lor|neg|lnot|wedge|vee|leftrightarrow|iff|equiv)(?![a-z])/i.test(t)
     ? 'logic' : 'calculus';
 }
 

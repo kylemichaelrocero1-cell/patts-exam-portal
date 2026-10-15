@@ -88,7 +88,7 @@ export default function AnswerReview({ rows }) {
                     <MathStatic latex={r.work_given} />
                   </div>
                 )}
-                {r.work_mode === 'lines' ? (
+                {r.work_mode === 'lines' || r.work_mode === 'proof' ? (
                   // A full solution: every line, and whether it was a step of
                   // the solution. Which step, and the steps themselves, stay
                   // with the server.
@@ -108,7 +108,9 @@ export default function AnswerReview({ rows }) {
                             <span className="ws-step-no">{k + 1}</span>
                             <span style={{ fontSize: 18 }}><MathStatic latex={l} /></span>
                             <span className={`ws-mark ${counted ? 'ws-mark-ok' : 'ws-mark-bad'}`}
-                              title={counted ? 'A step of the solution' : 'Not a step of the solution'}>
+                              title={r.work_mode === 'proof'
+                                ? (counted ? 'This line counted' : 'This line did not count')
+                                : (counted ? 'A step of the solution' : 'Not a step of the solution')}>
                               {counted ? '✓' : '✗'}
                             </span>
                           </li>
@@ -142,7 +144,7 @@ export default function AnswerReview({ rows }) {
                       <div key={k} style={{ fontSize: 17, marginTop: 4 }}><MathStatic latex={l} /></div>
                     ))}
                   </div>
-                ) : r.correct_latex && !(r.is_correct && r.work_mode === 'lines') ? (
+                ) : r.correct_latex && !(r.is_correct && (r.work_mode === 'lines' || r.work_mode === 'proof')) ? (
                   <div className="ws-answer-shown ws-ok" style={{ marginTop: 8 }}>
                     <span className="ws-given-label">Answer</span>
                     {r.work_mode === 'text'

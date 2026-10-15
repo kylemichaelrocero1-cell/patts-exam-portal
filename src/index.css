@@ -1109,13 +1109,18 @@ input:checked + .slider::before { transform: translateX(26px); }
 .ws-mark-bad  { background: var(--danger-bg); color: var(--danger); }
 .ws-mark-busy { color: var(--ink-5); }
 
+/* Every :hover below carries :not(:disabled). The global button:hover:not(:disabled)
+   paints navy and outranks a plain .x:hover, so "+ Add a line", the × and
+   every symbol key turned into navy text on navy when hovered. A phone keeps
+   :hover on whatever was last tapped, so there the key a student had just
+   used went dark and blank. */
 .ws-remove {
   width: 24px; height: 24px; padding: 0;
   display: flex; align-items: center; justify-content: center;
   background: none; border: 1px solid transparent; border-radius: var(--r-sm);
   color: var(--ink-4); font-size: 18px; line-height: 1; cursor: pointer;
 }
-.ws-remove:hover { border-color: var(--danger-bd); color: var(--danger); background: var(--danger-bg); }
+.ws-remove:hover:not(:disabled) { border-color: var(--danger-bd); color: var(--danger); background: var(--danger-bg); }
 
 .ws-actions {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -1127,7 +1132,7 @@ input:checked + .slider::before { transform: translateX(26px); }
   border-radius: var(--r-sm);
   font-size: 13px; font-weight: 600; color: var(--navy); cursor: pointer;
 }
-.ws-add:hover { background: var(--navy-50); border-style: solid; }
+.ws-add:hover:not(:disabled) { background: var(--navy-50); border-style: solid; }
 .ws-count { font-size: 12px; color: var(--ink-4); }
 
 /* The symbol strip. Wraps rather than scrolls, so nothing is hidden off the
@@ -1145,7 +1150,7 @@ input:checked + .slider::before { transform: translateX(26px); }
   background: var(--paper); border: 1px solid var(--line);
   border-radius: 6px; cursor: pointer; font-size: 15px;
 }
-.ws-sym:hover { border-color: var(--navy); background: var(--navy-tint); }
+.ws-sym:hover:not(:disabled) { border-color: var(--navy); background: var(--navy-tint); }
 
 /* Calculus | Logic switch above the symbol strip. */
 .ws-palette-tabs {
@@ -1158,8 +1163,9 @@ input:checked + .slider::before { transform: translateX(26px); }
   background: var(--paper); color: var(--ink-3);
   border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
 }
-.ws-palette-tab:hover { border-color: var(--navy); color: var(--navy); }
-.ws-palette-tab.is-active { background: var(--navy); border-color: var(--navy); color: var(--white); }
+.ws-palette-tab:hover:not(:disabled) { background: var(--paper); border-color: var(--navy); color: var(--navy); }
+.ws-palette-tab.is-active,
+.ws-palette-tab.is-active:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: var(--white); }
 
 .ws-hint {
   margin: 12px 0 0 34px;
@@ -1331,7 +1337,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
   color: var(--ink-1); font-size: 14px; cursor: pointer;
 }
-.wr-sym:hover { border-color: var(--navy); background: var(--navy-tint); color: var(--navy); }
+.wr-sym:hover:not(:disabled) { border-color: var(--navy); background: var(--navy-tint); color: var(--navy); }
 .wr-sym .math-static, .wr-sym .katex { color: inherit; }
 
 .wr-accept {
@@ -1352,11 +1358,12 @@ button.card { color: var(--ink-1); background: var(--surface); }
 }
 .wr-chip.bad { background: var(--danger-bg); border-color: var(--danger-bd); }
 .wr-chip.add { background: var(--paper); border: 1px dashed var(--line); cursor: pointer; }
-.wr-chip.add:hover { border-color: var(--navy); border-style: solid; }
+.wr-chip.add:hover:not(:disabled) { background: var(--paper); border-color: var(--navy); border-style: solid; }
 .wr-chip > button {
   width: 14px; height: 14px; padding: 0; background: none; border: none;
   color: var(--ink-4); font-size: 14px; line-height: 1; cursor: pointer;
 }
+.wr-chip > button:hover:not(:disabled) { background: none; color: var(--danger); box-shadow: none; transform: none; }
 .wr-chip .katex, .wr-chip .math-static { color: inherit; }
 .wr-accept-add { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
 .wr-accept-add .math-field-wrap { flex: 1 1 auto; min-width: 0; }

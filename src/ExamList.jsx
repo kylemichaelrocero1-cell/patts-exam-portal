@@ -454,7 +454,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       {/* Content */}
       <div style={{ maxWidth: '860px', margin: '0 auto', padding: '36px 24px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
-          <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>Available Examinations</h2>
+          <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>{kind === 'seatwork' ? 'Available Seatwork' : 'Available Examinations'}</h2>
           <span style={{ background: 'var(--navy-tint)', color: 'var(--navy)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}>
             {exams.length} open
           </span>
@@ -468,8 +468,8 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         ) : exams.length === 0 ? (
           <div style={{ background: 'var(--white)', padding: '52px 32px', borderRadius: 'var(--r-xl)', textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
-            <p style={{ color: 'var(--text-2)', fontSize: '17px', fontWeight: 600, margin: 0 }}>No open exams at the moment.</p>
-            <p style={{ color: 'var(--text-3)', fontSize: '14px', margin: '8px 0 0' }}>Please wait for your instructor to open an exam.</p>
+            <p style={{ color: 'var(--text-2)', fontSize: '17px', fontWeight: 600, margin: 0 }}>{kind === 'seatwork' ? 'No open seatwork at the moment.' : 'No open exams at the moment.'}</p>
+            <p style={{ color: 'var(--text-3)', fontSize: '14px', margin: '8px 0 0' }}>{kind === 'seatwork' ? 'Please wait for your instructor to open one.' : 'Please wait for your instructor to open an exam.'}</p>
           </div>
         ) : (
           <div style={{ display: 'grid', gap: '16px' }}>

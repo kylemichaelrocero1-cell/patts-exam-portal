@@ -51,14 +51,15 @@ export default function AnswerReview({ rows }) {
             {marksEarned} / {marksTotal} marks
           </span>
         )}
+        {/* Inside the card: on the Summary this review sits on a dark
+            overlay, where a bare line of grey text could not be read. */}
+        {rows.some(r => r.key_hidden) && (
+          <p style={{ flexBasis: '100%', margin: 0, fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.55 }}>
+            Your instructor has kept the answers back for the questions you did not get fully
+            right, so you can work them out yourself on your next attempt.
+          </p>
+        )}
       </div>
-
-      {rows.some(r => r.key_hidden) && (
-        <p style={{ margin: '0 2px 14px', fontSize: 13, color: 'var(--ink-3)', lineHeight: 1.55 }}>
-          Your instructor has kept the answers back for the questions you did not get fully
-          right, so you can work them out yourself on your next attempt.
-        </p>
-      )}
 
       {rows.map((r, i) => {
         const unanswered = isBlank(r);

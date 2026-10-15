@@ -47,7 +47,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       </header>
 
       {/* Tabs */}
-      <div style={{
+      <div className="student-tabs" style={{
         background: 'var(--surface)',
         borderBottom: '1px solid var(--line)',
         display: 'flex',
@@ -105,7 +105,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       )}
 
       {tab === 'summary' && (
-        <div style={{ padding: '32px 24px' }}>
+        <div className="student-main">
           <Suspense fallback={<Loading label="summary" />}>
             <StudentSummary
               student={student}
@@ -117,7 +117,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       )}
 
       {tab === 'lessons' && (
-        <div style={{ padding: '32px 24px' }}>
+        <div className="student-main">
           <Suspense fallback={<Loading label="lessons" />}>
             <StudentLessons student={student} selectedSection={selectedSection} />
           </Suspense>

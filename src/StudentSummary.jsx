@@ -219,7 +219,10 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
           </p>
         </div>
       ) : (
-        <div style={{ display: 'grid', gap: 8, marginBottom: 24 }}>
+        // minmax(0, 1fr): a grid column is otherwise as wide as its longest
+        // unbreakable line, and a long paper title pushed the card — and the
+        // whole page — off the side of a phone.
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginBottom: 24 }}>
           {[...todo, ...upcoming].map(a => {
             const scheduled = availabilityState(a) === 'scheduled';
             return (
@@ -271,7 +274,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                   <tr>
                     <th>Assessment</th>
                     <th style={{ textAlign: 'right' }}>Score</th>
-                    <th style={{ textAlign: 'right' }}>Submitted</th>
+                    <th className="hide-narrow" style={{ textAlign: 'right' }}>Submitted</th>
                     {anyReviewable && <th style={{ textAlign: 'right' }}>Answers</th>}
                   </tr>
                 </thead>
@@ -299,7 +302,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', color: 'var(--ink-4)', fontSize: 12.5 }}>
+                        <td className="hide-narrow" style={{ textAlign: 'right', color: 'var(--ink-4)', fontSize: 12.5 }}>
                           {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString() : '—'}
                         </td>
                         {anyReviewable && (

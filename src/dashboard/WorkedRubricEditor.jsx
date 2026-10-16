@@ -66,7 +66,8 @@ export default function WorkedRubricEditor({ value, onChange, marks: marksProp }
         {[...MATH_PALETTE, ...LOGIC_PALETTE].map(sym => (
           <button key={sym.title} type="button" className="wr-sym" title={sym.title}
                   aria-label={sym.title}
-                  onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}>
+                  onPointerDown={e => e.preventDefault()}
+                  onClick={() => insertIntoFocusedField(sym.insert)}>
             <MathStatic latex={sym.label} ariaLabel={sym.title} />
           </button>
         ))}

@@ -291,11 +291,14 @@ export default function WorkedSolution({
                 className="ws-sym"
                 title={sym.title}
                 aria-label={sym.title}
-                // pointerdown, not mousedown: it covers touch and mouse with
-                // ONE handler, so a phone cannot fire both and insert the symbol
-                // twice. preventDefault stops the button taking focus, which is
-                // what keeps the caret where the student left it.
-                onPointerDown={e => { e.preventDefault(); insertIntoFocusedField(sym.insert); }}
+                // Inserted on click, which a phone fires once for a tap and
+                // not at all for a swipe: on pointerdown, a thumb that landed
+                // on the strip to scroll the page typed that symbol into the
+                // last line used, out of sight. preventDefault on pointerdown
+                // stops the button taking focus, which keeps the caret where
+                // the student left it.
+                onPointerDown={e => e.preventDefault()}
+                onClick={() => insertIntoFocusedField(sym.insert)}
               >
                 <MathStatic latex={sym.label} ariaLabel={sym.title} />
               </button>

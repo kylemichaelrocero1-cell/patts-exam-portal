@@ -13,7 +13,11 @@
 //     leaves every other item as it was; the review shows the lines and the
 //     ticks; the exam screen learns each item's mode and nothing of its key;
 //   * marking a sitting stays far inside the 20 s a request is allowed;
-//   * 073 runs twice, and its VERIFY row is all true.
+//   * 073 runs twice, and its VERIFY row is all true;
+//   * 076: a step that takes two laws is a step however often each is used,
+//     so naming one of them costs 1, not the rest of the proof; a line
+//     written as an equation (≡ or =) is the statement it ends on; 077
+//     re-marks what was submitted before, raise-only.
 //
 // Look-alike items only — never a real paper's.
 //
@@ -87,6 +91,16 @@ ck('073 applies, twice', true);
   const [v] = await q(M073.slice(M073.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
   ck('073\'s VERIFY row is all true', Object.values(v).every(b => b === true), JSON.stringify(v));
 }
+console.log('\n=== 076 applies ===');
+const M076 = fs.readFileSync(P + '/sql/076_two_law_steps_and_equations.sql', 'utf8');
+await x(M076);
+await x(M076);
+ck('076 applies, twice', true);
+{
+  const [v] = await q(M076.slice(M076.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  const flags = Object.entries(v).filter(([k]) => k !== 'sittings_with_logic_items');
+  ck('076\'s VERIFY row is all true', flags.every(([, b]) => b === true), JSON.stringify(v));
+}
 {
   const r = await asAnon(`SELECT public.logic_mark('[]'::jsonb, '{}'::jsonb)`);
   ck('the proof marker is not callable from a browser', !r.ok, JSON.stringify(r.rows));
@@ -107,6 +121,10 @@ const ALIKE = [
     'r\\Longleftrightarrow s']],
   ['r\\lor t', ['r\\vee T', 'r\\lor\\top', 'r\\lor\\mathrm{T}', 'r\\lor\\text{t}', 'r ∨ t']],
   ['s\\land c', ['s\\wedge C', 's\\land F', 's\\land\\bot', 's\\land\\mathrm{F}', 's\\land\\operatorname{c}']],
+  // A line written as an equation is the statement it ends on (076).
+  ['r\\land s', ['s\\land r\\equiv r\\land s', 's\\land r=r\\land s', '(r\\land s)\\lor c\\equiv r\\land s', '≡ s ∧ r ≡ r ∧ s',
+    '\\equiv r\\land s\\equiv', 'r\\land s=', '\\neg\\neg r\\land s=r\\land s\\equiv r\\land s']],
+  ['t', ['(s\\land u)\\lor\\neg(s\\land u)\\equiv t', '\\sim u\\lor u=T', '\\equiv u\\lor\\neg u\\equiv\\top']],
 ];
 for (const [base, forms] of ALIKE) {
   const want = parseLogic(base);
@@ -128,7 +146,9 @@ for (const [base, forms] of ALIKE) {
 }
 const NONSENSE = ['', '   ', 'r s', 'rs', 'r\\land', '\\land r', '(r\\lor s', 'r\\lor s)', '()', 'r()', '1', 'r\\lor 0',
   'x^2', '\\frac{r}{s}', 'r=s=', '\\placeholder{}', 'r\\lor\\placeholder{}', 'r \\equiv s', 'r\\neg s', 'r\\leftarrow s',
-  '\\neg', '((r))\\land', 'r'.repeat(1) + '\\land r'.repeat(40)];
+  '\\neg', '((r))\\land', 'r'.repeat(1) + '\\land r'.repeat(40),
+  // An equation whose sides are not equivalent is a false line (076).
+  'r\\lor\\neg r\\equiv c', 'r=s', 'r\\land s\\equiv r\\lor s', 'r\\equiv\\equiv r', '\\equiv', '='];
 {
   let agree = 0, bad = null;
   for (const n of NONSENSE) {
@@ -482,6 +502,111 @@ console.log('\n=== the review ===');
   ck('a proof comes back with its mode, every line and its ticks', rv[2]?.work_mode === 'proof' && rv[2]?.lines.length === 5
     && J(rv[2]?.line_steps) === J([1, null, 1, null, 1]) && Number(rv[2]?.earned) === 3, J(rv[2]));
   ck('…and the reason', /missing/.test(rv[2]?.reason || ''));
+}
+
+console.log('\n=== 076: a step that takes two laws, and lines written as equations ===');
+{
+  // A look-alike of the step a student took: Associative and Commutative
+  // in one line, named Associative only.
+  const PD = { mode: 'proof', given: '(s\\land u)\\land\\neg s', steps: [{ latex: 'c', marks: 5 }], marks: 5, key_steps: 4 };
+  const route = laws2 => [L('(s\\land\\sim s)\\land u', ...laws2), L('c\\land u', 'Complement'), L('c', 'Domination')];
+  const D = [
+    ['two laws in one line, both named', PD, route(['Associative', 'Commutative']), 5, 'Proved, with a law for every step.'],
+    ['…one of the two named', PD, route(['Associative']), 4,
+      'Proved, but 1 law is missing or wrong. The law on line 1 is missing or does not give that step.'],
+    ['…neither named', PD, route([]), 3,
+      'Proved, but 2 laws are missing or wrong. The law on line 1 is missing or does not give that step.'],
+    ['…a wrong law named', PD, route(['Distributive']), 3,
+      'Proved, but 2 laws are missing or wrong. The law on line 1 is missing or does not give that step.'],
+    ['three laws in one line is still a leap', PD, [L('(s\\land u)\\land\\neg s', 'Given'), L('c\\land u', 'Complement')], 0,
+      'Line 2 does not follow from the line before it by one or two laws: write each step on its own line.'],
+    ['a proof line written as an equation', PD, [L('(s\\land u)\\land\\neg s\\equiv(s\\land\\sim s)\\land u', 'Associative', 'Commutative'),
+      L('=c\\land u', 'Complement'), L('\\equiv c', 'Domination')], 5, 'Proved, with a law for every step.'],
+    ['a false equation stops the work', PD, [L('(s\\land\\sim s)\\land u', 'Associative', 'Commutative'), L('c\\land u\\equiv t', 'Complement')], 1,
+      'Line 2 could not be read as a statement, so the work stops counting there.'],
+    ['simplify written as the whole equation, ≡', SIMP, [L('(r\\land s)\\lor c\\equiv r\\land s', 'Identity')], 2, 'Correct result and law.'],
+    ['simplify written as the whole equation, =', SIMP, [L('(r\\land s)\\lor c=r\\land s', 'Identity')], 2, 'Correct result and law.'],
+    ['simplify with a false equation', SIMP, [L('(r\\land s)\\lor c\\equiv c', 'Identity')], 1,
+      'The law is right; the result could not be read as a statement.'],
+    ['simplify with a stray connective after it', SIMP, [L('r\\land s\\leftrightarrow', 'Identity')], 1,
+      'The law is right; the result could not be read as a statement.'],
+    ['a one-statement answer may be written as an equation', ONE, ['r\\lor\\neg s=s\\to r'], 1, 'Correct answer.'],
+  ];
+  for (const [name, rubric, lines, want, reason] of D) {
+    const js = markLogic(lines, rubric);
+    const [{ m }] = await q(`SELECT public.logic_mark($1::jsonb, $2::jsonb) AS m`, [J(lines), J(rubric)]);
+    ck(`${name}: ${want}/${rubric.marks}`, js.marks === want && js.reason === reason
+      && Number(m.marks) === want && m.reason === reason && J(m.line_steps) === J(js.lineSteps),
+      `js ${js.marks} "${js.reason}" ${J(js.lineSteps)} | sql ${m.marks} "${m.reason}" ${J(m.line_steps)}`);
+  }
+
+  // The slowest new search: every line a real step that takes two laws,
+  // naming a wrong one, so each tries every law beside it and then pairs.
+  const A = '\\neg(\\neg((r\\lor s)\\lor(u\\lor r))\\land((s\\lor u)\\lor(r\\lor s)))';
+  const B = '((r\\lor s)\\lor(u\\lor r))\\lor\\neg((s\\lor u)\\lor(r\\lor s))';
+  ck('the two-law statements are inside the length limit', parseLogic(A) !== null && parseLogic(B) !== null);
+  const SLOW = { mode: 'proof', given: A, steps: [{ latex: 'r', marks: 6 }], marks: 6, key_steps: 6 };
+  const slow = Array.from({ length: 40 }, (_, i) => joinLine(i % 2 ? A : B, ['Idempotent']));
+  const t0 = performance.now();
+  const sj = markLogic(slow, SLOW);
+  const jsMs = performance.now() - t0;
+  const t1 = performance.now();
+  const [{ m: ss }] = await q(`SELECT public.logic_mark($1::jsonb, $2::jsonb) AS m`, [J(slow), J(SLOW)]);
+  const sqlMs = performance.now() - t1;
+  ck(`40 two-law lines with a wrong law: ${Math.round(sqlMs)} ms in the database, ${Math.round(jsMs)} ms in JS, and they agree`,
+    sqlMs < 8000 && Number(ss.marks) === sj.marks && ss.reason === sj.reason, `${ss.reason} | ${sj.reason}`);
+
+  // …and the widest lines only the wider search finds a step: regrouping
+  // and reordering wide sides (Associative, Commutative, Associative), the
+  // law named wrong, forty times.
+  const P1 = '(\\neg r\\land s)', P2 = '(u\\lor\\neg s)', P3 = '(r\\to u)';
+  const X = `(${P1}\\lor ${P2})\\lor ${P3}`, Y = `(${P1}\\lor ${P3})\\lor ${P2}`;
+  ck('the regrouped statements are inside the length limit, and three uses apart', parseLogic(X) !== null && parseLogic(Y) !== null
+    && !stepFollows(parseLogic(X), parseLogic(Y), STEP_LAWS, 2) && stepFollows(parseLogic(X), parseLogic(Y), ['associative', 'commutative'], 3));
+  const REGROUP = { mode: 'proof', given: X, steps: [{ latex: 'r', marks: 6 }], marks: 6, key_steps: 6 };
+  const regroup = Array.from({ length: 40 }, (_, i) => joinLine(i % 2 ? X : Y, ['Idempotent']));
+  const t2 = performance.now();
+  const rj = markLogic(regroup, REGROUP);
+  const rjMs = performance.now() - t2;
+  const t3 = performance.now();
+  const [{ m: rs }] = await q(`SELECT public.logic_mark($1::jsonb, $2::jsonb) AS m`, [J(regroup), J(REGROUP)]);
+  const rsMs = performance.now() - t3;
+  ck(`40 regrouping lines with a wrong law: ${Math.round(rsMs)} ms in the database, ${Math.round(rjMs)} ms in JS, and they agree`,
+    rsMs < 8000 && Number(rs.marks) === rj.marks && rs.reason === rj.reason, `${rs.reason} | ${rj.reason}`);
+
+  // 077 marks again what was submitted before 076, raise-only.
+  const M077 = fs.readFileSync(P + '/sql/077_remark_in_batches_after_076.sql', 'utf8');
+  const P76 = '3d0f6c2a-8e41-4b7a-9c55-1f2e3d4c5b6a';
+  await x(`INSERT INTO public.assessments (id,kind,title,target_section,instructor_id,is_open,duration_minutes,allow_retakes,show_answers)
+           VALUES ('${P76}','seatwork','P 76','AERO 101','${INS}',true,60,true,true);`);
+  await q(`INSERT INTO public.questions (exam_id, assessment_id, question_number, question_text, question_type, choices, correct_answer, marks,
+             work_given, work_variable, work_rubric)
+           VALUES ($1,$1,1,'Prove it.','worked_solution','[]'::jsonb,NULL,5,'(s\\land u)\\land\\neg s\\equiv c',NULL,$2::jsonb)`, [P76, J(PD)]);
+  const q76 = (await q(`SELECT id FROM public.questions WHERE exam_id = $1`, [P76]))[0].id;
+  const sit76 = async lines => {
+    await x(`DELETE FROM public.live_sessions WHERE student_id='${STU}'`);
+    await q(`INSERT INTO public.live_sessions (student_id, exam_id, assessment_id, student_name, status, work_answers_json)
+             VALUES ($1,$2,$2,'S One','active',$3::jsonb)`, [STU, P76, J({ [q76]: { lines } })]);
+    return (await q(`SELECT public.submit_assessment($1,$2,'{}'::jsonb,60,0,'[]'::jsonb) AS r`, [STU, P76]))[0].r;
+  };
+  const short = (await sit76(route(['Associative']))).attempt_no;
+  const full = (await sit76(route(['Associative', 'Commutative']))).attempt_no;
+  // As they stood under 073: 0 and 5, marked before 076 went live.
+  await q(`UPDATE public.review_attempts SET work_marks = CASE attempt_no WHEN $2::int THEN 0 ELSE 5 END,
+             work_marked_at = '2000-01-01' WHERE assessment_id = $1`, [P76, short]);
+  const left = async () => { const c = (await q(M077.slice(M077.lastIndexOf('SELECT\n'))))[0]; return Number(c.graded_left) + Number(c.practice_left); };
+  ck('077 has both sittings of the logic paper to re-mark', (await left()) === 2, String(await left()));
+  await x(M077);
+  const marks = Object.fromEntries((await q(`SELECT attempt_no, work_marks FROM public.review_attempts WHERE assessment_id = $1`, [P76]))
+    .map(r => [r.attempt_no, Number(r.work_marks)]));
+  ck('…raises the one short a law to 4, leaves the full one at 5, and has none left', marks[short] === 4 && marks[full] === 5
+    && (await left()) === 0, J(marks));
+  await q(`UPDATE public.review_attempts SET work_marks = 5, work_marked_at = '2000-01-01' WHERE assessment_id = $1 AND attempt_no = $2`, [P76, short]);
+  let refused = '';
+  try { await x(M077); } catch (e) { refused = e.message; await x(`ROLLBACK`); }
+  ck('…and refuses a run that would lower a mark, changing nothing', /Would go DOWN from 5 to 4/.test(refused)
+    && Number((await q(`SELECT work_marks FROM public.review_attempts WHERE assessment_id = $1 AND attempt_no = $2`, [P76, short]))[0].work_marks) === 5,
+    refused);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

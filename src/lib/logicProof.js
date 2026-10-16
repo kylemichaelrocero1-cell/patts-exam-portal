@@ -23,7 +23,8 @@
 //                  together; each missing or wrong law costs 1 (a
 //                  line that takes two laws and names neither costs 2);
 //                * a line no one or two laws can give from the one before
-//                  skips working, and ends the work that counts too.
+//                  (each used as often as it takes) skips working, and
+//                  ends the work that counts too.
 //              Reaching the target: full marks less 1 for each missing or
 //              wrong law. Not reaching it: 1 for each step with its law,
 //              never more than the key's steps less one.
@@ -132,17 +133,22 @@ const SPELLINGS = [
 
 /**
  * The statement with every spelling reduced to one character each —
- * & | ! > = ( ) for the connectives and brackets, ⊤ ⊥ for t and c — and
- * nothing else but letters; null if anything else is left. A leading ≡ is
- * the line's own, not the statement's, and is dropped.
+ * & | ! > = ( ) for the connectives and brackets, ⊤ ⊥ for t and c, ≡ for
+ * "is equivalent to" — and nothing else but letters; null if anything else
+ * is left. A leading ≡ is the line's own, not the statement's, and is
+ * dropped. A plain = means ≡, not ↔: a student who writes
+ * (s ∧ u) ∨ c = s ∧ u means the two are equivalent, and ↔ has its own
+ * button.
  */
 export function logicTokens(latex) {
   let s = String(latex ?? '');
   s = s.replace(/\\(?:text|mathrm|mathit|mathbf|mathsf|mathtt|textrm|textit|operatorname)\s*\{([^{}]*)\}/g, '$1');
   s = s.replace(/^[\s{}]*(?:\\equiv|≡)/, '');
+  // Before the spellings, which write = for ↔.
+  s = s.split('\\equiv').join('≡').split('=').join('≡');
   for (const [from, to] of SPELLINGS) s = s.split(from).join(to);
   s = s.replace(/[\s{}]/g, '');
-  if (s === '' || !/^[A-Za-z&|!>=()⊤⊥]+$/.test(s)) return null;
+  if (s === '' || !/^[A-Za-z&|!>=()⊤⊥≡]+$/.test(s)) return null;
   return s;
 }
 
@@ -161,10 +167,27 @@ const NODE = { '&': 'and', '|': 'or', '>': 'imp', '=': 'iff' };
  * ['not', a], ['and', a, b], ['or', a, b], ['imp', a, b], ['iff', a, b].
  * ¬ binds tightest, then ∧, ∨, → and ↔; ∧ and ∨ group from the left, → and
  * ↔ from the right. t and T are true, c, C and F are false.
+ *
+ * A line written as an equation — (s ∧ u) ∨ c ≡ s ∧ u, or with = — is
+ * the statement it ends on, when every side of it is equivalent to the
+ * others; a ≡ at either end is dropped. Sides that are not equivalent are a
+ * false line, and it is not read.
  */
 export function parseLogic(latex) {
   const s = logicTokens(latex);
   if (s === null || s.length > MAX_TOKENS) return null;
+  const sides = s.split('≡');
+  while (sides.length > 1 && sides[0] === '') sides.shift();
+  while (sides.length > 1 && sides[sides.length - 1] === '') sides.pop();
+  const trees = sides.map(parseTokens);
+  if (trees.some(t => t === null)) return null;
+  const last = trees[trees.length - 1];
+  return trees.every(t => t === last || logicEquivalent(t, last) === true) ? last : null;
+}
+
+// One side: tokens with no ≡ in them, read by precedence.
+function parseTokens(s) {
+  if (s === '') return null;
   const out = [], ops = [];
   let operand = true;
   const apply = op => {
@@ -413,15 +436,30 @@ function lawsGive(a, b, keys) {
   return ks.length > 0 && stepFollows(a, b, ks, 3);
 }
 
-/** Could any one or two laws give `b` from `a` — a step, not a leap? */
-function isAStep(a, b) {
-  return stepFollows(a, b, STEP_LAWS, 2);
-}
-
-/** How many laws a step is short of (1 or 2), for a step isAStep() allows. */
-function lawsShort(a, b, keys) {
+/**
+ * How many laws a step is short of when those named do not give it: 1 when
+ * one more law beside them would, 2 when it takes two others, and null when
+ * no one or two laws give it — a leap, not a step. A law may be used at
+ * several places and up to three times, as when the laws named are enough,
+ * so (s ∧ u) ∧ ¬s to (s ∧ ¬s) ∧ u — Associative, Commutative, Associative —
+ * is a step needing two laws, and naming only Associative costs 1.
+ *
+ * A line two uses of any law give is costed as 073 costed it; only a line
+ * that 073 called a leap is searched further, so no line marks slower.
+ * `costed` false asks only whether it is a step (any number but null).
+ */
+function lawsShort(a, b, keys, costed = true) {
   const named = keys.filter(k => k && k !== 'given');
-  return STEP_LAWS.some(k => stepFollows(a, b, [...named, k], 2)) ? 1 : 2;
+  const oneMore = depth => STEP_LAWS.some(k => stepFollows(a, b, [...named, k], depth));
+  // A line that only goes back to an earlier one costs nothing: is it a step?
+  if (stepFollows(a, b, STEP_LAWS, 2)) return !costed || oneMore(2) ? 1 : 2;
+  if (oneMore(3)) return 1;
+  for (let i = 0; i < STEP_LAWS.length; i++) {
+    for (let j = i + 1; j < STEP_LAWS.length; j++) {
+      if (stepFollows(a, b, [STEP_LAWS[i], STEP_LAWS[j]], 3)) return 2;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------
@@ -524,12 +562,12 @@ export function markLogic(lines, rubric) {
     }
     const repeat = earlier.includes(key(t));
     const keys = laws.map(lawKey);
-    if (lawsGive(prev, t, keys)) {
+    const short = lawsGive(prev, t, keys) ? 0 : lawsShort(prev, t, keys, !repeat);
+    if (short === 0) {
       if (!repeat) { right++; ls[i] = 1; }
-    } else if (isAStep(prev, t)) {
-      // A step needing two laws costs 1 for each one not named: 1 when one
-      // more law beside those named would give it, 2 when it takes two.
-      if (!repeat) { wrongAt.push(n); missing += lawsShort(prev, t, keys); }
+    } else if (short !== null) {
+      // A step needing two laws costs 1 for each one not named.
+      if (!repeat) { wrongAt.push(n); missing += short; }
     } else {
       stop = `Line ${n} does not follow from the line before it by one or two laws: write each step on its own line.`;
       break;

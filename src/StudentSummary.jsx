@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
 import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import {
-  availabilityState, formatWindow, KIND_LABEL,
+  availabilityState, formatWindow,
 } from './lib/assessments';
+import { paperNoun } from './lib/paperNoun.js';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
 import { useAnswerReview } from './lib/useAnswerReview';
@@ -218,7 +219,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                   background: a.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
                   color: a.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
                 }}>
-                  {KIND_LABEL[a.kind] || 'Exam'}
+                  {paperNoun(a)}
                 </span>
                 {/* The colour is explicit because this whole card is a
                     <button>, and the global button rule paints text white for

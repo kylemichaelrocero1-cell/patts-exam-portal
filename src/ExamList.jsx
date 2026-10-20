@@ -452,7 +452,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                 </button>
                 <button type="submit" disabled={!enteredPassword || isVerifyingPassword}
                   style={{ flex: 1, background: enteredPassword && !isVerifyingPassword ? 'var(--navy)' : 'var(--text-4)' }}>
-                  {isVerifyingPassword ? 'Verifying…' : 'Enter Exam'}
+                  {isVerifyingPassword ? 'Verifying…' : `Enter ${paperNoun(pendingExam)}`}
                 </button>
               </div>
             </div>
@@ -664,7 +664,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                     ) : isResumable ? (
                       <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
                         style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
-                        {isCheckingSession ? 'Checking…' : '↩ Resume Exam'}
+                        {isCheckingSession ? 'Checking…' : `↩ Resume ${paperNoun(exam)}`}
                       </button>
                     ) : (
                       <div className="exam-card-btns">

@@ -5,7 +5,7 @@
 //
 //   npm run test:student-home
 
-import { makeHomeReads, HOME_MAX_AGE_MS } from '../studentHomeCore.js';
+import { makeHomeReads, papersToReview, HOME_MAX_AGE_MS } from '../studentHomeCore.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -37,12 +37,14 @@ function setup({ answer, open } = {}) {
   const db = fakeDb(answer);
   let clock = 1_000_000;
   let openCalls = 0;
+  const paperCalls = [];
   const reads = makeHomeReads({
     from: db.from,
     selectOpenAssessments: async () => { openCalls++; return open ? open() : [{ id: 'a1' }]; },
+    selectPapers: async (ids) => { paperCalls.push(ids); return ids.map(id => ({ id })); },
     now: () => clock,
   });
-  return { reads, db, tick: (ms) => { clock += ms; }, openCalls: () => openCalls };
+  return { reads, db, tick: (ms) => { clock += ms; }, openCalls: () => openCalls, paperCalls };
 }
 
 console.log('=== one copy, shared ===');
@@ -151,6 +153,56 @@ console.log('\n=== what is asked for ===');
     /in\(\["status",\["active","locked"\]\]\)/.test(q.live_sessions) && /exam_set/.test(q.live_sessions), q.live_sessions);
   check('lessons: published only', /eq\(\["is_published",true\]\)/.test(q.lessons), q.lessons);
   check('lesson progress: this student', /eq\(\["student_id","s1"\]\)/.test(q.lesson_progress), q.lesson_progress);
+}
+
+console.log('\n=== the papers behind the results ===');
+{
+  const { reads, paperCalls } = setup();
+  const a = await reads.papers(['e2', 'e1', 'e2', null]);
+  const b = await reads.papers(['e1', 'e2']);
+  check('the Summary and an exam list asking about the same results share one read',
+    paperCalls.length === 1, `${paperCalls.length} reads`);
+  check('asked once per paper, in a stable order', JSON.stringify(paperCalls[0]) === '["e1","e2"]', JSON.stringify(paperCalls[0]));
+  check('both get the papers', a === b && a.data.length === 2);
+  await reads.papers(['e1', 'e2', 'e3']);
+  check('a new result is a new read', paperCalls.length === 2);
+  const none = await reads.papers([]);
+  check('no results asks nothing', paperCalls.length === 2 && none.data.length === 0 && none.error === null);
+  reads.forget();
+  await reads.papers(['e1', 'e2']);
+  check('forget(): read again after a paper', paperCalls.length === 3);
+}
+
+console.log('\n=== what goes under "Ready to review" ===');
+{
+  const paper = (id, extra = {}) => ({
+    id, kind: 'exam', target_section: 'BSAMT 1A, BSAMT 1B', show_answers: true,
+    is_open: false, archived_at: null, created_at: '2026-10-01T00:00:00Z', ...extra,
+  });
+  const papers = [
+    paper('closed'),
+    paper('archived', { archived_at: '2026-10-10T00:00:00Z', created_at: '2026-10-05T00:00:00Z' }),
+    paper('review-off', { show_answers: false }),
+    paper('never-sat'),
+    paper('seatwork', { kind: 'seatwork' }),
+    paper('other-section', { target_section: 'BSAMT 2A' }),
+    paper('still-open', { is_open: true }),
+    paper('practice-only'),
+  ];
+  const sat = new Set(['closed', 'archived', 'review-off', 'seatwork', 'other-section', 'still-open', 'practice-only']);
+  const ids = papersToReview(papers, { sat, onList: new Set(['still-open']), kind: 'exam', section: 'BSAMT 1B' }).map(p => p.id);
+  check('a closed paper with review on is offered', ids.includes('closed'), ids.join());
+  check('so is an archived one', ids.includes('archived'), ids.join());
+  check('a paper sat only as practice counts as sat', ids.includes('practice-only'), ids.join());
+  check('review switched off: not offered', !ids.includes('review-off'));
+  check('never sat: not offered', !ids.includes('never-sat'));
+  check('another tab\'s kind: not offered here', !ids.includes('seatwork'));
+  check('another section: not offered', !ids.includes('other-section'));
+  check('a paper still on the open list is not listed twice', !ids.includes('still-open'));
+  check('newest first', ids[0] === 'archived', ids.join());
+  const sw = papersToReview(papers, { sat, kind: 'seatwork', section: 'BSAMT 1A' }).map(p => p.id);
+  check('the Seatwork tab gets its own', sw.length === 1 && sw[0] === 'seatwork', sw.join());
+  check('a missing paper list is empty, not a crash', papersToReview(null, { sat, section: 'x' }).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

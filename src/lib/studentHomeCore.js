@@ -29,9 +29,13 @@ export const HOME_LIVE_COLUMNS = 'exam_id, exam_set, answers_count, status, crea
 /**
  * from(table)             — a PostgREST query builder for that table.
  * selectOpenAssessments() — a promise of the open papers; may throw.
+ * selectPapers(ids)       — a promise of those papers, open or not; may throw.
  * Every read resolves to { data, error } and never rejects.
  */
-export function makeHomeReads({ from, selectOpenAssessments, now = Date.now, maxAgeMs = HOME_MAX_AGE_MS }) {
+export function makeHomeReads({
+  from, selectOpenAssessments, selectPapers = async () => [],
+  now = Date.now, maxAgeMs = HOME_MAX_AGE_MS,
+}) {
   const copies = new Map();   // key -> { at, promise }
   const claimed = new Set();
 
@@ -53,6 +57,17 @@ export function makeHomeReads({ from, selectOpenAssessments, now = Date.now, max
   return {
     openAssessments: ({ fresh = false } = {}) =>
       remember('open-assessments', async () => ({ data: await selectOpenAssessments(), error: null }), fresh),
+
+    // The papers behind a student's own results, closed and archived ones
+    // included: their titles, and whether the instructor has switched answer
+    // review on. Keyed by the ids, so the Summary and the exam lists asking
+    // about the same results share one read.
+    papers: (ids, { fresh = false } = {}) => {
+      const list = [...new Set((ids || []).filter(Boolean))].sort();
+      if (list.length === 0) return Promise.resolve({ data: [], error: null });
+      return remember(`papers:${list.join(',')}`,
+        async () => ({ data: await selectPapers(list), error: null }), fresh);
+    },
 
     results: (studentId, { fresh = false } = {}) =>
       remember(`results:${studentId}`, () =>
@@ -94,4 +109,20 @@ export function makeHomeReads({ from, selectOpenAssessments, now = Date.now, max
       else copies.delete(key);
     },
   };
+}
+
+/**
+ * The papers an exam list offers for review once they are off its open list:
+ * sat by this student (graded or practice), answer review switched on, and
+ * this tab's kind and section. Closed and archived papers are the point —
+ * review is its own switch, and an instructor usually closes a paper before
+ * opening the answers. The server decides whether the answers are released
+ * (get_answer_review); this only decides where the button is. Newest first.
+ */
+export function papersToReview(papers, { sat, onList = new Set(), kind = null, section }) {
+  return (papers || [])
+    .filter(p => p?.show_answers && sat.has(p.id) && !onList.has(p.id))
+    .filter(p => !kind || (p.kind || 'exam') === kind)
+    .filter(p => (p.target_section || '').split(',').map(s => s.trim()).includes(section))
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 }

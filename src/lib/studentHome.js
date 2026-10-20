@@ -8,6 +8,7 @@ export const homeReads = makeHomeReads({
   from: (table) => supabase.from(table),
   selectOpenAssessments: () =>
     selectAssessments(q => q.eq('is_open', true).order('created_at', { ascending: false })),
+  selectPapers: (ids) => selectAssessments(q => q.in('id', ids)),
 });
 
 // Called when a student leaves a paper and when anyone logs out.

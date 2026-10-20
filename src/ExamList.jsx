@@ -11,12 +11,19 @@ import {
   readinessKey as gateReadinessKey,
 } from './lib/examGateKeys';
 import ExamReadinessModal from './components/ExamReadinessModal';
+import AnswerReviewOverlay from './components/AnswerReviewOverlay';
+import Icon from './components/Icon';
 import { homeReads } from './lib/studentHome';
+import { papersToReview } from './lib/studentHomeCore';
+import { useAnswerReview } from './lib/useAnswerReview';
 import { combinedScore } from './lib/workedShape.js';
 import { scoreFraction } from './lib/resultsStats.js';
 
 // What the realtime listener asks for: no spinner, and past the shared copy.
 const LIVE_REFRESH = { silent: true, fresh: true };
+
+// "Ready to review" opens on the newest few; the rest are one click away.
+const REVIEW_RECENT = 5;
 
 export default function ExamList({ embedded = false, kind = null, student, selectedSection, onStartExam, onLogout }) {
   const [exams, setExams] = useState([]);
@@ -26,6 +33,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
+  // Papers this student has sat, gone from the open list, with answer review
+  // switched on — closed and archived ones included.
+  const [toReview, setToReview] = useState([]);
+  const [showAllReview, setShowAllReview] = useState(false);
+  const { review, busy: reviewBusy, open: openReview, close: closeReview } = useAnswerReview(student.id);
 
   // Password gate state
   const [pendingExam, setPendingExam] = useState(null);
@@ -186,8 +198,9 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
       if (examsRes.error) throw examsRes.error;
 
+      let filtered = [];
       if (examsRes.data) {
-        const filtered = examsRes.data.filter(exam => {
+        filtered = examsRes.data.filter(exam => {
           if (!exam.target_section) return false;
           const sections = exam.target_section.split(',').map(s => s.trim());
           if (!sections.includes(selectedSection)) return false;
@@ -212,6 +225,24 @@ export default function ExamList({ embedded = false, kind = null, student, selec
           (byAssessment[a.assessment_id] = byAssessment[a.assessment_id] || []).push(a);
         });
         setAttempts(byAssessment);
+      }
+
+      // Closing or archiving a paper takes it off the list above, but not out
+      // of review: that is the instructor's separate switch. So the papers
+      // behind this student's own results are read too — the same shared copy
+      // the Summary reads, so switching tabs costs nothing. Only a successful
+      // read replaces the list; a failure leaves the papers above working.
+      const sat = new Set([
+        ...(resultsRes.data || []).map(r => r.exam_id),
+        ...(attemptsRes.data || []).map(a => a.assessment_id),
+      ]);
+      const papersRes = await homeReads.papers([...sat], { fresh });
+      if (papersRes.error) {
+        console.error('Could not load papers to review:', papersRes.error.message);
+      } else {
+        setToReview(papersToReview(papersRes.data, {
+          sat, onList: new Set(filtered.map(e => e.id)), kind, section: selectedSection,
+        }));
       }
 
       if (liveRes.data) {
@@ -617,6 +648,17 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           ✅ Submitted
                         </span>
                         <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: '6px', marginBottom: 0 }}>Responses recorded.</p>
+                        {exam.show_answers && (
+                          <button
+                            className="btn ghost sm"
+                            style={{ width: 'auto', marginTop: 8 }}
+                            disabled={reviewBusy === exam.id}
+                            onClick={() => openReview(exam.id, exam.title)}
+                          >
+                            <Icon name="eye" size={13} />
+                            {reviewBusy === exam.id ? 'Loading…' : 'Review answers'}
+                          </button>
+                        )}
                       </div>
                     ) : isResumable ? (
                       <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
@@ -642,7 +684,66 @@ export default function ExamList({ embedded = false, kind = null, student, selec
             })}
           </div>
         )}
+
+        {/* Ready to review: sat, then closed or archived, with the answers
+            opened up. Below the open papers, because those are what a student
+            arriving here mostly needs. */}
+        {!fetchError && toReview.length > 0 && (
+          <div style={{ marginTop: 36 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: 6 }}>
+              <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '17px', fontWeight: 700 }}>Ready to review</h2>
+              <span style={{ background: 'var(--surface-2)', color: 'var(--text-3)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}>
+                {toReview.length}
+              </span>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 14px' }}>
+              Closed, but your instructor has opened the answers. Your score is on the Summary tab.
+            </p>
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {(showAllReview ? toReview : toReview.slice(0, REVIEW_RECENT)).map(p => (
+                <div key={p.id} className="exam-card" style={{
+                  background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--s-sm)',
+                  border: '1px solid var(--border)', borderLeft: '5px solid var(--success)', padding: '16px 22px',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h3 style={{ margin: '0 0 6px', color: 'var(--navy)', fontSize: '16px', fontWeight: 700, overflowWrap: 'anywhere' }}>{p.title}</h3>
+                    <span style={{
+                      background: p.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
+                      color: p.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
+                      border: `1px solid ${p.kind === 'seatwork' ? 'var(--navy-100)' : 'var(--gold-100)'}`,
+                      padding: '2px 10px', borderRadius: 'var(--r-full)',
+                      fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                    }}>
+                      {KIND_LABEL[p.kind] || 'Exam'}
+                    </span>
+                  </div>
+                  <div className="exam-card-actions">
+                    <button
+                      className="btn ghost sm"
+                      style={{ width: '100%' }}
+                      disabled={reviewBusy === p.id}
+                      onClick={() => openReview(p.id, p.title)}
+                    >
+                      <Icon name="eye" size={13} />
+                      {reviewBusy === p.id ? 'Loading…' : 'Review answers'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {toReview.length > REVIEW_RECENT && (
+              <button
+                className="btn ghost sm"
+                onClick={() => setShowAllReview(v => !v)}
+                style={{ width: 'auto', marginTop: 10 }}
+              >
+                {showAllReview ? 'Show recent only' : `Show all ${toReview.length}`}
+              </button>
+            )}
+          </div>
+        )}
       </div>
+      <AnswerReviewOverlay review={review} onClose={closeReview} />
       <p style={{ textAlign: 'center', margin: '0 0 14px', fontSize: '10.5px', color: 'var(--text-4)', letterSpacing: '.14em', fontWeight: 700 }}>KMR</p>
     </div>
   );

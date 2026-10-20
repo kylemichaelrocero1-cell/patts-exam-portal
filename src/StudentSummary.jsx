@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
-import AnswerReview from './components/AnswerReview';
+import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import {
-  selectAssessments, availabilityState, formatWindow, KIND_LABEL,
+  availabilityState, formatWindow, KIND_LABEL,
 } from './lib/assessments';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
-import { fetchAnswerReview } from './lib/answerReview';
+import { useAnswerReview } from './lib/useAnswerReview';
 import { combinedScore } from './lib/workedShape.js';
 import { homeReads } from './lib/studentHome';
 
@@ -33,9 +33,7 @@ function Stat({ label, value, sub, tone = 'var(--navy)' }) {
 export default function StudentSummary({ student, selectedSection, onGoToTab }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  // The marked paper, once the student asks for it: { title, rows }.
-  const [review, setReview] = useState(null);
-  const [reviewBusy, setReviewBusy] = useState(null);   // exam_id being fetched
+  const { review, busy: reviewBusy, open: openReview, close: closeReview } = useAnswerReview(student.id);
   // The table opens on the most recent handful; a student who wants the whole
   // semester asks for it. Nothing is dropped, only folded.
   const [showAllResults, setShowAllResults] = useState(false);
@@ -102,11 +100,12 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         // an instructor almost always CLOSES an exam before letting the class
         // look at it. Reading from `mine` alone is why a finished paper showed
         // up here as a bare "Assessment" with no way back into it.
-        const resultIds = [...new Set(results.map(r => r.exam_id).filter(Boolean))];
-        const behind = resultIds.length
-          ? await selectAssessments(q => q.in('id', resultIds))
-          : [];
+        // Through the shared copy, so the exam lists asking the same thing
+        // for their "Ready to review" do not read it again.
+        const behindRes = await homeReads.papers(results.map(r => r.exam_id));
         if (cancelled) return;
+        if (behindRes.error) throw behindRes.error;
+        const behind = behindRes.data || [];
 
         // Lessons tables may not exist on an un-migrated database; treat a
         // failure as "no lessons" rather than breaking the whole summary.
@@ -135,25 +134,6 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     })();
     return () => { cancelled = true; };
   }, [student.id, selectedSection]);
-
-  // The only route to a correct answer, and it is the server's decision:
-  // get_answer_review() refuses unless the paper has show_answers on AND this
-  // student has already submitted it. So a stale page that still shows the
-  // button after the instructor closes review again fails here, not silently.
-  const openReview = async (examId, title) => {
-    setReviewBusy(examId);
-    const { data: rows, error: rpcError } = await fetchAnswerReview(student.id, examId);
-    setReviewBusy(null);
-    if (rpcError) {
-      alert(/not available/i.test(rpcError.message)
-        ? 'Your instructor has not opened the answers for this one.'
-        : /session has expired/i.test(rpcError.message)
-          ? 'Your session has expired. Please log in again.'
-          : 'Could not load the answers. Please try again.');
-      return;
-    }
-    setReview({ title, rows: rows || [] });
-  };
 
   if (error) {
     return <div className="card" style={{ ...card, maxWidth: 860, margin: '0 auto' }}>{error}</div>;
@@ -343,35 +323,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         </>
       )}
 
-      {/* The marked paper. An overlay rather than an inline expansion: fifty
-          questions unrolled inside the summary would bury everything under it,
-          and a click on the backdrop puts the student straight back.
-          It scrolls itself — alignItems must stay flex-start or a long review
-          centres and the first questions go off the top, out of reach. */}
-      {review && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', zIndex: 1200, padding: 20, overflowY: 'auto' }}
-          onClick={e => { if (e.target === e.currentTarget) setReview(null); }}
-        >
-          <div style={{ width: '100%', maxWidth: 820 }}>
-            <div className="card" style={{ padding: '14px 18px', marginBottom: 14, display: 'flex', gap: 12, alignItems: 'center', position: 'sticky', top: 0, zIndex: 1 }}>
-              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {review.title}
-              </h2>
-              <button className="btn ghost sm" style={{ width: 'auto', flexShrink: 0 }} onClick={() => setReview(null)}>
-                Close
-              </button>
-            </div>
-            {review.rows.length === 0 ? (
-              <div className="card" style={{ ...card, color: 'var(--ink-3)', fontSize: 13.5 }}>
-                There is nothing to review on this paper — it has no multiple-choice questions.
-              </div>
-            ) : (
-              <AnswerReview rows={review.rows} />
-            )}
-          </div>
-        </div>
-      )}
+      <AnswerReviewOverlay review={review} onClose={closeReview} />
     </div>
   );
 }

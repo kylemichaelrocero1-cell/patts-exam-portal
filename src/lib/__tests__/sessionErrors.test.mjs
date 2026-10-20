@@ -5,7 +5,7 @@
 //
 //   npm run test:session-errors
 
-import { isSessionExpiredError, isNetworkError, gateErrorMessage } from '../sessionErrors.js';
+import { isSessionExpiredError, isNetworkError, isWorthRetrying, gateErrorMessage } from '../sessionErrors.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -56,6 +56,13 @@ check('a dead network IS told to check the connection',
   /internet/i.test(gateErrorMessage({ message: 'Failed to fetch' })));
 check('anything else gets an honest shrug that still offers the way out',
   /log in again/i.test(gateErrorMessage({ code: 'XX000', message: 'boom' })));
+
+check('a statement timeout is worth another try', isWorthRetrying({ code: '57014', message: 'canceling statement due to statement timeout' })
+  && isWorthRetrying({ message: 'canceling statement due to statement timeout' }));
+check('so is a dropped connection', isWorthRetrying({ message: 'Failed to fetch' }));
+check('a refusal never is', !isWorthRetrying({ code: '28000', message: 'Your session has expired. Please log in again.' })
+  && !isWorthRetrying({ code: '42501', message: 'permission denied for function save_worked_answers' })
+  && !isWorthRetrying({ code: 'PGRST202', message: 'Could not find the function' }) && !isWorthRetrying(null));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

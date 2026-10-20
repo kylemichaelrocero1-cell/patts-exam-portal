@@ -11,7 +11,7 @@ import {
 } from './lib/answers';
 import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
-import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js';
+import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
 import { createFocusLossWatcher, isTypingTarget } from './lib/focusLoss.js';
 import { isUpdateReload } from './lib/staleBuild.js';
@@ -62,6 +62,14 @@ const FINISH_SETTLE_MS = 4000;
 // How often an open paper checks that its account has not been logged into
 // elsewhere (see the CLONE GUARD). One request per student per interval.
 const SESSION_CHECK_MS = 60000;
+// When the clock runs out, a class hands in at the same second, and every
+// paper is marked by the one database at once: ten Quiz 2 sittings together
+// took 25-31 s each, past the 20 s a request is allowed. Each board waits a
+// random moment up to this long before sending, so they arrive spread out.
+// What is sent is fixed the moment the clock hits zero. Well inside the
+// dashboard's 90 s before it sweeps a timed-out sitting itself.
+const AUTO_SUBMIT_SPREAD_MS = 15000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
@@ -622,18 +630,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   };
 
   // --- SUBMIT HANDLER (declared before the auto-submit effect that depends on it) ---
-  const executeSubmission = useCallback(async () => {
+  const executeSubmission = useCallback(async ({ auto = false } = {}) => {
     if (isSubmittingRef.current || isSubmitting) return;
     isSubmittingRef.current = true;
 
     setIsSubmitting(true);
     setIsLoading(true);
+    // The maths keyboard sits above everything, the overlay included.
+    try { window.mathVirtualKeyboard?.hide?.(); document.activeElement?.blur?.(); } catch { /* no keyboard */ }
 
     try {
       // Use snapshot captured at modal-open time; fall back to live state for auto-submit
       const submittedAnswers = answersSnapshotRef.current ?? answers;
       const submittedEssayAnswers = essaySnapshotRef.current ?? essayAnswers;
       const submittedWork = workSnapshotRef.current ?? workAnswers;
+      // The clock ran out: wait a random moment so the class does not all
+      // reach the database at once. The paper above is already fixed.
+      if (auto) await sleep(Math.random() * AUTO_SUBMIT_SPREAD_MS);
 
       // Marking happens on the server. This used to fetch every
       // correct_answer to mark in the browser, which is why the key was
@@ -654,6 +667,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // its picked items alone. The progress pusher writes that copy 2s
       // after the last change; send the one being handed in first.
       const workTotal = workMarksAvailable(questions);
+      let workSentAhead = false;
       if (workTotal > 0) {
         const flush = supabase.from('live_sessions')
           .update({ work_answers_json: submittedWork, updated_at: new Date() });
@@ -661,6 +675,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           ? flush.eq('id', liveSessionId)
           : flush.eq('student_id', student?.id).eq('exam_id', exam.id));
         if (flushError) console.error('Could not send working ahead of submit:', flushError.message);
+        else workSentAhead = true;
       }
 
       const { data: outcome, error: rpcError } = await supabase.rpc('submit_assessment', {
@@ -686,6 +701,17 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       const mcTotal = outcome?.total_items ?? 0;
       setCanReviewAnswers(!!outcome?.can_review);
       setAttemptNo(outcome?.attempt_no ?? 1);
+
+      // Filed: the sitting is over. Said now rather than after the working
+      // is marked, which can take a while on a busy database — the
+      // dashboard's sweep of timed-out sittings must not file it again.
+      weFinishedRef.current = true;
+      if (liveSessionId) {
+        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
+      } else {
+        await supabase.from('live_sessions').update({ status: 'finished' })
+          .eq('student_id', student?.id).eq('exam_id', exam.id);
+      }
 
       // Essays are not marked server-side (there is nothing to mark against),
       // so they are attached to the stored row separately.
@@ -719,18 +745,30 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       // One call saves the working AND marks it, in the database, against a
       // rubric this browser has never seen. The number that comes back is
       // already stored — it is read here, not decided here (sql/027).
+      //
+      // Only when submit_assessment() did not already mark this same working
+      // (sql/039): it files and marks what was sent ahead just above, so
+      // asking again marked every paper twice, at the busiest moment there
+      // is. It is asked when the working could not be sent ahead, or the
+      // marking there did not finish (sql/083 files the paper regardless) —
+      // and asked again after a pause if the database is too busy to answer.
       let workOutcome = null;
-      if (workTotal > 0) {
-        const { data, error: saveError } = await supabase.rpc('save_worked_answers', {
-          p_student_id: student?.id,
-          p_assessment_id: exam.id,
-          p_session_token: localStorage.getItem('local_session_token'),
-          p_work: workPayload,
-        });
-        // Loud, not silent: the answers are still in localStorage and in the
-        // live session, so a student who sees this has not lost their work.
-        if (saveError) console.error('Could not save worked answers:', saveError.message);
-        else workOutcome = data;
+      const markedOnSubmit = outcome?.work_total !== null && outcome?.work_total !== undefined;
+      if (workTotal > 0 && !(markedOnSubmit && workSentAhead)) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          if (attempt > 0) await sleep(3000 * attempt + Math.random() * 4000);
+          const { data, error: saveError } = await supabase.rpc('save_worked_answers', {
+            p_student_id: student?.id,
+            p_assessment_id: exam.id,
+            p_session_token: localStorage.getItem('local_session_token'),
+            p_work: workPayload,
+          });
+          if (!saveError) { workOutcome = data; break; }
+          // Loud, not silent: the answers are still in localStorage and in the
+          // live session, so a student who sees this has not lost their work.
+          console.error('Could not save worked answers:', saveError.message);
+          if (!isWorthRetrying(saveError)) break;
+        }
       }
 
       // Essays still go through a direct patch, which only lands on a
@@ -747,14 +785,6 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             .eq('id', existing[0].id);
           if (essayError) console.error('Could not attach essay answers:', essayError.message);
         }
-      }
-
-      weFinishedRef.current = true;
-      if (liveSessionId) {
-        await supabase.from('live_sessions').update({ status: 'finished' }).eq('id', liveSessionId);
-      } else {
-        await supabase.from('live_sessions').update({ status: 'finished' })
-          .eq('student_id', student?.id).eq('exam_id', exam.id);
       }
 
       localStorage.removeItem(storageKey);
@@ -809,7 +839,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // --- SAFE AUTO-SUBMIT TRIGGER ---
   useEffect(() => {
     if (timeLeft === 0 && sittingResolved && !scoreDisplay && !isSubmitting && !isLoading && !endedByInstructor) {
-      executeSubmission();
+      executeSubmission({ auto: true });
     }
   }, [timeLeft, sittingResolved, scoreDisplay, isSubmitting, isLoading, endedByInstructor, executeSubmission]);
 
@@ -1360,6 +1390,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       onContextMenu={e => e.preventDefault()}
     >
 
+      {/* ── Handing in when the clock ran out ── Nothing typed from here on is
+          sent (the paper was fixed at zero), and on a busy database it can take
+          a little while, so the paper is covered and the student told to wait. */}
+      {isSubmitting && !showSubmitModal && (
+        <div className="exam-overlay" role="alertdialog" aria-modal="true" aria-labelledby="handing-in-title" aria-live="assertive">
+          <div className="card exam-dialog" style={{ padding: '26px 24px', textAlign: 'center' }}>
+            <Icon name="clipboard" size={34} color="var(--navy)" style={{ opacity: 0.35, marginBottom: 10 }} />
+            <h2 id="handing-in-title" style={{ margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--ink-1)' }}>
+              {timeLeft === 0 ? 'Time is up — handing in your paper…' : 'Handing in your paper…'}
+            </h2>
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+              Please keep this page open. It can take up to a minute when the whole class hands in together.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── Submit confirmation ── */}
       {showSubmitModal && (
         <div className="exam-overlay" role="dialog" aria-modal="true" aria-labelledby="submit-title">
@@ -1446,7 +1493,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                   className="btn"
                   style={{ flex: 1, background: confirmed ? 'var(--ok)' : 'var(--ink-4)', border: 'none' }}
                   disabled={!confirmed || isSubmitting}
-                  onClick={executeSubmission}
+                  onClick={() => executeSubmission()}
                 >
                   {isSubmitting ? 'Saving…' : 'Submit Exam'}
                 </button>

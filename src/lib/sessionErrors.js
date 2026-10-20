@@ -37,6 +37,17 @@ export function isNetworkError(err) {
   return /failed to fetch|networkerror|network request failed|load failed|timeout|err_internet/.test(msg);
 }
 
+/**
+ * Is a failed call worth making again in a moment? Only when the server ran
+ * out of time (57014, statement timeout — a busy database as a class hands
+ * in together) or could not be reached. Never a refusal: an expired session
+ * or a permission error answers the same way however often it is asked.
+ */
+export function isWorthRetrying(err) {
+  if (!err || isSessionExpiredError(err)) return false;
+  return err.code === '57014' || isNetworkError(err);
+}
+
 /** What to show a student when something went wrong at a gate. */
 export function gateErrorMessage(err) {
   if (isSessionExpiredError(err)) {

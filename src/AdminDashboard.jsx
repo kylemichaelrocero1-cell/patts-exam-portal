@@ -1191,7 +1191,12 @@ const [targetSection, setTargetSection] = useState('');
   const loadQuestionList = async (examId) => {
     if (!examId) { setQList([]); return; }
     setQLoading(true);
-    const { data } = await supabase.from('questions').select('*').eq('exam_id', examId).order('id', { ascending: true });
+    // In the order students get them (get_exam_questions, sql/042): by
+    // question number, unnumbered last, then id. By id alone, a paper loaded
+    // from SQL listed its items in random order.
+    const { data } = await supabase.from('questions').select('*').eq('exam_id', examId)
+      .order('question_number', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
     setQList(data || []);
     setQLoading(false);
   };

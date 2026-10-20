@@ -127,6 +127,15 @@ function QuestionCsvFormat({ dense = false }) {
 export default function AdminDashboard({ instructorId, instructorName, onLogout }) {
   // Navigation State
   const [activeView, setActiveView] = useState('results');
+  // On a phone the sidebar is a drawer behind a menu button (index.css,
+  // .dash-side); on anything wider it is always there and this does nothing.
+  const [sideOpen, setSideOpen] = useState(false);
+  useEffect(() => {
+    if (!sideOpen) return;
+    const onKey = e => { if (e.key === 'Escape') setSideOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [sideOpen]);
 
   // Data States
   const [results, setResults] = useState([]);
@@ -2534,8 +2543,8 @@ const deleteResult = async (studentId, examId) => {
   };
 
   if (isLoading) return (
-    <div style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr', background: 'var(--paper)' }}>
-      <div style={{ background: 'var(--navy)', height: '100vh' }} />
+    <div className="dash-shell" style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr', background: 'var(--paper)' }}>
+      <div className="dash-side-placeholder" style={{ background: 'var(--navy)', height: '100vh' }} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ textAlign: 'center', color: 'var(--ink-3)' }}>
           <Icon name="clipboard" size={36} color="var(--navy)" style={{ opacity: 0.3, marginBottom: 12 }} />
@@ -2546,10 +2555,13 @@ const deleteResult = async (studentId, examId) => {
   );
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr', background: 'var(--paper)' }}>
+    <div className="dash-shell" style={{ minHeight: '100vh', display: 'grid', gridTemplateColumns: '240px 1fr', background: 'var(--paper)' }}>
+
+      {/* On a phone, the page behind the open drawer; a tap closes it. */}
+      {sideOpen && <div className="dash-backdrop" onClick={() => setSideOpen(false)} aria-hidden="true" />}
 
       {/* ── SIDEBAR ── */}
-      <aside style={{
+      <aside id="dash-side" className={`dash-side${sideOpen ? ' is-open' : ''}`} style={{
         display: 'flex', flexDirection: 'column',
         background: 'var(--navy)', borderRight: '1px solid rgba(255,255,255,.07)',
         height: '100vh', position: 'sticky', top: 0,
@@ -2581,7 +2593,7 @@ const deleteResult = async (studentId, examId) => {
             return (
               <button
                 key={item.id}
-                onClick={() => { setActiveView(item.id); setLiveViolationTooltip(null); }}
+                onClick={() => { setActiveView(item.id); setLiveViolationTooltip(null); setSideOpen(false); }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9,
                   padding: '9px 11px', borderRadius: 'var(--r-sm)',
@@ -2654,16 +2666,29 @@ const deleteResult = async (studentId, examId) => {
       </aside>
 
       {/* ── WORKSPACE ── */}
-      <main style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', overflow: 'hidden', background: 'var(--surface-2)' }}>
+      <main className="dash-main" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', overflow: 'hidden', background: 'var(--surface-2)' }}>
 
         {/* Toolbar */}
-        <div style={{
+        <div className="dash-toolbar" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '13px 24px', borderBottom: '1px solid var(--line)',
           background: 'var(--paper)', position: 'sticky', top: 0, zIndex: 10,
           boxShadow: '0 1px 0 var(--line)',
         }}>
-          <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: 'var(--ink-1)' }}>
+          {/* Phones only: opens the sidebar. It carries the live count, so a
+              sitting in progress shows without opening the menu. */}
+          <button
+            type="button"
+            className="dash-menu-btn"
+            onClick={() => setSideOpen(true)}
+            aria-label={liveSessions.length > 0 ? `Open menu — ${liveSessions.length} live` : 'Open menu'}
+            aria-expanded={sideOpen}
+            aria-controls="dash-side"
+          >
+            <span className="dash-menu-bars" aria-hidden="true"><span /><span /><span /></span>
+            {liveSessions.length > 0 && <span className="dash-menu-live">{liveSessions.length}</span>}
+          </button>
+          <h2 style={{ margin: 0, fontSize: 15.5, fontWeight: 700, color: 'var(--ink-1)', flex: 1, minWidth: 0 }}>
             {({
               home: 'Overview',
               class: 'Class Review',
@@ -2680,7 +2705,7 @@ const deleteResult = async (studentId, examId) => {
           </h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             {lastRefreshed && (
-              <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>Updated {lastRefreshed}</span>
+              <span className="dash-updated" style={{ fontSize: 11, color: 'var(--ink-4)' }}>Updated {lastRefreshed}</span>
             )}
             <button
               disabled={isRefreshing}
@@ -2704,7 +2729,7 @@ const deleteResult = async (studentId, examId) => {
         </div>
 
         {/* Panel content */}
-        <div style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+        <div className="dash-panel" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
 
           {/* --- OVERVIEW HOME PANEL --- */}
           {activeView === 'home' && (

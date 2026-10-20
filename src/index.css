@@ -1430,3 +1430,45 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .student-tabs button { padding: 12px 7px !important; font-size: 13px !important; gap: 5px !important; }
   .hide-narrow { display: none; }
 }
+
+/* ── Instructor dashboard on a phone ──
+   The dashboard is laid out in inline styles as a 240px sidebar beside the
+   page, which left a phone about 150px of page. Up to 760px the sidebar is
+   a drawer opened from the menu button in the toolbar, and the page takes
+   the full width. !important because the layout it overrides is inline. */
+.dash-menu-btn, .dash-backdrop { display: none; }
+@media (max-width: 760px) {
+  .dash-shell { grid-template-columns: minmax(0, 1fr) !important; }
+  .dash-side-placeholder { display: none; }
+  .dash-side {
+    position: fixed !important; top: 0; left: 0; bottom: 0; z-index: 60;
+    width: 264px; max-width: 84vw; height: 100dvh !important;
+    transform: translateX(-100%); visibility: hidden;
+    transition: transform .22s ease, visibility 0s linear .22s;
+  }
+  .dash-side.is-open {
+    transform: none; visibility: visible; transition: transform .22s ease;
+    box-shadow: 0 0 40px rgba(6, 18, 40, .35);
+  }
+  .dash-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(6, 18, 40, .45); }
+  .dash-main { min-width: 0; }
+  .dash-toolbar { padding: 10px 12px !important; gap: 10px; }
+  .dash-updated { display: none; }
+  .dash-panel { padding: 16px 12px !important; }
+  .dash-menu-btn {
+    display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    width: auto; min-width: 44px; height: 40px; padding: 0 10px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-sm);
+    color: var(--ink-1); cursor: pointer;
+  }
+  .dash-menu-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--ink-1); border-color: var(--navy); }
+  .dash-menu-bars { display: grid; gap: 4px; width: 18px; }
+  .dash-menu-bars span { display: block; height: 2px; border-radius: 1px; background: currentColor; }
+  .dash-menu-live {
+    background: #E74C3C; color: white; font-size: 11px; font-weight: 700;
+    padding: 1px 6px; border-radius: 99px; line-height: 1.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-side, .dash-side.is-open { transition: none; }
+}

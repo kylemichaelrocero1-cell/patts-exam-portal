@@ -54,7 +54,22 @@ export function closeOf(s, i) {
   return -1;
 }
 
-/** normalize_math() as of sql/066. */
+// math_hyperbolic_names() (081): a hyperbolic function however the maths
+// field spells it is one command — \operatorname{\mathrm{sech}} and
+// \mathrm{sech} are \sech; cs\operatorname{\mathrm{ch}}, which is how
+// the field writes a typed csch, is \csch; arc\sinh, \arcsinh and
+// \operatorname{arsinh} are \arsinh. On lower-cased text with no spaces.
+const HYP = '(?:sinh|cosh|tanh|coth|sech|csch)';
+const HYP_WRAP = new RegExp(String.raw`\\(?:operatorname|mathrm|mathit|text|textrm)\{\\?((?:arc?)?${HYP})\}`, 'g');
+export function hyperbolicNames(p) {
+  let t = String(p ?? '');
+  if (!/sinh|cosh|tanh|coth|sech|csch|\{ch\}/.test(t)) return t;
+  t = t.replace(/cs\\(?:operatorname|mathrm)\{(?:\\mathrm\{ch\}|ch)\}/g, '\\csch');
+  t = t.replace(HYP_WRAP, '\\$1').replace(HYP_WRAP, '\\$1');
+  return t.replace(new RegExp(String.raw`(?:\\arc|arc\\|\\ar)(${HYP})`, 'g'), '\\ar$1');
+}
+
+/** normalize_math() as of sql/081. */
 export function normalizeMath(p) {
   let t = dropSpaces(p);                                                   // s1
   t = t.replace(/\\left|\\right/g, '');                                    // s2
@@ -65,6 +80,7 @@ export function normalizeMath(p) {
   t = t.replace(/\\cdot|\\times|\*/g, '');                                 // s4
   t = t.replace(/\s+/g, '');                                               // s5
   t = t.toLowerCase();                                                     // s6
+  t = hyperbolicNames(t);                                                  // s6h (081)
   t = primes(t);                                                           // s7
   t = t.split('^{}').join('');                                             // s8
   t = unwrap(unwrap(t));                                                   // s9
@@ -192,11 +208,25 @@ const FN_LETTERS = ['arcsin', 'arccos', 'arctan', 'arcsec', 'arccsc', 'arccot',
   'cosec', 'sin', 'cos', 'tan', 'sec', 'csc', 'cot'];
 const FN_BARE = ['arcsin', 'arccos', 'arctan', 'arcsec', 'arccsc', 'arccot',
   'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'ln', 'log'];
+// The hyperbolic names (081), read only on a line for an item whose accepted
+// answers hold a hyperbolic function (hasHyperbolic): anywhere else, letters
+// such as sinh may be sin h — the sin(x+h) of a limit — as they always were.
+// The inverse spellings come first: arcsinh is not arcsin followed by h.
+const HYP_NAMES = ['sinh', 'cosh', 'tanh', 'coth', 'sech', 'csch'];
+const HYP_LETTERS = [...HYP_NAMES.flatMap(n => ['arc' + n, 'ar' + n]), ...HYP_NAMES];
+const HYP_BARE = [...HYP_NAMES.map(n => 'ar' + n), ...HYP_NAMES];
+
+/** math_has_hyperbolic() (081): do these accepted answers hold a hyperbolic function? */
+export function hasHyperbolic(accepted) {
+  return /sinh|cosh|tanh|coth|sech|csch|\{ch\}/i.test((accepted || []).map(a => String(a ?? '')).join(' '));
+}
 const isLetter = c => c !== undefined && /^[a-zA-Z]$/.test(c);
 const isDigit = c => c !== undefined && /^[0-9]$/.test(c);
 
-export function respell(p) {
+export function respell(p, { hyperbolic = false } = {}) {
   let s = String(p ?? '');
+  const letters = hyperbolic ? [...HYP_LETTERS, ...FN_LETTERS] : FN_LETTERS;
+  const bare = hyperbolic ? [...HYP_BARE, ...FN_BARE] : FN_BARE;
   // r1. \left( \right) are plain brackets; \left. \right. draw nothing.
   s = s.replace(/\\(left|right)\./g, '').replace(/\\(left|right)(?![a-zA-Z])/g, '');
   // r2. Text mode: \text{…}, \mathrm{…}, \operatorname{…} hold what they show.
@@ -234,7 +264,9 @@ export function respell(p) {
     s = s.slice(0, i + 1) + s.slice(i + 3, k) + s.slice(k + 1);
   }
   s = s.split('^{^').join('^{').split('\\placeholder{}').join('');
-  // r5. A function name typed as letters, and \cosec, is the function.
+  // r5. A function name typed as letters, and \cosec, is the function;
+  //     with hyperbolic (081), sinh is \sinh and arcsinh, arsinh and
+  //     arc\sinh are \arsinh.
   let out = '';
   for (let i = 0; i < s.length;) {
     if (s[i] === '\\') {
@@ -247,12 +279,13 @@ export function respell(p) {
     }
     let name = null, len = 0;
     if (s.startsWith('arc\\', i)) {
-      const f = ['sin', 'cos', 'tan', 'sec', 'csc', 'cot'].find(n => s.startsWith(n, i + 4) && !isLetter(s[i + 4 + n.length]));
-      if (f) { name = 'arc' + f; len = 4 + f.length; }
+      const f = [...(hyperbolic ? HYP_NAMES : []), 'sin', 'cos', 'tan', 'sec', 'csc', 'cot']
+        .find(n => s.startsWith(n, i + 4) && !isLetter(s[i + 4 + n.length]));
+      if (f) { name = (HYP_NAMES.includes(f) ? 'ar' : 'arc') + f; len = 4 + f.length; }
     }
     if (!name) {
-      const f = FN_LETTERS.find(n => s.startsWith(n, i));
-      if (f) { name = f === 'cosec' ? 'csc' : f; len = f.length; }
+      const f = letters.find(n => s.startsWith(n, i));
+      if (f) { name = f === 'cosec' ? 'csc' : HYP_LETTERS.includes(f) && f.startsWith('arc') ? 'ar' + f.slice(3) : f; len = f.length; }
     }
     if (name) {
       out += '\\' + name;
@@ -297,7 +330,7 @@ export function respell(p) {
     const name = s.slice(i + 1, j);
     out += s.slice(i, j);
     i = j;
-    if (!FN_BARE.includes(name)) continue;
+    if (!bare.includes(name)) continue;
     const pw = /^\^(\{[^{}]*\}|[^{\\])/.exec(s.slice(i));
     if (pw) { out += pw[0]; i += pw[0].length; }
     const sp = /^\s*/.exec(s.slice(i))[0];

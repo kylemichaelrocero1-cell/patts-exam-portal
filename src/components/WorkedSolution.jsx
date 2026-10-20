@@ -42,12 +42,14 @@ export default function WorkedSolution({
 }) {
   const given = question?.work_given || '';
   const marks = Number(question?.marks) || 1;
-  // Calculus or logic symbols. The question's own wording picks the one it
-  // opens on; the other is always a tap away, so a guess that is wrong costs
-  // the student one tap rather than an answer they cannot type.
+  // Calculus, function or logic symbols. The question's own wording picks the
+  // one it opens on; the others are always a tap away, so a guess that is
+  // wrong costs the student one tap rather than an answer they cannot type.
   const mode = question?.work_mode;
-  const [palette, setPalette] = useState(() => (isLogicMode(mode) ? 'logic' : paletteFor(question?.question_text)));
+  const [palette, setPalette] = useState(() => (isLogicMode(mode) ? 'logic' : paletteFor(question?.question_text, question?.work_given)));
   const isLogic = palette === 'logic';
+  // A hyperbolic item: the hint says where the keyboard keeps sinh and the rest.
+  const hyperbolic = paletteFor(question?.question_text, question?.work_given) === 'functions';
 
   // A full solution, marked line by line in the database (sql/042), takes
   // several lines; every other typed item takes one. The exam screen only
@@ -288,7 +290,7 @@ export default function WorkedSolution({
               <button
                 key={sym.title}
                 type="button"
-                className="ws-sym"
+                className={`ws-sym${sym.wide ? ' ws-sym-wide' : ''}`}
                 title={sym.title}
                 aria-label={sym.title}
                 // Inserted on click, which a phone fires once for a tap and
@@ -373,6 +375,13 @@ export default function WorkedSolution({
             <code>dy/dx =</code>. A missing label, or the wrong one, is marked wrong.
           </p>
         </>
+      )}
+
+      {hyperbolic && !readOnly && (
+        <p className="ws-hint">
+          On a phone or tablet, <strong>sinh, cosh, tanh, sech, csch and coth</strong> are on the{' '}
+          <strong>f(x)</strong> tab of the maths keyboard, as well as in the Functions buttons.
+        </p>
       )}
     </div>
   );

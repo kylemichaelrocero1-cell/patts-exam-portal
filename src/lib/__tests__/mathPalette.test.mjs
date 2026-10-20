@@ -4,7 +4,8 @@
 //
 //   npm run test:palette
 
-import { fracToSlash, suggestVariants, MATH_PALETTE, LOGIC_PALETTE, PALETTES, paletteFor } from '../mathPalette.js';
+import { fracToSlash, suggestVariants, MATH_PALETTE, FUNCTION_PALETTE, LOGIC_PALETTE, PALETTES, paletteFor } from '../mathPalette.js';
+import { normalizeMath } from '../mathNormalize.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -78,11 +79,24 @@ check('it offers a limit, a fraction and a prime',
 console.log('\n=== the logic strip ===');
 check('every entry has a label, an insertion and a title',
   LOGIC_PALETTE.every(s => s.label && s.insert && s.title));
-check('titles are unique in each strip, and across both (the editor shows both, keyed by title)',
-  new Set([...MATH_PALETTE, ...LOGIC_PALETTE].map(s => s.title)).size === MATH_PALETTE.length + LOGIC_PALETTE.length);
+check('titles are unique in each strip, and across all three (the editor shows them all, keyed by title)',
+  new Set([...MATH_PALETTE, ...FUNCTION_PALETTE, ...LOGIC_PALETTE].map(s => s.title)).size
+    === MATH_PALETTE.length + FUNCTION_PALETTE.length + LOGIC_PALETTE.length);
 check('it offers and, or, not, if-then and iff',
   ['\\land', '\\lor', '\\sim', '\\to', '\\leftrightarrow'].every(c => LOGIC_PALETTE.some(s => s.insert.trim() === c.replace('\\\\', '\\'))));
-check('both strips are offered', eq(Object.keys(PALETTES), ['calculus', 'logic']));
+check('all three strips are offered', eq(Object.keys(PALETTES), ['calculus', 'functions', 'logic']));
+
+console.log('\n=== the functions strip ===');
+check('every entry has a label, an insertion and a title',
+  FUNCTION_PALETTE.every(s => s.label && s.insert && s.title));
+check('it offers all six hyperbolic functions and e',
+  ['sinh', 'cosh', 'tanh', 'sech', 'csch', 'coth'].every(n => FUNCTION_PALETTE.some(s => s.insert.includes(n)))
+  && FUNCTION_PALETTE.some(s => s.insert.startsWith('e^')));
+// What a button writes must read as the function the marker knows (sql/081).
+const filled = s => s.insert.replace('#0', 'x').replace('#?', '2');
+check('sech and csch from the strip read as the marker reads any other spelling',
+  normalizeMath(filled(FUNCTION_PALETTE.find(s => s.title === 'Hyperbolic secant'))) === normalizeMath('\\operatorname{\\mathrm{sech}}(x)')
+  && normalizeMath(filled(FUNCTION_PALETTE.find(s => s.title === 'Hyperbolic cosecant'))) === normalizeMath('cs\\operatorname{\\mathrm{ch}}(x)'));
 
 console.log('\n=== which strip a question opens on ===');
 const logicQs = [
@@ -101,6 +115,12 @@ const calcQs = [
 for (const t of logicQs) check(`logic: ${t}`, paletteFor(t) === 'logic');
 for (const t of calcQs) check(`calculus: ${String(t)}`, paletteFor(t) === 'calculus');
 check('\\leftarrow is not \\land-family', paletteFor('\\leftarrow') === 'calculus');
+check('a hyperbolic given opens on Functions', paletteFor('Differentiate.', 'y=2\\sinh(5x)') === 'functions'
+  && paletteFor('Find the derivative of the hyperbolic secant.') === 'functions'
+  && paletteFor('Differentiate.', 'y=\\operatorname{sech}(x)') === 'functions');
+check('a trig or exponential given stays on Calculus', paletteFor('Differentiate.', 'y=\\sin(5x)') === 'calculus'
+  && paletteFor('Differentiate.', 'y=e^{2x}') === 'calculus' && paletteFor('Differentiate.', null) === 'calculus');
+check('a logic question is logic, whatever the given', paletteFor('Simplify p ∧ q.', 'y=\\sinh(x)') === 'logic');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

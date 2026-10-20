@@ -13,7 +13,7 @@
 //     `partial` (sql/043; absent, it is `alone`);
 //   * the last step on the last line without that working — `alone`.
 // Nothing is ever taken away.
-import { mathAnswersMatch, sameUnbracketed, respell, normalizeMath, unbracket, unbracketSigns, tidyTerms } from './mathNormalize.js';
+import { mathAnswersMatch, sameUnbracketed, respell, hasHyperbolic, normalizeMath, unbracket, unbracketSigns, tidyTerms } from './mathNormalize.js';
 import { labelProblem } from './mathLabel.js';
 
 /** Is a rubric marked line by line? */
@@ -42,12 +42,13 @@ function verdictAsWritten(line, accepted) {
  * written, or once the student's line is respelt the way the keyboard should
  * have spelt it (respell(), mathNormalize.js) — otherwise the reason. The
  * accepted answers are compared as they are: respelling every one of them
- * for every line made submitting too slow.
+ * for every line made submitting too slow. Hyperbolic names are read only
+ * when the accepted answers hold one (sql/081).
  */
 function answerVerdictStrict(line, accepted) {
   const v = verdictAsWritten(line, accepted);
   if (v === null || !String(line ?? '').trim()) return v;
-  const r = respell(line);
+  const r = respell(line, { hyperbolic: hasHyperbolic(accepted) });
   // Respelling changed nothing the comparison reads: no third look.
   if (unbracket(normalizeMath(r)) === unbracket(normalizeMath(line))) return v;
   const v2 = verdictAsWritten(r, accepted);
@@ -64,7 +65,7 @@ function answerVerdictStrict(line, accepted) {
  */
 function answerVerdictBySigns(line, accepted) {
   if (!String(line ?? '').trim()) return 'Not an accepted answer.';
-  for (const l of [String(line), respell(line)]) {
+  for (const l of [String(line), respell(line, { hyperbolic: hasHyperbolic(accepted) })]) {
     const nl = normalizeMath(l);
     const tl = tidyTerms(nl);
     if (tl === nl && !/[([]-|\\lbrack-/.test(nl)) continue;

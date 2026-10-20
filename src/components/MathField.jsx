@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 // on the exam board: LessonContent.jsx imported the CSS, but that is a
 // different lazy chunk and the exam board never loads it.
 import 'katex/dist/katex.min.css';
-import { rememberField } from '../lib/mathPalette.js';
+import { rememberField, FUNCTION_KEYBOARD } from '../lib/mathPalette.js';
 import { displayLatex } from '../lib/mathDisplay.js';
 import { canonicalPrimes } from '../lib/primeTyping.js';
 
@@ -35,6 +35,7 @@ import { canonicalPrimes } from '../lib/primeTyping.js';
 // never true for the keystroke the student just typed.
 
 let loading = null;
+let keyboardSet = false;
 function loadMathlive() {
   // A rejected promise is deliberately NOT cached. Caching one meant a single
   // failed fetch of an 800KB chunk broke the maths editor for the rest of the
@@ -91,6 +92,15 @@ export default function MathField({
       if (cancelled || !hostRef.current) return;
       if (!customElements.get('math-field')) {
         throw new Error('mathlive loaded but <math-field> was never registered');
+      }
+
+      // The keyboard's own tabs, with a functions tab after the numbers:
+      // set once, on the one keyboard every field on the page shares.
+      if (!keyboardSet && window.mathVirtualKeyboard) {
+        keyboardSet = true;
+        try {
+          window.mathVirtualKeyboard.layouts = ['numeric', FUNCTION_KEYBOARD, 'symbols', 'alphabetic', 'greek'];
+        } catch { /* keep the default keyboard */ }
       }
 
       const field = document.createElement('math-field');

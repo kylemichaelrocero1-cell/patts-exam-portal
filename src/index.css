@@ -1244,6 +1244,8 @@ input:checked + .slider::before { transform: translateX(26px); }
   font-size: 14px; line-height: 1;
 }
 .ws-sym .math-static { display: inline-block; max-width: 100%; overflow: hidden; }
+/* sinh⁻¹ and the like: too long a label for 44px. */
+.ws-sym.ws-sym-wide { width: 64px; max-width: 64px; }
 /* A doubled expression is always a missing katex.min.css. Belt and braces:
    the MathML copy is hidden here too, so the failure cannot recur silently. */
 .math-static .katex-mathml,
@@ -1339,6 +1341,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   background: var(--paper); border: 1px solid var(--line); border-radius: 6px;
   color: var(--ink-1); font-size: 14px; cursor: pointer;
 }
+.wr-sym.wr-sym-wide { width: 60px; }
 .wr-sym:hover:not(:disabled) { border-color: var(--navy); background: var(--navy-tint); color: var(--navy); }
 .wr-sym .math-static, .wr-sym .katex { color: inherit; }
 

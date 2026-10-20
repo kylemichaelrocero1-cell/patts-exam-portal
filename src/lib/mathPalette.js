@@ -30,6 +30,59 @@ export const MATH_PALETTE = [
   { label: '\\infty', insert: '\\infty', title: 'Infinity' },
 ];
 
+// Exponentials, the reciprocal trig functions and the hyperbolic ones — the
+// names a phone's keyboard makes students spell out letter by letter. sech
+// and csch go in as \operatorname{…}: there is no \sech command, and the
+// marker reads every spelling of a hyperbolic name as one (sql/081). The
+// inverses are written ^{-1}, as the papers give them. Titles differ from
+// the calculus strip's, which already has sin, cos, tan, ln and log.
+export const FUNCTION_PALETTE = [
+  { label: 'e^{x}', insert: 'e^{#?}', title: 'e to a power' },
+  { label: '\\log_{b}', insert: '\\log_{#?}(#0)', title: 'Log to a base' },
+  { label: '\\sec', insert: '\\sec(#0)', title: 'Secant' },
+  { label: '\\csc', insert: '\\csc(#0)', title: 'Cosecant' },
+  { label: '\\cot', insert: '\\cot(#0)', title: 'Cotangent' },
+  { label: '\\sinh', insert: '\\sinh(#0)', title: 'Hyperbolic sine' },
+  { label: '\\cosh', insert: '\\cosh(#0)', title: 'Hyperbolic cosine' },
+  { label: '\\tanh', insert: '\\tanh(#0)', title: 'Hyperbolic tangent' },
+  { label: '\\operatorname{sech}', insert: '\\operatorname{sech}(#0)', title: 'Hyperbolic secant' },
+  { label: '\\operatorname{csch}', insert: '\\operatorname{csch}(#0)', title: 'Hyperbolic cosecant' },
+  { label: '\\coth', insert: '\\coth(#0)', title: 'Hyperbolic cotangent' },
+  // wide: too long a label for a standard button.
+  { label: '\\sinh^{-1}', insert: '\\sinh^{-1}(#0)', title: 'Inverse hyperbolic sine', wide: true },
+  { label: '\\cosh^{-1}', insert: '\\cosh^{-1}(#0)', title: 'Inverse hyperbolic cosine', wide: true },
+  { label: '\\tanh^{-1}', insert: '\\tanh^{-1}(#0)', title: 'Inverse hyperbolic tangent', wide: true },
+];
+
+// The same functions as a tab of the maths keyboard (MathField sets it).
+// On a phone or tablet the keyboard covers the strip below the answer, so a
+// student typing a hyperbolic answer had to close it, scroll down, tap a
+// button and scroll back, or spell sinh out letter by letter on the abc tab.
+// Keys write what the strips write.
+const key = (latex, insert, tooltip) => ({ latex, insert, tooltip, class: 'small' });
+const inverse = (name, tooltip) => ({ label: `<span style="white-space:nowrap;font-size:72%">${name}<sup>−1</sup></span>`, insert: `\\${name}^{-1}(#0)`, tooltip, class: 'small' });
+export const FUNCTION_KEYBOARD = {
+  label: 'f(x)',
+  tooltip: 'Functions',
+  id: 'patts-functions',
+  rows: [
+    [key('\\sin', '\\sin(#0)', 'Sine'), key('\\cos', '\\cos(#0)', 'Cosine'), key('\\tan', '\\tan(#0)', 'Tangent'),
+      key('\\sec', '\\sec(#0)', 'Secant'), key('\\csc', '\\csc(#0)', 'Cosecant'), key('\\cot', '\\cot(#0)', 'Cotangent'),
+      '[separator-5]', key('\\ln', '\\ln(#0)', 'Natural log')],
+    [key('\\sinh', '\\sinh(#0)', 'Hyperbolic sine'), key('\\cosh', '\\cosh(#0)', 'Hyperbolic cosine'),
+      key('\\tanh', '\\tanh(#0)', 'Hyperbolic tangent'), key('\\operatorname{sech}', '\\operatorname{sech}(#0)', 'Hyperbolic secant'),
+      key('\\operatorname{csch}', '\\operatorname{csch}(#0)', 'Hyperbolic cosecant'), key('\\coth', '\\coth(#0)', 'Hyperbolic cotangent'),
+      '[separator-5]', key('\\log', '\\log(#0)', 'Log')],
+    // The inverses are labelled as text: three KaTeX labels this wide ran into each other.
+    [inverse('sinh', 'Inverse hyperbolic sine'), inverse('cosh', 'Inverse hyperbolic cosine'),
+      inverse('tanh', 'Inverse hyperbolic tangent'), key('e^{\\square}', 'e^{#?}', 'e to a power'),
+      key('x^{\\square}', '^{#?}', 'Exponent'), key("y'", "'", 'Prime'), '[separator-5]', key('\\log_{\\square}', '\\log_{#?}(#0)', 'Log to a base')],
+    // y and x, so y' = and f(x) = can be written without leaving the tab.
+    [key('y', 'y', 'y'), key('x', 'x', 'x'), key('(', '(', 'Open bracket'), key(')', ')', 'Close bracket'),
+      key('=', '=', 'Equals'), key('\\frac{\\square}{\\square}', '\\frac{#0}{#?}', 'Fraction'), '[backspace]', '[left]', '[right]'],
+  ],
+};
+
 // The strip for propositional logic (MATH 115). Every insertion here is a
 // spelling the item's accepted answers already carry: the database compares
 // answers as strings, so a button that wrote \wedge where the key says \land
@@ -59,18 +112,20 @@ export const LOGIC_PALETTE = [
 
 export const PALETTES = {
   calculus: { name: 'Calculus', symbols: MATH_PALETTE },
+  functions: { name: 'Functions', symbols: FUNCTION_PALETTE },
   logic: { name: 'Logic', symbols: LOGIC_PALETTE },
 };
 
 /**
- * Which strip a question should open on. Both are always one tap away, so
+ * Which strip a question should open on. All are always one tap away, so
  * this only has to be right most of the time: a question whose own wording
- * uses a connective (∧ ∨ ¬ ~ → ↔ ≡, as plain text or LaTeX) is a logic item.
+ * uses a connective (∧ ∨ ¬ ~ → ↔ ≡, as plain text or LaTeX) is a logic item,
+ * and one whose wording or given function is hyperbolic opens on Functions.
  */
-export function paletteFor(questionText) {
+export function paletteFor(questionText, given = '') {
   const t = String(questionText || '');
-  return /[∧∨¬↔≡]|\\(land|lor|neg|lnot|wedge|vee|leftrightarrow|iff|equiv)(?![a-z])/i.test(t)
-    ? 'logic' : 'calculus';
+  if (/[∧∨¬↔≡]|\\(land|lor|neg|lnot|wedge|vee|leftrightarrow|iff|equiv)(?![a-z])/i.test(t)) return 'logic';
+  return /sinh|cosh|tanh|coth|sech|csch|hyperbolic/i.test(`${t} ${given || ''}`) ? 'functions' : 'calculus';
 }
 
 // The field a symbol should go into. On a desktop that is whatever has focus,

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import { paperNoun } from './lib/paperNoun.js';
 import { supabase } from './supabase';
 import {
-  isAvailableNow, availabilityState, formatWindow, KIND_LABEL,
+  isAvailableNow, availabilityState, formatWindow,
   fetchAssessmentById,
 } from './lib/assessments';
 import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors';
@@ -558,7 +559,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         padding: '2px 10px', borderRadius: 'var(--r-full)',
                         fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
                       }}>
-                        {KIND_LABEL[exam.kind] || 'Exam'}
+                        {paperNoun(exam)}
                       </span>
                       <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                         ⏱ <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
@@ -714,7 +715,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                       padding: '2px 10px', borderRadius: 'var(--r-full)',
                       fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
                     }}>
-                      {KIND_LABEL[p.kind] || 'Exam'}
+                      {paperNoun(p)}
                     </span>
                   </div>
                   <div className="exam-card-actions">

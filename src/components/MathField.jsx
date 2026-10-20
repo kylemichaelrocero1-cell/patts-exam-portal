@@ -9,6 +9,7 @@ import 'katex/dist/katex.min.css';
 import { rememberField, FUNCTION_KEYBOARD } from '../lib/mathPalette.js';
 import { displayLatex } from '../lib/mathDisplay.js';
 import { canonicalPrimes } from '../lib/primeTyping.js';
+import { keepInView } from '../lib/keepInView.js';
 
 // A single line of maths, typed the way Google Docs or Symbolab let you type
 // it: 1/2 opens a fraction, ^ raises an exponent, \sqrt builds a radical, and
@@ -101,6 +102,12 @@ export default function MathField({
         try {
           window.mathVirtualKeyboard.layouts = ['numeric', FUNCTION_KEYBOARD, 'symbols', 'alphabetic', 'greek'];
         } catch { /* keep the default keyboard */ }
+        // When the keyboard slides up, the field being typed in may now be
+        // under it: brought just clear of it, and only then.
+        window.mathVirtualKeyboard.addEventListener?.('geometrychange', () => {
+          const active = document.activeElement;
+          if (active?.tagName === 'MATH-FIELD') keepInView(active);
+        });
       }
 
       const field = document.createElement('math-field');
@@ -115,10 +122,27 @@ export default function MathField({
       // on the virtual keyboard moves focus off the field and fired focusout.
       field.mathVirtualKeyboardPolicy = 'auto';
       field.smartMode = false;
+      // MathLive scrolls the page on every keystroke, and on an iPhone that
+      // made typing a fraction jolt the whole screen up and down
+      // (lib/keepInView.js). The page now moves only when the field is
+      // actually hidden. MathLive still scrolls the caret along inside it.
+      field.onScrollIntoView = () => keepInView(field);
       field.value = canonicalPrimes(value || '').latex;
       if (readOnly) field.readOnly = true;
 
-      field.addEventListener('input', () => {
+      // When Enter was last handled, so the line break MathLive announces for
+      // that same press is not taken as a second one.
+      let enterAt = -Infinity;
+
+      field.addEventListener('input', e => {
+        // The maths keyboard's return key does not press Enter: it runs
+        // MathLive's commit, which announces a line break. On a phone that is
+        // the only Enter there is, and it did nothing — a student could not
+        // move on to the next line of a solution.
+        if (e.inputType === 'insertLineBreak') {
+          if (performance.now() - enterAt > 250) handlers.current.onEnter?.();
+          return;
+        }
         // Primes on one level, however they were typed (lib/primeTyping.js):
         // pressing prime with the caret inside a superscript stacked each new
         // prime on top of the last. Fixed as it happens, with the caret put
@@ -134,6 +158,7 @@ export default function MathField({
       field.addEventListener('keydown', e => {
         if (e.key === 'Enter') {
           e.preventDefault();
+          enterAt = performance.now();
           handlers.current.onEnter?.();
           return;
         }
@@ -152,12 +177,12 @@ export default function MathField({
       field.addEventListener('focusin', () => {
         rememberField(field);
         // The maths keyboard slides up over the bottom third of a phone, and
-        // a field near the fold ends up underneath it. Nudged into view once
-        // the keyboard has finished animating.
+        // a field near the fold ends up underneath it. Checked once the
+        // keyboard has finished animating, and moved only if it is hidden:
+        // this used to centre the field every time it took focus, and focus
+        // comes back to it after every key the maths keyboard types.
         if (matchMedia('(pointer: coarse)').matches) {
-          setTimeout(() => {
-            field.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          }, 350);
+          setTimeout(() => keepInView(field), 350);
         }
       });
 

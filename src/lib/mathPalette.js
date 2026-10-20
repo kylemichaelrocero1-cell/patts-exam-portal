@@ -59,8 +59,10 @@ export const FUNCTION_PALETTE = [
 // student typing a hyperbolic answer had to close it, scroll down, tap a
 // button and scroll back, or spell sinh out letter by letter on the abc tab.
 // Keys write what the strips write.
-const key = (latex, insert, tooltip) => ({ latex, insert, tooltip, class: 'small' });
-const inverse = (name, tooltip) => ({ label: `<span style="white-space:nowrap;font-size:72%">${name}<sup>−1</sup></span>`, insert: `\\${name}^{-1}(#0)`, tooltip, class: 'small' });
+// The names are for whoever reads this; the keys carry no tooltip, which on
+// a phone pops up a bubble over the key being pressed.
+const key = (latex, insert) => ({ latex, insert, class: 'small' });
+const inverse = name => ({ label: `<span style="white-space:nowrap;font-size:72%">${name}<sup>−1</sup></span>`, insert: `\\${name}^{-1}(#0)`, class: 'small' });
 export const FUNCTION_KEYBOARD = {
   label: 'f(x)',
   tooltip: 'Functions',

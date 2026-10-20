@@ -15,6 +15,7 @@ import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/
 import { sessionReplaced } from './lib/sessionCheck.js';
 import { createFocusLossWatcher, isTypingTarget } from './lib/focusLoss.js';
 import { isUpdateReload } from './lib/staleBuild.js';
+import { paperNoun } from './lib/paperNoun.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -77,6 +78,8 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // revision paper the student can simply restart is pure friction, and it
   // strands them behind a screen only an instructor can clear.
   const isPractice = !!exam?.allow_retakes;
+  // "Assignment", "Quiz", "Seatwork" or "Exam", for the buttons and headings.
+  const noun = paperNoun(exam);
 
   const storageKey = `exam_progress_${student?.id}_${exam?.id}`;
   const startingSeconds = exam?.duration_minutes ? (exam.duration_minutes * 60) : 14400;
@@ -820,7 +823,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       }
 
     } catch (err) {
-      alert("There was an error saving your exam. Please contact your instructor.");
+      alert(`There was an error saving your ${noun.toLowerCase()}. Please contact your instructor.`);
     } finally {
       isSubmittingRef.current = false;
       setIsLoading(false);
@@ -1161,7 +1164,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--paper)' }}>
       <div style={{ textAlign: 'center', color: 'var(--ink-3)' }}>
         <Icon name="clipboard" size={38} color="var(--navy)" style={{ opacity: 0.22, marginBottom: 14 }} />
-        <p style={{ margin: 0, fontWeight: 600, fontSize: 15, color: 'var(--ink-2)' }}>Loading Exam…</p>
+        <p style={{ margin: 0, fontWeight: 600, fontSize: 15, color: 'var(--ink-2)' }}>Loading {noun}…</p>
       </div>
     </div>
   );
@@ -1225,7 +1228,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             <div className="eyebrow" style={{ color: 'var(--gold-bright)', fontSize: 11, maxWidth: 340, margin: '14px auto 0', lineHeight: 1.5 }}>
               Aeronautical Engineering Learning Portal
             </div>
-            <h1 className="display" style={{ color: 'white', marginTop: 8, fontSize: 24 }}>Exam Complete</h1>
+            <h1 className="display" style={{ color: 'white', marginTop: 8, fontSize: 24 }}>{noun} Complete</h1>
           </div>
         </div>
 
@@ -1412,7 +1415,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
         <div className="exam-overlay" role="dialog" aria-modal="true" aria-labelledby="submit-title">
           <div className="card exam-dialog">
             <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 24px', borderBottom: '3px solid var(--gold)' }}>
-              <h2 id="submit-title" style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Final Submission</h2>
+              <h2 id="submit-title" style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Hand in your {noun.toLowerCase()}</h2>
               <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
                 {totalAnswered} of {questions.length} questions answered
               </p>
@@ -1495,7 +1498,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
                   disabled={!confirmed || isSubmitting}
                   onClick={() => executeSubmission()}
                 >
-                  {isSubmitting ? 'Saving…' : 'Submit Exam'}
+                  {isSubmitting ? 'Saving…' : `Submit ${noun}`}
                 </button>
               </div>
             </div>
@@ -1838,7 +1841,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             onClick={openSubmit}
           >
             <Icon name="check-circle" size={16} />
-            Submit Final Exam
+            {noun === 'Exam' && !isPractice ? 'Submit Final Exam' : `Submit ${noun}`}
           </button>
         </aside>
       </div>

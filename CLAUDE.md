@@ -43,6 +43,10 @@ Kyle pastes each `sql/NNN_*.sql` into the Supabase SQL editor himself.
 - A committed migration is not a live one. Say plainly what he must run.
 - End a migration with a read-only VERIFY query: the SQL editor shows only
   the last statement's result, so a check in the middle is never seen.
+- A migration that creates a table must GRANT each role (`anon`,
+  `authenticated`) only what it needs, in the same file. Since 2026-10-30
+  Supabase no longer grants new `public` tables to the Data API, so a table
+  without grants is refused.
 - New files take the next free number. Gaps in the sequence are deliberate —
   those numbers went to content scripts that live outside the repo.
 - Deploy order matters. If the frontend selects a new column or calls a new

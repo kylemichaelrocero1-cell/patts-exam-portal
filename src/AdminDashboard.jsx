@@ -8,7 +8,9 @@ import { choicesOf, letterFor, choicesPatch, keyIsValid } from './lib/choices';
 import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
          isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
-         updateAssessment, deleteAssessment, setAssessmentArchived } from './lib/assessments';
+         updateAssessment, deleteAssessment, setAssessmentArchived,
+         isMissingFunctionError } from './lib/assessments';
+import { removalPrompt, removalSummary } from './lib/removeStudents';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
 import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
@@ -2321,24 +2323,34 @@ const deleteResult = async (studentId, examId) => {
     setIsBatchSaving(false);
   };
 
+  // A student is one account shared by every instructor who teaches them, so
+  // this takes them out of YOUR sections and nothing more. It used to delete
+  // the account outright, and with it every result the student had under
+  // every instructor — one colleague clearing a class list wiped another's
+  // course. The database now decides what removing leaves (sql/094); the
+  // dashboard only asks, and reports what it did.
+  const removeStudents = async (ids) => {
+    const { data, error } = await supabase.rpc('remove_students_from_my_sections', { p_student_ids: ids });
+    if (error) {
+      console.error('Could not remove students:', error);
+      alert(isMissingFunctionError(error)
+        ? 'Removing students needs a database update (sql/094) that has not been run yet. Nothing was changed.'
+        : 'Could not remove the student(s). Nothing was changed — please try again.');
+      return false;
+    }
+    setSelectedStudentIds(prev => { const n = new Set(prev); ids.forEach(id => n.delete(id)); return n; });
+    // Some are gone, some only left your sections and keep their results here:
+    // rebuild from the server rather than guess which.
+    await fetchDashboardData();
+    alert(removalSummary(data));
+    return true;
+  };
+
   const deleteStudent = async (studentId) => {
     const student = studentsList.find(s => s.id === studentId);
     if (!student) return;
-    if (!window.confirm(`Delete "${student.full_name || 'this student'}" permanently?\n\nThis will also remove all their exam results. This cannot be undone.`)) return;
-
-    await supabase.from('live_sessions').delete().eq('student_id', studentId);
-    await supabase.from('results').delete().eq('student_id', studentId);
-    const { error } = await supabase.from('users').delete().eq('id', studentId);
-
-    if (error) {
-      alert('Error deleting student: ' + error.message);
-      return;
-    }
-
-    setStudentsList(prev => prev.filter(s => s.id !== studentId));
-    setStudents(prev => { const n = { ...prev }; delete n[studentId]; return n; });
-    setResults(prev => prev.filter(r => r.student_id !== studentId));
-    setSelectedStudentIds(prev => { const n = new Set(prev); n.delete(studentId); return n; });
+    if (!window.confirm(removalPrompt(1, student.full_name))) return;
+    await removeStudents([studentId]);
   };
 
   const batchDeleteStudents = async () => {
@@ -2346,22 +2358,10 @@ const deleteResult = async (studentId, examId) => {
     const ownedIds = new Set(studentsList.map(s => s.id));
     const ids = [...selectedStudentIds].filter(id => ownedIds.has(id));
     if (ids.length === 0) return;
-    if (!window.confirm(`Permanently delete ${ids.length} student(s) and all their results?\n\nThis cannot be undone.`)) return;
+    if (!window.confirm(removalPrompt(ids.length))) return;
 
     setIsBatchSaving(true);
-    await supabase.from('live_sessions').delete().in('student_id', ids);
-    await supabase.from('results').delete().in('student_id', ids);
-    const { error } = await supabase.from('users').delete().in('id', ids);
-
-    if (error) {
-      alert('Error deleting students: ' + error.message);
-    } else {
-      const deletedSet = new Set(ids);
-      setStudentsList(prev => prev.filter(s => !deletedSet.has(s.id)));
-      setStudents(prev => { const n = { ...prev }; ids.forEach(id => delete n[id]); return n; });
-      setResults(prev => prev.filter(r => !deletedSet.has(r.student_id)));
-      setSelectedStudentIds(new Set());
-    }
+    await removeStudents(ids);
     setIsBatchSaving(false);
   };
 
@@ -3551,7 +3551,7 @@ const deleteResult = async (studentId, examId) => {
                 </button>
                 {selectedStudentIds.size > 0 && (
                   <>
-                    <button onClick={batchDeleteStudents} disabled={isBatchSaving} className="btn sm danger"><Icon name="trash" size={13} /> Delete Selected</button>
+                    <button onClick={batchDeleteStudents} disabled={isBatchSaving} className="btn sm danger"><Icon name="trash" size={13} /> Remove Selected</button>
                     <button onClick={() => setSelectedStudentIds(new Set())} className="btn ghost sm">Clear</button>
                   </>
                 )}
@@ -3645,7 +3645,7 @@ const deleteResult = async (studentId, examId) => {
                             </div>
                           </td>
                           <td onClick={e => e.stopPropagation()}>
-                            <button onClick={() => deleteStudent(student.id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}>
+                            <button onClick={() => deleteStudent(student.id)} className="btn ghost sm" title="Remove from your sections" aria-label="Remove from your sections" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}>
                               <Icon name="trash" size={13} />
                             </button>
                           </td>

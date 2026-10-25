@@ -2132,21 +2132,29 @@ const deleteResult = async (studentId, examId) => {
       : x));
   };
 
-  // --- NEW: Delete Exam ---
+  // A paper a class has sat is archived before it can be deleted — two
+  // deliberate steps, so one stray click cannot take a whole class's results.
+  // Postgres holds the same rule (sql/095); this only says it first. Only the
+  // paper is deleted here: its questions, results and sittings go with it by
+  // foreign key. Deleting those first, as this used to, would empty the paper
+  // before the database could see it had been sat.
+  const ARCHIVE_FIRST = 'This paper has been sat. Archive it first — that keeps every result and hides it from students — and delete it afterwards if you still need to.';
   const deleteExam = async (examId) => {
-    if (window.confirm("🚨 Are you sure? This will delete the exam, its questions, and all student results associated with it forever!")) {
-      // Delete dependents first so no orphaned rows remain regardless of DB cascade config
-      await supabase.from('live_sessions').delete().eq('exam_id', examId);
-      await supabase.from('results').delete().eq('exam_id', examId);
-      await supabase.from('questions').delete().eq('exam_id', examId);
-      let error = null;
-      try { await deleteAssessment(examId); } catch (e) { error = e; }
-      if (error) {
-        alert("Error deleting exam: " + error.message);
-      } else {
-        fetchDashboardData();
-      }
+    const exam = examsList.find(e => e.id === examId);
+    const sat = results.filter(r => r.exam_id === examId).length;
+    if (sat > 0 && !exam?.archived_at) return alert(ARCHIVE_FIRST);
+    const warning = sat > 0
+      ? `Delete "${exam?.title || 'this paper'}" and its ${sat} result${sat === 1 ? '' : 's'} forever?\n\nThis cannot be undone.`
+      : `Delete "${exam?.title || 'this paper'}" and its questions?\n\nThis cannot be undone.`;
+    if (!window.confirm(warning)) return;
+    try {
+      await deleteAssessment(examId);
+    } catch (e) {
+      console.error('Could not delete paper:', e);
+      alert(e?.hint === 'archive_before_delete' ? ARCHIVE_FIRST : 'Could not delete this paper. Nothing was deleted — please try again.');
+      return;
     }
+    fetchDashboardData();
   };
 
   // --- NEW: Toggle Exam Open/Close ---

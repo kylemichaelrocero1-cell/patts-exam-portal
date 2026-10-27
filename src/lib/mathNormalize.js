@@ -122,11 +122,13 @@ export function mathAnswersMatch(a, b) {
 }
 
 // math_unbracket() (045): brackets that cannot change the meaning, removed
-// so that 4x(\sin(x^2))(\cos(x^2)) and 4x\sin(x^2)\cos(x^2) are one answer.
+// so that 4x(\sin(x^2))(\cos(x^2)) and 4x\sin(x^2)\cos(x^2) are one answer;
+// since 097, one that must stay is written one way (regroup, below).
 // Run on normalised text, from both sides. A bracket stays if it holds a
 // top-level + − or =, starts with a sign, is a function's argument, is
 // raised, subscripted, primed or divided, or would run two digits together.
-function unbracketOk(before, inside, after) {
+// With digits: false, that last rule is left out (097's math_regroup).
+function unbracketOk(before, inside, after, { digits = true } = {}) {
   if (inside === '' || inside[0] === '-' || inside[0] === '+') return false;
   let d = 0;
   for (const c of inside) {
@@ -137,9 +139,49 @@ function unbracketOk(before, inside, after) {
   if (/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(before)) return false;
   if (['^', '_', '/', "'"].includes(before.slice(-1))) return false;
   if (['^', '_', '/', "'", '!'].includes(after.slice(0, 1))) return false;
+  if (!digits) return true;
   if (/[0-9]$/.test(before) && /^[0-9]/.test(inside)) return false;
   if (/[0-9]$/.test(inside) && /^[0-9]/.test(after)) return false;
   return true;
+}
+
+// math_regroup() (097): a bracket unbracketOk() keeps, written the one way
+// the same product is written without it — or null. Two cases:
+//   * a single number or letter raised: (x)^2 is x^2 and (5)^{x} is 5^{x},
+//     but 3(2)^{x} keeps its bracket (32^{x} is another number) and
+//     \sin(x)^2 is a function's argument, as before;
+//   * a bracket kept only because its ends would run two digits together:
+//     the number at that end is bracketed instead, so 3(2^{3x}\ln(2)) is
+//     3(2)^{3x}\ln(2) — which is how 3\cdot2^{3x}\cdot\ln(2) already reads.
+// Neither right after a function's bare number: \ln3(2x), \ln5(5^{x}).
+function regroup(before, inside, after) {
+  // After a function's bare number, \ln3(2x): the 2x could be in the log
+  // (053's call), so it is not read as \ln 3\cdot 2x.
+  if (/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?[0-9.]+$/.test(before)) return null;
+  if (after[0] === '^' && /^([0-9]+(\.[0-9]+)?|[a-z])$/.test(inside)) {
+    if (/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(before)) return null;
+    if (['^', '_', '/', "'"].includes(before.slice(-1))) return null;
+    if (/[0-9.]$/.test(before) && /^[0-9]/.test(inside)) return null;
+    return before + inside + after;
+  }
+  const lead = /[0-9]$/.test(before) && /^[0-9]/.test(inside);
+  const trail = /[0-9]$/.test(inside) && /^[0-9]/.test(after);
+  if (!lead && !trail) return null;
+  if (/^[0-9]+(\.[0-9]+)?$/.test(inside)) return null;
+  if (!unbracketOk(before, inside, after, { digits: false })) return null;
+  let mid = inside;
+  if (lead) {
+    const m = /^[0-9]+(\.[0-9]+)?/.exec(mid)[0];
+    mid = '(' + m + ')' + mid.slice(m.length);
+  }
+  if (trail) {
+    const m = /[0-9]+(\.[0-9]+)?$/.exec(mid)[0];
+    const at = mid.length - m.length;
+    // A power's or a subscript's digit is not a factor: (x^2)3 stays.
+    if (['^', '_'].includes(mid[at - 1])) return null;
+    mid = mid.slice(0, at) + '(' + m + ')';
+  }
+  return before + mid + after;
 }
 
 // math_sign_out() (061): the sign moved to the front of the term a bracket
@@ -176,8 +218,13 @@ export function unbracket(p, { signs = false } = {}) {
       }
       if (j < 0) continue;
       const before = s.slice(0, i), inside = s.slice(i + 1, j), after = s.slice(j + 1);
-      if (unbracketOk(before, inside, after)) {
+      const ok = unbracketOk(before, inside, after);
+      const rg = ok ? null : regroup(before, inside, after);
+      if (ok) {
         s = before + inside + after;
+        changed = true;
+      } else if (rg !== null) {
+        s = rg;
         changed = true;
       } else if (signs && inside.length > 1 && inside[0] === '-' && unbracketOk(before, inside.slice(1), after)
                  && !/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(inside)) {
@@ -205,7 +252,7 @@ export function sameUnbracketed(a, b) {
 // differently. Applied to the student's line AND to every accepted answer
 // before a third look (working_verdict, 050); never to anything stored.
 const FN_LETTERS = ['arcsin', 'arccos', 'arctan', 'arcsec', 'arccsc', 'arccot',
-  'cosec', 'sin', 'cos', 'tan', 'sec', 'csc', 'cot'];
+  'cosec', 'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'ln', 'log'];
 const FN_BARE = ['arcsin', 'arccos', 'arctan', 'arcsec', 'arccsc', 'arccot',
   'sin', 'cos', 'tan', 'sec', 'csc', 'cot', 'ln', 'log'];
 // The hyperbolic names (081), read only on a line for an item whose accepted
@@ -220,6 +267,17 @@ const HYP_BARE = [...HYP_NAMES.map(n => 'ar' + n), ...HYP_NAMES];
 export function hasHyperbolic(accepted) {
   return /sinh|cosh|tanh|coth|sech|csch|\{ch\}/i.test((accepted || []).map(a => String(a ?? '')).join(' '));
 }
+// math_open() (097): the index of the ( that the ) at i closes, or -1.
+function openOf(s, i) {
+  let d = 0;
+  for (let k = i; k >= 0; k--) {
+    if (s[k] === ')') d++;
+    else if (s[k] === '(' && --d === 0) return k;
+  }
+  return -1;
+}
+// A denominator written without brackets in the plain-text box: x^2, 3x, x.
+const DEN = /^(?:[0-9]+(?:\.[0-9]+)?[a-zA-Z]?|[a-zA-Z])(?:\^(?:\{[^{}]*\}|[0-9a-zA-Z]))?/;
 const isLetter = c => c !== undefined && /^[a-zA-Z]$/.test(c);
 const isDigit = c => c !== undefined && /^[0-9]$/.test(c);
 
@@ -229,9 +287,53 @@ export function respell(p, { hyperbolic = false } = {}) {
   const bare = hyperbolic ? [...HYP_BARE, ...FN_BARE] : FN_BARE;
   // r1. \left( \right) are plain brackets; \left. \right. draw nothing.
   s = s.replace(/\\(left|right)\./g, '').replace(/\\(left|right)(?![a-zA-Z])/g, '');
-  // r2. Text mode: \text{…}, \mathrm{…}, \operatorname{…} hold what they show.
-  for (let k = 0; k < 3; k++) {
-    s = s.replace(/\\(text|textrm|textit|mathrm|mathit|operatorname)\{([^{}]*)\}/g, '$2');
+  // r1b (097). The plain-text box, shown when the maths keyboard cannot
+  //     load, asks for ^ and /: a power in round brackets, e^(2x), is e^{2x}…
+  for (let g = 0; g < 50; g++) {
+    const i = s.indexOf('^(');
+    if (i < 0) break;
+    const k = closeOf(s, i + 1);
+    if (k < 0) break;
+    s = s.slice(0, i) + '^{' + s.slice(i + 2, k) + '}' + s.slice(k + 1);
+  }
+  // r1c (097). …and a bracket divided by something is a fraction:
+  //     (2x)/(x^2+1) is \frac{2x}{x^2+1}, (1-ln x)/x^2 is \frac{1-ln x}{x^2}.
+  //     Never a function's argument: ln(x)/x and \sin^{2}(x)/x stay.
+  for (let g = 0; g < 50; g++) {
+    let hit = false;
+    for (let k = 0; k < s.length && !hit; k++) {
+      if (s[k] !== '/') continue;
+      let a = k - 1;
+      while (a >= 0 && s[a] === ' ') a--;
+      if (s[a] !== ')') continue;
+      const o = openOf(s, a);
+      if (o < 0) continue;
+      let p = o - 1;
+      while (p >= 0 && s[p] === ' ') p--;
+      if (p >= 0 && /[a-zA-Z^_}\\]/.test(s[p])) continue;
+      let b = k + 1;
+      while (b < s.length && s[b] === ' ') b++;
+      let den, end;
+      if (s[b] === '(') {
+        const c = closeOf(s, b);
+        if (c < 0) continue;
+        den = s.slice(b + 1, c); end = c + 1;
+      } else {
+        const m = DEN.exec(s.slice(b));
+        if (!m) continue;
+        den = m[0]; end = b + den.length;
+      }
+      s = s.slice(0, o) + '\\frac{' + s.slice(o + 1, a) + '}{' + den + '}' + s.slice(end);
+      hit = true;
+    }
+    if (!hit) break;
+  }
+  // r2. Text mode: \text{…}, \mathrm{…}, \operatorname{…} hold what they show
+  //     — as deep as they are nested (097; it stopped at three).
+  for (let k = 0; k < 10; k++) {
+    const t = s.replace(/\\(text|textrm|textit|mathrm|mathit|operatorname)\{([^{}]*)\}/g, '$2');
+    if (t === s) break;
+    s = t;
   }
   s = s.split('\\textasciicircum').join('^').split('\\textbraceleft').join('{')
     .split('\\textbraceright').join('}');
@@ -264,7 +366,14 @@ export function respell(p, { hyperbolic = false } = {}) {
     s = s.slice(0, i + 1) + s.slice(i + 3, k) + s.slice(k + 1);
   }
   s = s.split('^{^').join('^{').split('\\placeholder{}').join('');
-  // r5. A function name typed as letters, and \cosec, is the function;
+  // r4b (097). The same before one character: \log_{_2} is \log_{2}.
+  s = s.replace(/\{[\^_](?![{}\\])/g, '{');
+  // r4c (097). A power typed in two goes — the field left the power and ^
+  //     was pressed again: e^4^{x} is e^{4x}. Only a number then letters:
+  //     3^{x}^{2} could be 3^{x^2} or 3^{2x}, and stays as it is.
+  s = s.replace(/\^\{([0-9]+)\}\^\{(?=[a-zA-Z\\])/g, '^{$1').replace(/\^([0-9])\^\{(?=[a-zA-Z\\])/g, '^{$1');
+  // r5. A function name typed as letters, and \cosec, is the function
+  //     (ln and log too, since 097: the plain-text box has no \ln key);
   //     with hyperbolic (081), sinh is \sinh and arcsinh, arsinh and
   //     arc\sinh are \arsinh.
   let out = '';

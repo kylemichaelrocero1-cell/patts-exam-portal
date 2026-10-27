@@ -227,12 +227,14 @@ export default function MathField({
           onChange={e => onChange?.(e.target.value)}
           readOnly={readOnly}
           aria-label={ariaLabel}
-          placeholder="Type your answer, e.g. 5  or  x^2+C"
+          placeholder="Type your answer, e.g. y' = 3e^(2x)"
         />
         <p className="math-field-error">
           The maths keyboard could not load. Type your answer as plain text —
-          use <code>^</code> for powers and <code>/</code> for division. It will
-          still be marked.
+          use <code>^</code> for powers and <code>/</code> for division, with
+          brackets: <code>e^(2x)</code>, <code>(x+1)/(x-1)</code>. Begin with the
+          label the question asks for, such as <code>y' =</code>. It will still
+          be marked.
         </p>
       </div>
     );

@@ -3738,7 +3738,11 @@ const deleteResult = async (studentId, examId) => {
                 </thead>
                 <tbody>
                   {filteredStudents.length === 0 ? (
-                    <tr><td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>No students found.</td></tr>
+                    <tr><td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>
+                      {studentsList.length === 0
+                        ? 'No students yet. Add your roster with Import Students from CSV below.'
+                        : 'No students match this filter.'}
+                    </td></tr>
                   ) : (
                     groups.map((item, idx) => {
                       if (item.type === 'header') {
@@ -4263,7 +4267,7 @@ const deleteResult = async (studentId, examId) => {
                 </div>
 
                 {eligibleStudents.length === 0 ? (
-                  <p style={{ color: 'var(--ink-3)', textAlign: 'center', padding: '20px' }}>No students found for this exam's section(s).</p>
+                  <p style={{ color: 'var(--ink-3)', textAlign: 'center', padding: '20px' }}>No students are enrolled in this exam's sections. Add them on the Students page, or check the exam's sections in Manage Exams.</p>
                 ) : (
                   <div className="card" style={{ overflow: 'hidden' }}>
                   <div className="table-scroll">
@@ -4802,9 +4806,13 @@ const deleteResult = async (studentId, examId) => {
                       }}>
                         {picked && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--navy)' }} />}
                       </span>
+                      {/* An account with no display name carries its email
+                          as its name; it is then the label, said once. */}
                       <span>
-                        {inst.full_name}
-                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, color: 'var(--ink-3)' }}>{inst.email}</span>
+                        {inst.full_name || inst.email}
+                        {inst.full_name && inst.email && inst.full_name !== inst.email && (
+                          <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, color: 'var(--ink-3)' }}>{inst.email}</span>
+                        )}
                       </span>
                     </button>
                   );

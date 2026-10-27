@@ -215,21 +215,24 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                 onClick={() => onGoToTab(a.kind === 'seatwork' ? 'seatwork' : 'exams')}
                 style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', cursor: 'pointer', width: '100%', border: '1px solid var(--line)', background: 'var(--surface)' }}
               >
-                <span style={{
-                  fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
-                  padding: '3px 8px', borderRadius: 'var(--r-full)', flexShrink: 0, alignSelf: 'flex-start',
-                  background: a.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
-                  color: a.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
-                }}>
-                  {paperNoun(a)}
-                </span>
                 {/* The title wraps and the status sits under it. On one line
                     a scheduled paper's date range left a phone room for one
                     letter of the title, and papers in a series ("AE Board
                     Review — …") were cut before the part that tells them
                     apart. The colour is explicit because this whole card is a
                     <button>, and the global button rule paints text white. */}
-                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {/* The type badge sits above the title, not beside it: a
+                    wide one ("ASSIGNMENT") left a phone a column so narrow
+                    the title ran to five lines. */}
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
+                  <span style={{
+                    fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
+                    padding: '2px 8px', borderRadius: 'var(--r-full)', marginBottom: 2,
+                    background: a.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
+                    color: a.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
+                  }}>
+                    {paperNoun(a)}
+                  </span>
                   <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-1)', lineHeight: 1.35, overflowWrap: 'anywhere' }}>
                     {a.title || 'Untitled'}
                   </span>

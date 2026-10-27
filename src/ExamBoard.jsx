@@ -184,6 +184,8 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
   // A letter key that replaced a picked answer says so, briefly: one stray
   // keypress used to change an answer without a sign that anything happened.
   const [keyNotice, setKeyNotice] = useState(null);
+  // A phone clamps the paper's title to two lines; a tap shows all of it.
+  const [titleOpen, setTitleOpen] = useState(false);
   const questionTextRef = useRef(null);
   // What was handed in and when, for the finish screen — something to show
   // if there is ever a question of whether a paper went in.
@@ -1739,7 +1741,12 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
           <img src="/patts-logo.png" alt="PATTS" className="exam-logo" />
           {/* Which paper this is, and whose — the first thing a proctor
               walking the room looks for, as on a board exam's answer sheet. */}
-          <div className="exam-id">
+          <div
+            className={`exam-id${titleOpen ? ' is-open' : ''}`}
+            role="button" tabIndex={0} aria-expanded={titleOpen}
+            onClick={() => setTitleOpen(v => !v)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setTitleOpen(v => !v); } }}
+          >
             <p className="exam-paper-title" title={exam?.title || ''}>{exam?.title || noun}</p>
             <p className="exam-student-name">
               {formatName(student?.full_name)}{examSet ? ` · Set ${examSet}` : ''}

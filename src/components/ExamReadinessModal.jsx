@@ -8,49 +8,51 @@
 // here is verifiable from the browser, and pretending otherwise would just
 // block students over a check we cannot actually make.
 
+import Icon from './Icon';
+
 const RULES = [
   {
-    icon: '🔕',
+    icon: 'bell-off',
     title: 'Silence every notification',
     body: 'Turn on Do Not Disturb / Focus. A banner from Messenger, email or Viber takes the focus off this page and is logged as a violation.',
   },
   {
-    icon: '💬',
+    icon: 'message',
     title: 'Turn off chat heads and bubbles',
     body: 'Messenger chat heads, Android bubbles and any floating chat window must be off before you start — in Messenger\'s settings, and on Android under Settings → Notifications → Bubbles (on Samsung: Floating notifications). Anything opened over the exam hides the paper and is recorded as a violation.',
   },
   {
-    icon: '⏾',
+    icon: 'moon',
     title: 'Stop the screen from sleeping',
     body: 'Switch off auto-lock, auto-sleep and the screensaver. If the screen locks while you are thinking, coming back counts against you.',
   },
   {
-    icon: '🔋',
+    icon: 'battery',
     title: 'Charge the device, or plug it in',
     body: 'A device that dies mid-exam ends the sitting where it stands. Only what has been saved is submitted.',
   },
   {
-    icon: '🕵️',
+    icon: 'eye-off',
     title: 'Use a private / incognito window',
     body: 'A normal window can restore old tabs, autofill, or pop up an extension over the exam. A fresh private window will not.',
   },
   {
-    icon: '🗂️',
+    icon: 'layers',
     title: 'Close every other tab and app',
     body: 'This portal should be the only thing open. Switching to anything else — even for a second — is recorded, and four violations lock your paper until your instructor clears it.',
   },
   {
-    icon: '📶',
+    icon: 'wifi',
     title: 'Sit somewhere with a stable connection',
     body: 'Your answers save every few seconds. A connection that drops in and out risks losing the most recent ones.',
   },
   {
-    icon: '📱',
+    icon: 'smartphone',
     title: 'On a phone, keep the page at normal size',
     body: 'If this page looks tiny, turn off "Desktop site" (iPhone: tap aA → Request Mobile Website) and set the zoom to 100%. Previous, Next and the question list are in the bar at the bottom of the screen.',
   },
   {
-    icon: '🚫',
+    icon: 'ban',
     title: 'Do not refresh, minimise or go back',
     body: 'Refreshing is counted as a violation. Use the Submit button when you are finished — nothing else ends the exam safely.',
   },
@@ -67,7 +69,13 @@ export default function ExamReadinessModal({ exam, onAcknowledge, onCancel }) {
     >
       <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: 560, width: '100%', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
         <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '24px 28px', borderBottom: '3px solid var(--gold)', flexShrink: 0 }}>
-          <div style={{ fontSize: 30, marginBottom: 6 }}>⚠️</div>
+          <span aria-hidden="true" style={{
+            width: 40, height: 40, borderRadius: 12, marginBottom: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(244,208,63,.14)', border: '1px solid rgba(244,208,63,.35)',
+          }}>
+            <Icon name="shield-check" size={21} color="var(--gold-bright, #F4D03F)" />
+          </span>
           <h2 id="readiness-title" style={{ color: 'white', margin: 0, fontSize: 18, fontWeight: 700 }}>
             Before you begin
           </h2>
@@ -86,7 +94,13 @@ export default function ExamReadinessModal({ exam, onAcknowledge, onCancel }) {
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 10 }}>
             {RULES.map(rule => (
               <li key={rule.title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '11px 13px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2, #F7F8FA)' }}>
-                <span aria-hidden="true" style={{ fontSize: 17, lineHeight: 1.4, flexShrink: 0 }}>{rule.icon}</span>
+                <span aria-hidden="true" style={{
+                  width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'var(--navy-tint, #EAF0F8)', color: 'var(--navy)',
+                }}>
+                  <Icon name={rule.icon} size={16} />
+                </span>
                 <span>
                   <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5, color: 'var(--navy)' }}>{rule.title}</span>
                   <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.55 }}>{rule.body}</span>

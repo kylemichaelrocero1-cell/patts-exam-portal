@@ -431,7 +431,9 @@ export default function ExamList({ embedded = false, kind = null, student, selec
             style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: '400px', width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}
           >
             <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '28px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
-              <div style={{ fontSize: '36px', marginBottom: '8px' }}>🔒</div>
+              <span aria-hidden="true" style={{ width: 44, height: 44, borderRadius: 12, margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(244,208,63,.14)', border: '1px solid rgba(244,208,63,.35)' }}>
+                <Icon name="lock" size={21} color="var(--gold-bright, #F4D03F)" />
+              </span>
               <h2 style={{ color: 'white', margin: 0, fontSize: '18px', fontWeight: 700 }}>Password Required</h2>
               <p style={{ color: 'rgba(244,208,63,.85)', margin: '6px 0 0', fontSize: '13px', fontWeight: 500 }}>{pendingExam.title}</p>
             </div>
@@ -495,8 +497,8 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
       {/* Recovery toast */}
       {recoveryMsg && (
-        <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-bd)', color: 'var(--success)', padding: '12px 20px', textAlign: 'center', fontSize: '14px', fontWeight: 600 }}>
-          ✅ {recoveryMsg}
+        <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-bd)', color: 'var(--success)', padding: '12px 20px', fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <Icon name="check-circle" size={16} /> {recoveryMsg}
         </div>
       )}
 
@@ -511,12 +513,12 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
         {fetchError ? (
           <div style={{ background: 'var(--danger-bg)', padding: '32px', borderRadius: 'var(--r-lg)', textAlign: 'center', border: '1px solid var(--danger-bd)' }}>
-            <p style={{ color: 'var(--danger)', fontSize: '16px', fontWeight: 600, margin: '0 0 16px' }}>⚠️ Could not load exams. Please check your internet connection.</p>
+            <p style={{ color: 'var(--danger)', fontSize: '16px', fontWeight: 600, margin: '0 0 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="alert" size={18} /> Could not load exams. Please check your internet connection.</p>
             <button onClick={() => fetchExams({ fresh: true })} style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '10px 24px' }}>Retry</button>
           </div>
         ) : exams.length === 0 ? (
           <div style={{ background: 'var(--white)', padding: '52px 32px', borderRadius: 'var(--r-xl)', textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)' }}>
-            <div style={{ fontSize: '48px', marginBottom: '16px' }}>📋</div>
+            <Icon name="clipboard" size={38} color="var(--ink-4)" style={{ marginBottom: 14 }} />
             <p style={{ color: 'var(--text-2)', fontSize: '17px', fontWeight: 600, margin: 0 }}>{kind === 'seatwork' ? 'No open seatwork at the moment.' : 'No open exams at the moment.'}</p>
             <p style={{ color: 'var(--text-3)', fontSize: '14px', margin: '8px 0 0' }}>{kind === 'seatwork' ? 'Please wait for your instructor to open one.' : 'Please wait for your instructor to open an exam.'}</p>
           </div>
@@ -579,11 +581,11 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         {paperNoun(exam)}
                       </span>
                       <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        ⏱ <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
+                        <Icon name="clock" size={14} /> <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
                       </span>
                       {windowLabel && (
                         <span style={{ color: 'var(--text-3)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: 5 }}>
-                          🗓 {windowLabel}
+                          <Icon name="calendar" size={14} /> {windowLabel}
                         </span>
                       )}
                       {exam.allow_retakes && (
@@ -593,12 +595,12 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                       )}
                       {isRetakingGraded && (
                         <span style={{ background: 'var(--success-bg)', color: 'var(--success)', border: '1px solid var(--success-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: 12, fontWeight: 600 }}>
-                          ✅ Graded submission on file
+                          <Icon name="check-circle" size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Graded submission on file
                         </span>
                       )}
                       {exam.has_password && !isAlreadyDone && !isResumable && (
                         <span style={{ background: 'var(--warning-bg)', color: 'var(--warning)', border: '1px solid var(--warning-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
-                          🔒 Password required
+                          <Icon name="lock" size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Password required
                         </span>
                       )}
                       {isResumable && (
@@ -663,7 +665,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                     ) : isAlreadyDone ? (
                       <div style={{ textAlign: 'center' }}>
                         <span style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--success-bd)' }}>
-                          ✅ Submitted
+                          <Icon name="check-circle" size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Submitted
                         </span>
                         <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: '6px', marginBottom: 0 }}>Responses recorded.</p>
                         {exam.show_answers && (
@@ -681,7 +683,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                     ) : isResumable ? (
                       <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
                         style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
-                        {isCheckingSession ? 'Checking…' : `↩ Resume ${paperNoun(exam)}`}
+                        {isCheckingSession ? 'Checking…' : <><Icon name="undo" size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Resume {paperNoun(exam)}</>}
                       </button>
                     ) : (
                       <div className="exam-card-btns">

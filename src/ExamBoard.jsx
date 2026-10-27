@@ -266,7 +266,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       if (stopped || replaced !== true) return;
       stopped = true;
       clearInterval(checkSession);
-      alert("⚠️ SECURITY ALERT: Your account was logged in from another device or tab. You have been disconnected.");
+      alert("You have been signed out: your account was signed in on another device or tab.");
       // Clear both tokens so reload lands at login instead of re-entering ExamBoard
       // and re-triggering this guard in an infinite loop.
       localStorage.removeItem('local_session_token');
@@ -674,7 +674,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
     if (error) {
       console.error('Could not load the answer review:', error.message);
       alert(/session has expired/i.test(error.message || '')
-        ? '⚠️ Your session has expired. Please log in again.'
+        ? 'Your session has expired. Please log in again.'
         : 'Could not load the answers. Please try again.');
       return;
     }
@@ -1034,7 +1034,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       // Counted either way; only a real exam interrupts the student for it.
       if (!isPractice) {
         alertActiveRef.current = true;
-        alert("⚠️ SYSTEM WARNING: Tab switch detected.");
+        alert("Warning: leaving the exam page was recorded.");
         alertActiveRef.current = false;
       }
     };
@@ -1125,7 +1125,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       if (forbidden) {
         e.preventDefault();
         logViolation("Screenshot or Print shortcut attempted");
-        if (!isPractice) alert("⚠️ SECURITY VIOLATION: Screenshot/Print disabled.");
+        if (!isPractice) alert("Screenshots and printing are disabled during the exam.");
       }
     };
 
@@ -1208,10 +1208,10 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
           // Worth spelling out: the student has done nothing wrong and the
           // server is fine. There is one session_token per student, so logging
           // in anywhere else invalidated this device.
-          ? `⚠️ ${gateErrorMessage(error)}`
+          ? `${gateErrorMessage(error)}`
           : error?.message && /password|section|not open|exists/i.test(error.message)
-            ? `⚠️ ${error.message}`
-            : "⚠️ Could not load exam questions. Please refresh the page or contact your instructor.");
+            ? `${error.message}`
+            : "Could not load exam questions. Please refresh the page or contact your instructor.");
 
         // Turned away at the password gate, holding a tab that thinks it is
         // already through. That happens the moment an instructor changes a

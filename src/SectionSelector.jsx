@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { selectAssessments, isAvailableNow, availabilityState } from './lib/assessments';
 import { formatName } from './lib/personName.js';
+import Icon from './components/Icon';
 
 export default function SectionSelector({ student, onSelect, onLogout }) {
   const [sections, setSections] = useState([]);
@@ -89,7 +90,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
                 justifyContent: 'center', fontSize: '20px', flexShrink: 0,
                 boxShadow: 'var(--s-sm)',
               }}>
-                👤
+                <Icon name="user" size={22} color="white" />
               </div>
               <div>
                 <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.05em' }}>Welcome back</p>
@@ -112,7 +113,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
             </div>
           ) : fetchError ? (
             <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger-bd)', borderRadius: 'var(--r-lg)', padding: '28px', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 14px', color: 'var(--danger)', fontWeight: 600 }}>⚠️ Could not connect to the server.</p>
+              <p style={{ margin: '0 0 14px', color: 'var(--danger)', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="alert" size={17} /> Could not connect to the server.</p>
               <button onClick={() => { setFetchError(false); setIsLoading(true); setRetryCount(c => c + 1); }}
                 style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '9px 20px' }}>
                 Retry
@@ -152,7 +153,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
                     e.currentTarget.style.boxShadow = 'var(--s-xs)';
                   }}
                 >
-                  <span>📚 {sec}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}><Icon name="book" size={17} /> {sec}</span>
                   <span style={{ color: 'var(--gold)', fontSize: '18px' }}>→</span>
                 </button>
               ))}
@@ -162,7 +163,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
               background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: '40px 28px',
               textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)',
             }}>
-              <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+              <Icon name="clipboard" size={36} color="var(--ink-4)" style={{ marginBottom: 12 }} />
               <p style={{ margin: 0, color: 'var(--text-2)', fontWeight: 600, fontSize: '16px' }}>No Open Exams</p>
               <p style={{ margin: '8px 0 0', color: 'var(--text-3)', fontSize: '14px' }}>
                 {enrolledSections.length === 0

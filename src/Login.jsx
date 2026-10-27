@@ -6,7 +6,7 @@
   Compared to your current Login.jsx, this version:
    • Keeps ALL your Supabase auth logic untouched
    • Keeps the rate-limit / lockout state machine intact
-   • Uses the new Icon component instead of emoji (🔒, ⏳, ⚠️)
+   • Uses the Icon component instead of emoji
    • Uses the new design tokens (--ink-1, --paper, --sh-2, etc.)
    • Adds a small "session bound to device" reassurance card
    • Uses Fraunces for the hero title

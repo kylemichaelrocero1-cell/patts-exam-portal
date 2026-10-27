@@ -95,6 +95,13 @@ const PATHS = {
   'plane-takeoff':<><path d="M2 22h20"/><path d="m21 8-7 7-9-3 3-2 4 1L8 7l2-1 6 3 5-1z"/></>,
   'compass':      <><circle cx="12" cy="12" r="9"/><path d="m9 15 2-6 6-2-2 6-6 2z"/></>,
   'navigation':   <path d="m3 11 19-8-8 19-2-9-9-2z"/>,
+  'bell-off':     <><path d="M13.7 21a2 2 0 0 1-3.4 0"/><path d="M18 13.2V10a6 6 0 0 0-9.2-5.1"/><path d="M6.3 6.3A6 6 0 0 0 6 8v5l-2 3h13"/><path d="m3 3 18 18"/></>,
+  'moon':         <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>,
+  'battery':      <><rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2"/><path d="M6 10.5v3M9.5 10.5v3"/></>,
+  'wifi':         <><path d="M2 8.8a15 15 0 0 1 20 0"/><path d="M5 12.6a10 10 0 0 1 14 0"/><path d="M8.5 16.3a5 5 0 0 1 7 0"/><circle cx="12" cy="20" r=".6"/></>,
+  'smartphone':   <><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></>,
+  'ban':          <><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></>,
+  'undo':         <><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></>,
 };
 
 export default function Icon({ name, size = 18, color = 'currentColor', strokeWidth = 1.75, style, ...rest }) {

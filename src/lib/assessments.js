@@ -81,13 +81,9 @@ export async function updateAssessment(id, patch) {
   }
 }
 
-export async function deleteAssessment(id) {
-  const { error } = await supabase.from('assessments').delete().eq('id', id);
-  if (error) throw error;
-  // Deleting the legacy row would re-fire the sync trigger's DELETE branch,
-  // which is harmless now the assessment is already gone.
-  await supabase.from('exams').delete().eq('id', id);
-}
+// No deleteAssessment: since sql/104 a paper leaves through the Trash
+// (trash_papers, then purge_expired_trash after 30 days), and the API roles
+// may no longer DELETE one.
 
 /** Read one assessment, falling back to the legacy table. */
 export async function fetchAssessmentById(id, columns = ASSESSMENT_STUDENT_COLUMNS) {

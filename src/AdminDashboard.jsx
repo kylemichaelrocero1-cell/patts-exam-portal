@@ -8,9 +8,9 @@ import { choicesOf, letterFor, choicesPatch, keyIsValid } from './lib/choices';
 import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
          isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
-         updateAssessment, deleteAssessment, setAssessmentArchived,
-         isMissingFunctionError } from './lib/assessments';
-import { removalPrompt, removalSummary } from './lib/removeStudents';
+         updateAssessment, setAssessmentArchived,
+         isMissingFunctionError, isMissingTableError } from './lib/assessments';
+import { removalPrompt, removalSummary, purgeLabel, TRASH_DAYS } from './lib/removeStudents';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
 import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
@@ -187,6 +187,10 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [editingSections, setEditingSections] = useState({});
   const [editingPasswords, setEditingPasswords] = useState({});
   const [qShowArchived, setQShowArchived] = useState(false);
+  // The Trash (sql/104): deleted papers and students wait here 30 days.
+  const [trashRows, setTrashRows] = useState([]);
+  const [restoringTrash, setRestoringTrash] = useState(null);
+  const purgedRef = useRef(false);
   // Passwords are masked until asked for: the dashboard is often on a
   // projector or a screen the class can see.
   const [shownPasswords, setShownPasswords] = useState(() => new Set());
@@ -213,20 +217,13 @@ const [targetSection, setTargetSection] = useState('');
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
 
   // --- ATTENDANCE STATES ---
-  const [attendanceExam, setAttendanceExam] = useState('');
   // Attendance opens on the newest open paper rather than an empty page —
-  // that is almost always the one being taken. Once, so a deliberate
-  // "Choose an exam" is not overridden.
-  const attendancePickedRef = useRef(false);
-  useEffect(() => {
-    if (activeView !== 'attendance' || attendancePickedRef.current || attendanceExam) return;
-    const newestOpen = examsList
-      .filter(e => e.is_open && !e.archived_at)
-      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
-    if (!newestOpen) return;
-    attendancePickedRef.current = true;
-    setAttendanceExam(newestOpen.id);
-  }, [activeView, examsList, attendanceExam]);
+  // that is almost always the one being taken. null until the instructor
+  // picks, so a deliberate "Choose an exam" is not overridden.
+  const [attendanceChoice, setAttendanceExam] = useState(null);
+  const attendanceExam = attendanceChoice ?? (examsList
+    .filter(e => e.is_open && !e.archived_at)
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0]?.id || '');
   const [attendanceSection, setAttendanceSection] = useState('All');
 
   // --- QUESTION MANAGEMENT STATES ---
@@ -1167,7 +1164,7 @@ const [targetSection, setTargetSection] = useState('');
     if (!hasAnswerData) {
       alert(
         `Time fixed for ${timeFixed} student${timeFixed !== 1 ? 's' : ''}.\n\n` +
-        `⚠️ Scores could NOT be recovered automatically.\n\n` +
+        `Scores could NOT be recovered automatically.\n\n` +
         `The students' answers were never saved to the server — only the answer COUNT was stored. ` +
         `This is because the live_sessions table is missing the answers_json column.\n\n` +
         `Run this SQL in Supabase to fix it for future exams:\n\n` +
@@ -1535,7 +1532,7 @@ const [targetSection, setTargetSection] = useState('');
       setCsvParsed(null);
       setExamQuestionsCache(prev => { const n = { ...prev }; delete n[examId]; return n; });
       loadQuestionList(examId);
-      alert(`✅ ${questions.length} question${questions.length !== 1 ? 's' : ''} imported!`);
+      alert(`${questions.length} question${questions.length !== 1 ? 's' : ''} imported!`);
     } catch (err) {
       alert('Import failed: ' + err.message);
     }
@@ -1707,8 +1704,8 @@ const [targetSection, setTargetSection] = useState('');
 
       const mergedCount = finalMerges.length - mergeFailures.length;
       const lines = [];
-      if (inserted.length > 0) lines.push(`✅ ${inserted.length} new student${inserted.length !== 1 ? 's' : ''} added.`);
-      if (mergedCount > 0) lines.push(`✅ ${mergedCount} existing student${mergedCount !== 1 ? 's' : ''} added to their new section.`);
+      if (inserted.length > 0) lines.push(`${inserted.length} new student${inserted.length !== 1 ? 's' : ''} added.`);
+      if (mergedCount > 0) lines.push(`${mergedCount} existing student${mergedCount !== 1 ? 's' : ''} added to their new section.`);
       if (alreadyIn.length > 0) lines.push(`${alreadyIn.length} already in that section — no change.`);
       if (lines.length === 0) lines.push('Nothing to import.');
       let msg = lines.join('\n');
@@ -1722,7 +1719,7 @@ const [targetSection, setTargetSection] = useState('');
       if (problems.length > 0) {
         const preview = problems.slice(0, 8).join('\n');
         const more = problems.length > 8 ? `\n…and ${problems.length - 8} more` : '';
-        msg += `\n\n⚠️ ${problems.length} row${problems.length !== 1 ? 's' : ''} need${problems.length === 1 ? 's' : ''} attention:\n${preview}${more}`;
+        msg += `\n\n${problems.length} row${problems.length !== 1 ? 's' : ''} need${problems.length === 1 ? 's' : ''} attention:\n${preview}${more}`;
       }
       alert(msg);
     } catch (err) {
@@ -1757,7 +1754,7 @@ const [targetSection, setTargetSection] = useState('');
         : (instructorsList.find(i => i.id === dupAssignTo)?.full_name || 'the instructor');
       setDupModal(null);
       await fetchDashboardData();
-      alert(`✅ Exam duplicated and assigned to ${dest}.`);
+      alert(`Exam duplicated and assigned to ${dest}.`);
     }
     setIsDuplicating(false);
   };
@@ -1870,7 +1867,7 @@ const [targetSection, setTargetSection] = useState('');
       setTransferExamIds(new Set());
       setTransferTarget('');
       await fetchDashboardData();
-      alert(`✅ ${count} exam${count !== 1 ? 's' : ''} transferred to ${dest?.full_name || dest?.email}.`);
+      alert(`${count} exam${count !== 1 ? 's' : ''} transferred to ${dest?.full_name || dest?.email}.`);
     }
     setIsTransferring(false);
   };
@@ -1878,6 +1875,24 @@ const [targetSection, setTargetSection] = useState('');
 async function fetchDashboardData() {
     setIsLoading(true);
     try {
+      // What has waited its 30 days in the Trash is deleted for good, once
+      // per visit, before anything is read. Before sql/104 has run there is
+      // no such function, and nothing to purge.
+      if (!purgedRef.current) {
+        purgedRef.current = true;
+        const { error: purgeError } = await supabase.rpc('purge_expired_trash');
+        if (purgeError && !isMissingFunctionError(purgeError)) console.error('Could not empty the Trash:', purgeError);
+      }
+      // Read first: a paper in the Trash is hidden everywhere on this
+      // dashboard. Before sql/104 there is no table — an empty Trash.
+      const trashRes = await supabase.from('trash')
+        .select('id, kind, item_id, label, detail, trashed_by, trashed_at, purge_after')
+        .order('trashed_at', { ascending: false });
+      if (trashRes.error && !isMissingTableError(trashRes.error)) console.error('Could not read the Trash:', trashRes.error);
+      const trash = trashRes.error ? [] : (trashRes.data || []);
+      const trashedPapers = new Set(trash.filter(t => t.kind === 'paper').map(t => t.item_id));
+      setTrashRows(trash);
+
       // Fetch own exams, incoming exam-shares, and section co-instructor memberships in parallel
       const [examsRes, inSharesRes, coSectionsRes] = await Promise.all([
         // Through the transitional reader so seatworks and schedules appear
@@ -1895,7 +1910,7 @@ async function fetchDashboardData() {
           .or(`added_by.eq.${instructorId},instructor_id.eq.${instructorId}`),
       ]);
 
-      const examsData = examsRes.data || [];
+      const examsData = (examsRes.data || []).filter(e => !trashedPapers.has(e.id));
       const inShares = inSharesRes.data || [];
       const allSectionRows = coSectionsRes.data || [];
 
@@ -1944,7 +1959,7 @@ async function fetchDashboardData() {
         ),
       ]);
 
-      const sharedExamsData = sharedExamsRes.data || [];
+      const sharedExamsData = (sharedExamsRes.data || []).filter(e => !trashedPapers.has(e.id));
       const outShares = outSharesRes.data || [];
 
       // Merge exams from co-managed sections (verify exact section match client-side)
@@ -1957,7 +1972,7 @@ async function fetchDashboardData() {
           // Exact section match — ensures "BSME 3A" doesn't match "BSME 30"
           const sections = (exam.target_section || '').split(',').map(s => s.trim());
           if (!sections.includes(secName)) return;
-          if (ownExamIdSet.has(exam.id) || seenCoIds.has(exam.id)) return;
+          if (ownExamIdSet.has(exam.id) || seenCoIds.has(exam.id) || trashedPapers.has(exam.id)) return;
           seenCoIds.add(exam.id);
           coSectionExams.push({ ...exam, _coSection: secName });
         });
@@ -2069,7 +2084,7 @@ async function fetchDashboardData() {
     }
   }
 const deleteResult = async (studentId, examId) => {
-    if (window.confirm("🚨 Are you sure you want to permanently delete this score?")) {
+    if (window.confirm("Delete this score permanently? This cannot be undone.")) {
       const { error } = await supabase
         .from('results')
         .delete()
@@ -2167,29 +2182,50 @@ const deleteResult = async (studentId, examId) => {
       : x));
   };
 
-  // A paper a class has sat is archived before it can be deleted — two
-  // deliberate steps, so one stray click cannot take a whole class's results.
-  // Postgres holds the same rule (sql/095); this only says it first. Only the
-  // paper is deleted here: its questions, results and sittings go with it by
-  // foreign key. Deleting those first, as this used to, would empty the paper
-  // before the database could see it had been sat.
-  const ARCHIVE_FIRST = 'This paper has been sat. Archive it first — that keeps every result and hides it from students — and delete it afterwards if you still need to.';
+  // Deleting a paper moves it to the Trash (sql/104): closed and hidden at
+  // once, with its questions and results kept, and deleted for good only
+  // after 30 days unrestored. That replaces "archive first, then delete":
+  // a slip is now one Restore away.
   const deleteExam = async (examId) => {
     const exam = examsList.find(e => e.id === examId);
     const sat = results.filter(r => r.exam_id === examId).length;
-    if (sat > 0 && !exam?.archived_at) return alert(ARCHIVE_FIRST);
-    const warning = sat > 0
-      ? `Delete "${exam?.title || 'this paper'}" and its ${sat} result${sat === 1 ? '' : 's'} forever?\n\nThis cannot be undone.`
-      : `Delete "${exam?.title || 'this paper'}" and its questions?\n\nThis cannot be undone.`;
+    const title = exam?.title || 'this paper';
+    const warning = `Move "${title}" to the Trash?\n\n` +
+      'It closes and disappears from students now. ' +
+      (sat > 0 ? `Its ${sat} result${sat === 1 ? '' : 's'} and its questions are kept. ` : 'Its questions are kept. ') +
+      `You can restore it from the Trash for ${TRASH_DAYS} days; after that it is deleted for good` +
+      (sat > 0 ? ', results and all.' : '.');
     if (!window.confirm(warning)) return;
-    try {
-      await deleteAssessment(examId);
-    } catch (e) {
-      console.error('Could not delete paper:', e);
-      alert(e?.hint === 'archive_before_delete' ? ARCHIVE_FIRST : 'Could not delete this paper. Nothing was deleted — please try again.');
+    const { data, error } = await supabase.rpc('trash_papers', { p_paper_ids: [examId] });
+    if (error) {
+      console.error('Could not move paper to the Trash:', error);
+      alert(isMissingFunctionError(error)
+        ? 'Deleting papers needs a database update (sql/104) that has not been run yet. Nothing was changed.'
+        : 'Could not delete this paper. Nothing was changed — please try again.');
+      return;
+    }
+    if (data?.[0]?.outcome === 'not_yours') {
+      alert('Only the instructor who owns this paper can delete it.');
       return;
     }
     fetchDashboardData();
+  };
+
+  // Back out of the Trash, exactly as it went in: a student's sections are
+  // put back, a paper returns closed (and archived only if it was before).
+  const restoreFromTrash = async (row) => {
+    setRestoringTrash(row.id);
+    const { data, error } = await supabase.rpc('restore_from_trash', { p_trash_ids: [row.id] });
+    setRestoringTrash(null);
+    if (error) {
+      console.error('Could not restore from the Trash:', error);
+      alert('Could not restore this. Nothing was changed — please try again.');
+      return;
+    }
+    const outcome = data?.[0]?.outcome;
+    if (outcome === 'not_yours') { alert('Only the instructor who deleted this, or the paper\'s owner, can restore it.'); return; }
+    if (outcome === 'gone') alert('This was already deleted for good, so there was nothing to restore.');
+    await fetchDashboardData();
   };
 
   // --- NEW: Toggle Exam Open/Close ---
@@ -2378,14 +2414,15 @@ const deleteResult = async (studentId, examId) => {
   // this takes them out of YOUR sections and nothing more. It used to delete
   // the account outright, and with it every result the student had under
   // every instructor — one colleague clearing a class list wiped another's
-  // course. The database now decides what removing leaves (sql/094); the
-  // dashboard only asks, and reports what it did.
+  // course. The database now decides what removing leaves, and since
+  // sql/104 it goes to the Trash for 30 days first; the dashboard only
+  // asks, and reports what it did.
   const removeStudents = async (ids) => {
-    const { data, error } = await supabase.rpc('remove_students_from_my_sections', { p_student_ids: ids });
+    const { data, error } = await supabase.rpc('trash_students', { p_student_ids: ids });
     if (error) {
       console.error('Could not remove students:', error);
       alert(isMissingFunctionError(error)
-        ? 'Removing students needs a database update (sql/094) that has not been run yet. Nothing was changed.'
+        ? 'Removing students needs a database update (sql/104) that has not been run yet. Nothing was changed.'
         : 'Could not remove the student(s). Nothing was changed — please try again.');
       return false;
     }
@@ -2659,6 +2696,7 @@ const deleteResult = async (studentId, examId) => {
             { group: 'Admin', items: [
               { id: 'students',   label: 'Students',      icon: 'users' },
               { id: 'transfer',   label: 'Transfer',      icon: 'arrow-up-right' },
+              { id: 'trash',      label: 'Trash',         icon: 'trash', badge: trashRows.length > 0 ? String(trashRows.length) : null },
             ] },
           ].map(({ group, items }) => (
             <div key={group} role="group" aria-label={group} style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
@@ -2781,6 +2819,7 @@ const deleteResult = async (studentId, examId) => {
               attendance: 'Attendance',
               questions: 'Questions',
               transfer: 'Transfer Exams',
+              trash: 'Trash',
             })[activeView] || 'Dashboard'}
           </h2>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -4763,6 +4802,70 @@ const deleteResult = async (studentId, examId) => {
       )}
 
       {/* --- TAB 7: TRANSFER EXAMS --- */}
+      {activeView === 'trash' && (() => {
+        const papers = trashRows.filter(t => t.kind === 'paper');
+        const people = trashRows.filter(t => t.kind === 'student');
+        const when = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        const trashRow = (row, icon, title, meta) => {
+          const mine = row.trashed_by === instructorId;
+          return (
+            <div className="trash-row" key={row.id}>
+              <span className="trash-row-icon"><Icon name={icon} size={16} /></span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: 'var(--ink-1)', fontSize: 14, overflowWrap: 'anywhere' }}>{title}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 2 }}>
+                  {meta}{meta ? ' · ' : ''}Deleted {when(row.trashed_at)} · <span style={{ color: 'var(--warn)', fontWeight: 600 }}>{purgeLabel(row.purge_after)}</span>
+                </div>
+              </div>
+              {mine ? (
+                <button className="btn ghost sm" style={{ width: 'auto', flexShrink: 0 }}
+                  disabled={restoringTrash === row.id} onClick={() => restoreFromTrash(row)}>
+                  <Icon name="refresh" size={13} />
+                  {restoringTrash === row.id ? 'Restoring…' : 'Restore'}
+                </button>
+              ) : (
+                <span style={{ fontSize: 12, color: 'var(--ink-4)', flexShrink: 0 }}>Deleted by its owner</span>
+              )}
+            </div>
+          );
+        };
+        return (
+          <div>
+            <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)' }}>Trash</h1>
+            <p style={{ margin: '0 0 22px', fontSize: 13, color: 'var(--ink-3)', maxWidth: 640, lineHeight: 1.55 }}>
+              Deleted papers and students wait here for {TRASH_DAYS} days. Restore puts them back as they were —
+              a paper comes back closed. After {TRASH_DAYS} days they are deleted for good.
+            </p>
+            {trashRows.length === 0 ? (
+              <div className="card" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)' }}>
+                <Icon name="trash" size={26} color="var(--ink-4)" />
+                <p style={{ margin: '10px 0 0', fontSize: 14 }}>The Trash is empty.</p>
+              </div>
+            ) : (
+              <>
+                {papers.length > 0 && (
+                  <section style={{ marginBottom: 22 }}>
+                    <h2 className="trash-heading">Papers <span>{papers.length}</span></h2>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {papers.map(row => trashRow(row, 'clipboard', row.label || 'Untitled paper', 'Questions and results kept'))}
+                    </div>
+                  </section>
+                )}
+                {people.length > 0 && (
+                  <section>
+                    <h2 className="trash-heading">Students <span>{people.length}</span></h2>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {people.map(row => trashRow(row, 'users', formatName(row.label) || 'Unnamed student',
+                        (row.detail?.sections || []).length ? `Removed from ${row.detail.sections.join(', ')}` : ''))}
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       {activeView === 'transfer' && (
         <div>
           <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)' }}>Transfer Exams</h1>

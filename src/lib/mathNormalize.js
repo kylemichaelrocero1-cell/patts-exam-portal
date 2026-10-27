@@ -204,6 +204,22 @@ function signOut(before) {
   return before.slice(0, k + 1) + '-' + before.slice(k + 1);
 }
 
+// math_unit_factor() (101): is a (1) here a factor of one, to drop? The
+// rule written out in full leaves one — d/dx ln x is (1/x)(1), so
+// x^{2x}(\frac{2x}{x}(1)+…) is the working line, ×1 and all — and a
+// string comparison read it as a 1 standing in the line. Never a
+// function's argument (\ln(1), \log_3(1)), never raised, subscripted,
+// primed or divided, never a term standing alone (x+(1), \frac{(1)}{x}),
+// and never between two digits (2(1)3 is not 23).
+function unitFactor(before, after) {
+  if (/\\[A-Za-z]+(\^(\{[^{}]*\}|.))?$/.test(before) || /\\[A-Za-z]+_(\{[^{}]*\}|.)$/.test(before)) return false;
+  const prev = before.slice(-1), next = after.slice(0, 1);
+  if (['^', '_', '/', "'"].includes(prev) || ['^', '_', '/', "'", '!'].includes(next)) return false;
+  if (['', '+', '-', '=', '(', '{'].includes(prev) && ['', '+', '-', '=', ')', '}'].includes(next)) return false;
+  if (/[0-9.]/.test(prev) && /[0-9.]/.test(next)) return false;
+  return true;
+}
+
 export function unbracket(p, { signs = false } = {}) {
   let s = String(p ?? '').split('\\lbrack').join('(').split('\\rbrack').join(')')
     .split('[').join('(').split(']').join(')');
@@ -218,6 +234,11 @@ export function unbracket(p, { signs = false } = {}) {
       }
       if (j < 0) continue;
       const before = s.slice(0, i), inside = s.slice(i + 1, j), after = s.slice(j + 1);
+      if (inside === '1' && unitFactor(before, after)) {
+        s = before + after;
+        changed = true;
+        continue;
+      }
       const ok = unbracketOk(before, inside, after);
       const rg = ok ? null : regroup(before, inside, after);
       if (ok) {

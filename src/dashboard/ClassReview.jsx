@@ -3,6 +3,7 @@ import Icon from '../components/Icon';
 import { combinedScore } from '../lib/workedShape';
 import { classRecordSheets, groupOf } from '../lib/classRecord';
 import { workbookBytes } from '../lib/xlsx';
+import { formatName } from '../lib/personName';
 
 // One section at a time, answering the questions an instructor actually asks:
 // who hasn't submitted, who is struggling, and how did the class do on each
@@ -329,7 +330,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                 </td></tr>
               ) : sorted.map(r => (
                 <tr key={r.id}>
-                  <td style={{ fontWeight: 600, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 1 }}>{r.name}</td>
+                  <td style={{ fontWeight: 600, position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 1 }}>{formatName(r.name)}</td>
                   {items.map(it => {
                     const res = r.results.get(it.id);
                     const m = scoreOf(res);

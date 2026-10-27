@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { selectAssessments, isAvailableNow, availabilityState } from './lib/assessments';
+import { formatName } from './lib/personName.js';
 
 export default function SectionSelector({ student, onSelect, onLogout }) {
   const [sections, setSections] = useState([]);
@@ -41,6 +42,12 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
     }
     fetchSections();
   }, [retryCount, student.section]);
+
+  // One section to choose from is no choice: go straight in.
+  const onlySection = !isLoading && !fetchError && sections.length === 1 ? sections[0] : null;
+  useEffect(() => {
+    if (onlySection) onSelect(onlySection);
+  }, [onlySection, onSelect]);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
@@ -87,7 +94,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
               <div>
                 <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.05em' }}>Welcome back</p>
                 <h2 style={{ margin: '2px 0 0', color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>
-                  {student.full_name}
+                  {formatName(student.full_name)}
                 </h2>
               </div>
             </div>
@@ -99,7 +106,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
           </div>
 
           {/* Section Buttons */}
-          {isLoading ? (
+          {isLoading || onlySection ? (
             <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
               Loading sections…
             </div>

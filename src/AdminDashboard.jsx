@@ -19,6 +19,7 @@ import { submittedDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
 import { paperOptions, resultInView } from './lib/paperFilter';
+import { formatName, nameInitials, instructorName as displayInstructor } from './lib/personName';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -130,6 +131,13 @@ function QuestionCsvFormat({ dense = false }) {
 export default function AdminDashboard({ instructorId, instructorName, onLogout }) {
   // Navigation State
   const [activeView, setActiveView] = useState('results');
+  // A new view opens at its top. Moving on from a long scrolled list opened
+  // the next one part-way down, with its heading and filters out of sight.
+  const dashPanelRef = useRef(null);
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+    dashPanelRef.current?.scrollTo?.({ top: 0 });
+  }, [activeView]);
   // On a phone the sidebar is a drawer behind a menu button (index.css,
   // .dash-side); on anything wider it is always there and this does nothing.
   const [sideOpen, setSideOpen] = useState(false);
@@ -178,6 +186,11 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [editingTimes, setEditingTimes] = useState({});
   const [editingSections, setEditingSections] = useState({});
   const [editingPasswords, setEditingPasswords] = useState({});
+  const [qShowArchived, setQShowArchived] = useState(false);
+  // Passwords are masked until asked for: the dashboard is often on a
+  // projector or a screen the class can see.
+  const [shownPasswords, setShownPasswords] = useState(() => new Set());
+  const [copiedPassword, setCopiedPassword] = useState(null);
   const [editingTitles, setEditingTitles] = useState({});
   // --- NEW: Create Exam States ---
 const [newTitle, setNewTitle] = useState('');
@@ -201,6 +214,19 @@ const [targetSection, setTargetSection] = useState('');
 
   // --- ATTENDANCE STATES ---
   const [attendanceExam, setAttendanceExam] = useState('');
+  // Attendance opens on the newest open paper rather than an empty page —
+  // that is almost always the one being taken. Once, so a deliberate
+  // "Choose an exam" is not overridden.
+  const attendancePickedRef = useRef(false);
+  useEffect(() => {
+    if (activeView !== 'attendance' || attendancePickedRef.current || attendanceExam) return;
+    const newestOpen = examsList
+      .filter(e => e.is_open && !e.archived_at)
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))[0];
+    if (!newestOpen) return;
+    attendancePickedRef.current = true;
+    setAttendanceExam(newestOpen.id);
+  }, [activeView, examsList, attendanceExam]);
   const [attendanceSection, setAttendanceSection] = useState('All');
 
   // --- QUESTION MANAGEMENT STATES ---
@@ -1830,7 +1856,8 @@ const [targetSection, setTargetSection] = useState('');
   const transferExams = async () => {
     if (!transferTarget || transferExamIds.size === 0) return;
     const dest = instructorsList.find(i => i.id === transferTarget);
-    if (!window.confirm(`Transfer ${transferExamIds.size} exam${transferExamIds.size !== 1 ? 's' : ''} to ${dest?.full_name || dest?.email}?\n\nStudents will automatically appear under their dashboard. This cannot be undone from the UI.`)) return;
+    const movingResults = results.filter(r => transferExamIds.has(r.exam_id)).length;
+    if (!window.confirm(`Move ${transferExamIds.size} exam${transferExamIds.size !== 1 ? 's' : ''} and ${movingResults} result${movingResults !== 1 ? 's' : ''} to ${dest?.full_name || dest?.email}?\n\nStudents will automatically appear under their dashboard. This cannot be undone from the UI.`)) return;
     setIsTransferring(true);
     const { error } = await supabase.rpc('transfer_exams', {
       p_exam_ids: [...transferExamIds],
@@ -2168,7 +2195,15 @@ const deleteResult = async (studentId, examId) => {
   // --- NEW: Toggle Exam Open/Close ---
   const toggleExamStatus = async (examId, currentStatus) => {
     const newStatus = !currentStatus;
-    
+    // One tap on a pill used to open a paper to whole sections, so it asks.
+    const exam = examsList.find(e => e.id === examId);
+    const title = exam?.title || 'this exam';
+    const sections = splitSections(exam?.target_section || '').join(', ');
+    const question = newStatus
+      ? `Open “${title}”${sections ? ` for ${sections}` : ''}?\n\nStudents in ${sections ? 'those sections' : 'its sections'} can start it straight away.`
+      : `Close “${title}”?\n\nIt goes from students' lists. Sittings already under way are not submitted.`;
+    if (!window.confirm(question)) return;
+
     // Update Supabase
     try {
       await updateAssessment(examId, { is_open: newStatus });
@@ -2284,7 +2319,7 @@ const deleteResult = async (studentId, examId) => {
   const batchUpdateSection = async () => {
     if (selectedStudentIds.size === 0) return alert("Please select at least one student.");
     if (!batchSection.trim()) return alert("Please enter a section name.");
-    if (!window.confirm(`Assign "${batchSection}" to ${selectedStudentIds.size} student(s)?`)) return;
+    if (!window.confirm(`Set ${selectedStudentIds.size} student(s) to "${batchSection.trim()}"?\n\nThis replaces the sections you have them in. Sections they have with other instructors are kept.`)) return;
 
     setIsBatchSaving(true);
     // Strip any IDs not in the instructor's visible student list (belt-and-suspenders)
@@ -2601,25 +2636,42 @@ const deleteResult = async (studentId, examId) => {
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <nav style={{ flex: 1, padding: '4px 8px 10px', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {/* Grouped by the job, with the rare, far-reaching ones (moving
+              papers to another instructor) at the bottom rather than among
+              the pages used every day. */}
           {[
-            { id: 'home',       label: 'Overview',     icon: 'home' },
-            { id: 'class',      label: 'Class Review',  icon: 'graduation' },
-            { id: 'results',    label: 'Results',       icon: 'bar-chart' },
-            { id: 'practice',   label: 'Practice Results', icon: 'refresh' },
-            { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
-            { id: 'lessons',    label: 'Lessons',       icon: 'book' },
-            { id: 'students',   label: 'Students',      icon: 'users' },
-            { id: 'live',       label: 'Live Monitor',  icon: 'activity', badge: liveSessions.length > 0 ? String(liveSessions.length) : null, live: true },
-            { id: 'attendance', label: 'Attendance',    icon: 'calendar' },
-            { id: 'questions',  label: 'Questions',     icon: 'file-text' },
-            { id: 'transfer',   label: 'Transfer',      icon: 'arrow-up-right' },
-          ].map(item => {
+            { group: 'Teach', items: [
+              { id: 'home',       label: 'Overview',     icon: 'home' },
+              { id: 'lessons',    label: 'Lessons',       icon: 'book' },
+            ] },
+            { group: 'Assess', items: [
+              { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
+              { id: 'questions',  label: 'Questions',     icon: 'file-text' },
+              { id: 'live',       label: 'Live Monitor',  icon: 'activity', badge: liveSessions.length > 0 ? String(liveSessions.length) : null, live: true },
+            ] },
+            { group: 'Results', items: [
+              { id: 'results',    label: 'Results',       icon: 'bar-chart' },
+              { id: 'class',      label: 'Class Review',  icon: 'graduation' },
+              { id: 'practice',   label: 'Practice Results', icon: 'refresh' },
+              { id: 'attendance', label: 'Attendance',    icon: 'calendar' },
+            ] },
+            { group: 'Admin', items: [
+              { id: 'students',   label: 'Students',      icon: 'users' },
+              { id: 'transfer',   label: 'Transfer',      icon: 'arrow-up-right' },
+            ] },
+          ].map(({ group, items }) => (
+            <div key={group} role="group" aria-label={group} style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
+              <div style={{ padding: '8px 11px 4px', fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,.34)' }}>
+                {group}
+              </div>
+              {items.map(item => {
             const active = activeView === item.id;
             return (
               <button
                 key={item.id}
                 onClick={() => { setActiveView(item.id); setLiveViolationTooltip(null); setSideOpen(false); }}
+                aria-current={active ? 'page' : undefined}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9,
                   padding: '9px 11px', borderRadius: 'var(--r-sm)',
@@ -2641,7 +2693,9 @@ const deleteResult = async (studentId, examId) => {
                 )}
               </button>
             );
-          })}
+              })}
+            </div>
+          ))}
         </nav>
 
         {/* Profile + Logout */}
@@ -2653,11 +2707,11 @@ const deleteResult = async (studentId, examId) => {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 12.5, fontWeight: 700,
             }}>
-              {(instructorName || '?')[0].toUpperCase()}
+              {nameInitials(displayInstructor(instructorName))}
             </div>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {instructorName}
+                {displayInstructor(instructorName)}
               </div>
               <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.38)' }}>Instructor</div>
             </div>
@@ -2755,14 +2809,14 @@ const deleteResult = async (studentId, examId) => {
         </div>
 
         {/* Panel content */}
-        <div className="dash-panel" style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+        <div className="dash-panel" ref={dashPanelRef} style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
 
           {/* --- OVERVIEW HOME PANEL --- */}
           {activeView === 'home' && (
             <div>
               <div style={{ marginBottom: 20 }}>
                 <div className="eyebrow" style={{ fontSize: 10 }}>Dashboard</div>
-                <h3 style={{ margin: '4px 0 4px', fontSize: 18 }}>Welcome back, {(instructorName || 'Instructor').split(' ')[0]}.</h3>
+                <h3 style={{ margin: '4px 0 4px', fontSize: 18 }}>Welcome back, {displayInstructor(instructorName).split(' ')[0] || 'Instructor'}.</h3>
                 <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-3)' }}>
                   {examsList.length} exam{examsList.length !== 1 ? 's' : ''} · {studentsList.length} student{studentsList.length !== 1 ? 's' : ''} · {results.length} submission{results.length !== 1 ? 's' : ''}
                 </p>
@@ -2773,7 +2827,7 @@ const deleteResult = async (studentId, examId) => {
                   { label: 'Live Now', value: liveSessions.length, color: liveSessions.length > 0 ? '#E74C3C' : 'var(--ink-3)', icon: 'activity', sub: 'active sessions' },
                   { label: 'Total Students', value: studentsList.length, color: '#2980B9', icon: 'users', sub: 'in your sections' },
                   { label: 'Total Results', value: results.length, color: '#27AE60', icon: 'bar-chart', sub: 'submissions' },
-                  { label: 'Pass Rate', value: (() => { const scored = results.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% passing` },
+                  { label: 'Pass Rate', value: (() => { const scored = results.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% · every paper, archived too` },
                   // Worked maths items can only be marked in this browser
                   // (sql/024), so scripts sit waiting until somebody opens
                   // them. This tile is the prompt; the Results table says which.
@@ -3089,7 +3143,7 @@ const deleteResult = async (studentId, examId) => {
                         const essayCount = (examQuestionsCache[row.exam_id] || []).filter(q => q.question_type === 'essay').length;
                         return (
                           <tr key={index}>
-                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{student.name}</td>
+                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{formatName(student.name)}</td>
                             <td data-label="Section"><span className="px-pill brand">{student.section}</span></td>
                             {selectedExam === 'All' && (
                               <td data-label="Paper" title={examTitle} style={{ color: 'var(--ink-2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
@@ -3196,7 +3250,8 @@ const deleteResult = async (studentId, examId) => {
                       onChange={e => setEditingTitles(prev => ({ ...prev, [exam.id]: e.target.value }))}
                       onKeyDown={e => e.key === 'Enter' && saveTitle(exam.id)}
                       className="input"
-                      style={{ width: 200, padding: '7px 10px', fontSize: 13 }}
+                      title={editingTitles[exam.id] ?? exam.title}
+                      style={{ width: 260, padding: '7px 10px', fontSize: 13 }}
                     />
                     {(editingTitles[exam.id] ?? exam.title) !== exam.title && (
                       <button onClick={() => saveTitle(exam.id)} className="btn sm">Save</button>
@@ -3264,13 +3319,49 @@ const deleteResult = async (studentId, examId) => {
                 <td data-label="Password">
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
-                      type="text"
+                      type={shownPasswords.has(exam.id) ? 'text' : 'password'}
                       value={editingPasswords[exam.id] !== undefined ? editingPasswords[exam.id] : ''}
                       onChange={(e) => setEditingPasswords(prev => ({ ...prev, [exam.id]: e.target.value }))}
                       placeholder="No password"
+                      autoComplete="new-password"
+                      aria-label={`Password for ${exam.title}`}
                       className="input"
                       style={{ width: 110, padding: '7px 10px', fontSize: 13, fontFamily: 'var(--font-mono)' }}
                     />
+                    <button
+                      type="button"
+                      className="btn ghost sm"
+                      style={{ width: 'auto', padding: '5px 7px' }}
+                      onClick={() => setShownPasswords(prev => {
+                        const next = new Set(prev);
+                        if (next.has(exam.id)) next.delete(exam.id); else next.add(exam.id);
+                        return next;
+                      })}
+                      aria-label={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
+                      title={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
+                    >
+                      <Icon name={shownPasswords.has(exam.id) ? 'eye-off' : 'eye'} size={13} />
+                    </button>
+                    {exam.exam_password && (
+                      <button
+                        type="button"
+                        className="btn ghost sm"
+                        style={{ width: 'auto', padding: '5px 7px' }}
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(exam.exam_password);
+                            setCopiedPassword(exam.id);
+                            setTimeout(() => setCopiedPassword(c => (c === exam.id ? null : c)), 1500);
+                          } catch {
+                            alert('Could not copy. Use the eye button to show the password instead.');
+                          }
+                        }}
+                        aria-label="Copy password"
+                        title="Copy password"
+                      >
+                        <Icon name={copiedPassword === exam.id ? 'check' : 'copy'} size={13} />
+                      </button>
+                    )}
                     <button onClick={() => savePassword(exam.id)} className="btn sm" style={{ opacity: editingPasswords[exam.id] !== (exam.exam_password || '') ? 1 : 0.4 }}>Save</button>
                   </div>
                   <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3606,12 +3697,14 @@ const deleteResult = async (studentId, examId) => {
                   type="text"
                   value={batchSection}
                   onChange={e => setBatchSection(e.target.value)}
-                  placeholder="New section name"
+                  placeholder="Set selected students' section to…"
+                  aria-label="Section to set for the selected students (replaces your sections for them)"
+                  title="Replaces the sections you have these students in. Other instructors' sections are kept."
                   className="input"
                   style={{ flex: 1, minWidth: 180, padding: '7px 10px' }}
                 />
                 <button onClick={batchUpdateSection} disabled={isBatchSaving || selectedStudentIds.size === 0 || !batchSection.trim()} className="btn sm">
-                  {isBatchSaving ? 'Saving…' : 'Apply to Selected'}
+                  {isBatchSaving ? 'Saving…' : 'Set section'}
                 </button>
                 {selectedStudentIds.size > 0 && (
                   <>
@@ -3690,9 +3783,9 @@ const deleteResult = async (studentId, examId) => {
                           <td className="tbl-stack-title" style={{ fontWeight: 600 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--navy-100)', color: 'var(--navy)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
-                                {(student.full_name || '?').split(' ').slice(0,2).map(n => n[0]).join('').toUpperCase()}
+                                {nameInitials(student.full_name)}
                               </div>
-                              {student.full_name || 'Unknown'}
+                              {formatName(student.full_name) || 'Unknown'}
                             </div>
                           </td>
                           <td data-label="Section"><span className="px-pill brand">{mySectionsOf(student.section).join(', ') || '—'}</span></td>
@@ -3964,7 +4057,7 @@ const deleteResult = async (studentId, examId) => {
                 </thead>
                 <tbody>
                   {activeSessions.length === 0 ? (
-                    <tr><td colSpan="6" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students currently taking an exam.</td></tr>
+                    <tr><td colSpan="6" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students are sitting a paper right now. Open one in Manage Exams — students appear here as they start.</td></tr>
                   ) : (
                     activeSessions.map(session => (
                       <tr key={session.id} style={
@@ -3972,7 +4065,7 @@ const deleteResult = async (studentId, examId) => {
                         : isSessionForceSubmittable(session) ? { background: 'var(--warn-bg, #FFFDE7)' }
                         : {}
                       }>
-                        <td className="tbl-stack-title" style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{session.student_name}</td>
+                        <td className="tbl-stack-title" style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{formatName(session.student_name)}</td>
                         <td data-label="Paper" style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
                         <td data-label="Status">
                           {session.status === 'locked'
@@ -4157,7 +4250,7 @@ const deleteResult = async (studentId, examId) => {
             </div>
 
             {!attendanceExam ? (
-              <p style={{ color: 'var(--ink-3)', textAlign: 'center', padding: '40px' }}>Select an exam above to see attendance.</p>
+              <p style={{ color: 'var(--ink-3)', textAlign: 'center', padding: '40px' }}>Choose an exam above to see who has sat it.</p>
             ) : (
               <>
                 {/* Summary pills */}
@@ -4193,7 +4286,7 @@ const deleteResult = async (studentId, examId) => {
                         return (
                           <tr key={s.id} style={rowBg ? { background: rowBg } : {}}>
                             <td data-label="#" style={{ color: 'var(--ink-4)', width: 40 }}>{idx + 1}</td>
-                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{s.full_name || 'Unknown'}</td>
+                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{formatName(s.full_name) || 'Unknown'}</td>
                             <td data-label="Section" style={{ color: 'var(--ink-2)' }}>{s.section || '—'}</td>
                             <td data-label="Status"><span className={`px-pill ${pillClass}`}>{pillLabel}</span></td>
                           </tr>
@@ -4218,21 +4311,41 @@ const deleteResult = async (studentId, examId) => {
           {/* Exam selector */}
           <div className="card" style={{ padding: '16px 20px', marginBottom: '20px' }}>
             <label className="label">Select Exam to Manage</label>
-            <select className="input" style={{ maxWidth: '360px' }} value={qExamId} onChange={e => handleQExamChange(e.target.value)}>
-              <option value="">— Choose an exam —</option>
-              {sharedExamsList.length > 0 ? (
-                <>
-                  <optgroup label="My Exams">
-                    {examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)}
-                  </optgroup>
-                  <optgroup label="Shared With Me">
-                    {sharedExamsList.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
-                  </optgroup>
-                </>
-              ) : (
-                examsList.map(e => <option key={e.id} value={e.id}>{e.title}{e.archived_at ? ' (archived)' : ''}</option>)
-              )}
-            </select>
+            {(() => {
+              // Current papers first, by title so a course's papers sit
+              // together; archived ones only when asked for (or when one is
+              // the paper already open here).
+              const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', undefined, { numeric: true, sensitivity: 'base' });
+              const current = examsList.filter(e => !e.archived_at).sort(byTitle);
+              const archived = examsList.filter(e => e.archived_at).sort(byTitle);
+              const showArch = qShowArchived || archived.some(e => e.id === qExamId);
+              return (
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <select className="input" style={{ maxWidth: '420px', flex: '1 1 260px' }} value={qExamId} onChange={e => handleQExamChange(e.target.value)}>
+                    <option value="">— Choose an exam —</option>
+                    <optgroup label={sharedExamsList.length > 0 ? 'My exams' : 'Current'}>
+                      {current.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                    </optgroup>
+                    {showArch && archived.length > 0 && (
+                      <optgroup label="Archived">
+                        {archived.map(e => <option key={e.id} value={e.id}>{e.title} (archived)</option>)}
+                      </optgroup>
+                    )}
+                    {sharedExamsList.length > 0 && (
+                      <optgroup label="Shared with me">
+                        {[...sharedExamsList].sort(byTitle).map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                      </optgroup>
+                    )}
+                  </select>
+                  {archived.length > 0 && (
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink-3)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={qShowArchived} onChange={e => setQShowArchived(e.target.checked)} style={{ width: 'auto' }} />
+                      Show archived ({archived.length})
+                    </label>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {qExamId && (
@@ -4497,7 +4610,14 @@ const deleteResult = async (studentId, examId) => {
                     <Icon name="download" size={13} /> Download Template
                   </button>
                 </div>
-                <div style={{ marginBottom: 12 }}><QuestionCsvFormat /></div>
+                {/* Folded, as on Create New Exam: open, it pushed the
+                    question list a screen and a half down on every visit. */}
+                <details style={{ marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--navy)' }}>
+                    How to format the CSV
+                  </summary>
+                  <div style={{ marginTop: 10 }}><QuestionCsvFormat /></div>
+                </details>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <label className={`btn ghost sm ${csvParsed ? 'ok' : ''}`} style={{ width: 'auto', cursor: 'pointer', ...(csvParsed ? { borderColor: 'var(--ok-bd)', color: 'var(--ok)', background: 'var(--ok-bg)' } : {}) }}>
@@ -4600,8 +4720,13 @@ const deleteResult = async (studentId, examId) => {
                             <button className="btn ghost sm" onClick={() => startEditQuestion(q)} style={{ width: 'auto' }}>
                               <Icon name="pencil" size={13} /> Edit
                             </button>
-                            <button className="btn ghost sm danger" onClick={() => deleteQuestion(q.id)} style={{ width: 'auto', color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}>
-                              <Icon name="trash" size={13} color="var(--bad)" /> Delete
+                            {/* Kept apart from Edit and smaller than it, so
+                                the one used every day is not a slip away
+                                from the one that cannot be undone. */}
+                            <button className="btn ghost sm danger" onClick={() => deleteQuestion(q.id)}
+                              aria-label={`Delete question ${idx + 1}`} title="Delete question"
+                              style={{ width: 'auto', marginLeft: 10, padding: '5px 8px', color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}>
+                              <Icon name="trash" size={13} color="var(--bad)" />
                             </button>
                           </div>
                         </div>
@@ -4651,22 +4776,39 @@ const deleteResult = async (studentId, examId) => {
                 No other instructors found. Ask them to <strong>log in once</strong> using Instructor Login — they'll register automatically.
               </div>
             ) : (
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-                {instructorsList.map(inst => (
-                  <button
-                    key={inst.id}
-                    onClick={() => setTransferTarget(inst.id)}
-                    style={{
-                      padding: '10px 20px', borderRadius: 'var(--r-sm)', fontWeight: 600, fontSize: '14px', cursor: 'pointer', border: `2px solid ${transferTarget === inst.id ? 'var(--navy)' : 'var(--line)'}`,
-                      background: transferTarget === inst.id ? 'var(--navy)' : 'var(--surface)',
-                      color: transferTarget === inst.id ? 'white' : 'var(--ink-1)',
-                      transition: 'all var(--t-1)',
-                    }}
-                  >
-                    {inst.full_name}
-                    <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, opacity: 0.75 }}>{inst.email}</span>
-                  </button>
-                ))}
+              <div role="radiogroup" aria-label="Destination instructor" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+                {instructorsList.map(inst => {
+                  const picked = transferTarget === inst.id;
+                  return (
+                    <button
+                      key={inst.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={picked}
+                      onClick={() => setTransferTarget(inst.id)}
+                      className="transfer-choice"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, textAlign: 'left',
+                        padding: '10px 16px', borderRadius: 'var(--r-sm)', fontWeight: 600, fontSize: '14px', cursor: 'pointer',
+                        border: `2px solid ${picked ? 'var(--navy)' : 'var(--line)'}`,
+                        background: picked ? 'var(--navy-50)' : 'var(--surface)',
+                        color: 'var(--ink-1)', width: 'auto',
+                      }}
+                    >
+                      <span aria-hidden="true" style={{
+                        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${picked ? 'var(--navy)' : 'var(--ink-4)'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {picked && <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--navy)' }} />}
+                      </span>
+                      <span>
+                        {inst.full_name}
+                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 400, color: 'var(--ink-3)' }}>{inst.email}</span>
+                      </span>
+                    </button>
+                  );
+                })}
                 <button className="btn ghost sm" onClick={fetchInstructors} style={{ width: 'auto' }}>
                   <Icon name="refresh" size={13} /> Refresh
                 </button>
@@ -4739,7 +4881,7 @@ const deleteResult = async (studentId, examId) => {
       </main>
 
       {/* On a phone, the views used most sit under the thumb (index.css hides
-          this above 760px); everything else is in the menu behind "More". */}
+          this above 1024px); everything else is in the menu behind "More". */}
       <nav className="dash-tabbar" aria-label="Dashboard">
         {[
           { id: 'home', label: 'Overview', icon: 'home' },
@@ -4749,7 +4891,7 @@ const deleteResult = async (studentId, examId) => {
         ].map(t => (
           <button key={t.id} type="button" className={`dash-tab${activeView === t.id ? ' is-active' : ''}`}
             aria-current={activeView === t.id ? 'page' : undefined}
-            onClick={() => { setActiveView(t.id); setSideOpen(false); window.scrollTo({ top: 0 }); }}>
+            onClick={() => { setActiveView(t.id); setSideOpen(false); }}>
             <Icon name={t.icon} size={20} />
             {t.label}
             {t.badge && <span className="dash-tab-badge">{t.badge}</span>}
@@ -4952,7 +5094,7 @@ const deleteResult = async (studentId, examId) => {
             <div className="patts-header" style={{ padding: '24px 28px', position: 'sticky', top: 0, zIndex: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
-                  <h2 style={{ margin: 0, color: 'white', fontSize: '18px' }}>{students[viewingStudent.student_id]?.name}'s Exam Paper</h2>
+                  <h2 style={{ margin: 0, color: 'white', fontSize: '18px' }}>{formatName(students[viewingStudent.student_id]?.name)}'s Exam Paper</h2>
                   <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     {/* The same score as the Results row — points plus worked
                         marks. This read score / total_items, the picked-item
@@ -5556,7 +5698,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                   <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)' }}>
                     <div>
-                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--ink-1)' }}>{s.student_name}</p>
+                      <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: 'var(--ink-1)' }}>{formatName(s.student_name)}</p>
                       <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-3)' }}>{examsDict[s.exam_id] || s.exam_id}</p>
                     </div>
                     <span style={{ fontSize: 12, color: 'var(--ink-3)', textAlign: 'right' }}>
@@ -5692,6 +5834,9 @@ function InlinePoints({ value, onSave, busy }) {
         onFocus={() => { setEditing(true); setDraft(String(value)); }}
         onChange={e => setText(e.target.value)}
         onBlur={commit}
+        // A wheel over a focused number box changes it. Scrolling a long
+        // list past one must never reweight a question, so the wheel lets go.
+        onWheel={e => e.currentTarget.blur()}
         onKeyDown={e => {
           if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
           if (e.key === 'Escape') { setDraft(null); setEditing(false); e.currentTarget.blur(); }

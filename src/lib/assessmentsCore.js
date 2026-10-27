@@ -139,4 +139,21 @@ export function formatWindow(a) {
   return '';
 }
 
+/**
+ * When an open paper shuts, for the student's to-do row: { label, soon } or
+ * null when it has no closing time. The clock time alone on the day it
+ * closes, the date as well otherwise; soon is the last hour.
+ */
+export function closingNote(a, now = new Date()) {
+  if (!a?.closes_at) return null;
+  const at = new Date(a.closes_at);
+  if (Number.isNaN(at.getTime())) return null;
+  const sameDay = at.toDateString() === now.toDateString();
+  const label = 'closes ' + at.toLocaleString(undefined, sameDay
+    ? { hour: 'numeric', minute: '2-digit' }
+    : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const left = at.getTime() - now.getTime();
+  return { label, soon: left > 0 && left <= 60 * 60000 };
+}
+
 export const KIND_LABEL = { exam: 'Exam', seatwork: 'Seatwork' };

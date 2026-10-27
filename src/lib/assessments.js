@@ -26,6 +26,7 @@ export {
   isAvailableNow,
   availabilityState,
   formatWindow,
+  closingNote,
   isMissingTableError,
   KIND_LABEL,
 } from './assessmentsCore';

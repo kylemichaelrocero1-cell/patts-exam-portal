@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
 import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import {
-  availabilityState, formatWindow,
+  availabilityState, formatWindow, closingNote,
 } from './lib/assessments';
+import { givenName } from './lib/personName.js';
 import { paperNoun } from './lib/paperNoun.js';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
@@ -172,7 +173,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
   return (
     <div style={{ maxWidth: 860, margin: '0 auto' }}>
       <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 25, letterSpacing: '-0.02em', margin: '0 0 4px' }}>
-        Hello, {(student.full_name || '').split(' ')[0] || 'there'}
+        Hello, {givenName(student.full_name) || 'there'}
       </h1>
       <p style={{ color: 'var(--ink-3)', fontSize: 13.5, margin: '0 0 20px' }}>{selectedSection}</p>
 
@@ -206,6 +207,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginBottom: 24 }}>
           {[...todo, ...upcoming].map(a => {
             const scheduled = availabilityState(a) === 'scheduled';
+            const closing = scheduled ? null : closingNote(a);
             return (
               <button
                 key={a.id}
@@ -215,22 +217,25 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
               >
                 <span style={{
                   fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
-                  padding: '3px 8px', borderRadius: 'var(--r-full)', flexShrink: 0,
+                  padding: '3px 8px', borderRadius: 'var(--r-full)', flexShrink: 0, alignSelf: 'flex-start',
                   background: a.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
                   color: a.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
                 }}>
                   {paperNoun(a)}
                 </span>
-                {/* The colour is explicit because this whole card is a
-                    <button>, and the global button rule paints text white for
-                    the navy buttons everywhere else — so the paper's name was
-                    being drawn in white on a white card and the row looked
-                    like an unnamed EXAM. */}
-                <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 14, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {a.title || 'Untitled'}
-                </span>
-                <span style={{ fontSize: 12, color: scheduled ? 'var(--ink-4)' : 'var(--ok)', fontWeight: 600, flexShrink: 0 }}>
-                  {scheduled ? formatWindow(a) : 'Open now'}
+                {/* The title wraps and the status sits under it. On one line
+                    a scheduled paper's date range left a phone room for one
+                    letter of the title, and papers in a series ("AE Board
+                    Review — …") were cut before the part that tells them
+                    apart. The colour is explicit because this whole card is a
+                    <button>, and the global button rule paints text white. */}
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-1)', lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                    {a.title || 'Untitled'}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: scheduled ? 'var(--ink-4)' : closing?.soon ? 'var(--warn)' : 'var(--ok)' }}>
+                    {scheduled ? formatWindow(a) : closing ? `Open · ${closing.label}` : 'Open now'}
+                  </span>
                 </span>
                 <Icon name="chevron-right" size={15} color="var(--ink-4)" />
               </button>

@@ -230,6 +230,9 @@ export default function Login({ onLogin }) {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 placeholder="juan.delacruz@patts.edu.ph"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 required
                 disabled={isLocked || isLoading}
               />
@@ -246,6 +249,10 @@ export default function Login({ onLogin }) {
                 value={credential}
                 onChange={e => setCredential(e.target.value)}
                 placeholder={isInstructor ? '••••••••' : '2024-1-0421'}
+                autoComplete={isInstructor ? 'current-password' : 'off'}
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 required
                 disabled={isLocked || isLoading}
               />
@@ -293,7 +300,7 @@ export default function Login({ onLogin }) {
             }}>
               <Icon name="shield-check" size={16} color="var(--navy)" style={{ marginTop: 1 }} />
               <p style={{ margin: 0, fontSize: 12, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-                Sessions are tied to a single device. Closing your browser ends the attempt.
+                Signing in on another device signs you out here. Your answers are saved as you go.
               </p>
             </div>
           </div>

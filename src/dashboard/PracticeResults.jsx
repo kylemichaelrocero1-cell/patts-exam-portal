@@ -4,6 +4,7 @@ import { submittedDateTime } from '../lib/examDates.js';
 import { combinedScore } from '../lib/workedShape.js';
 import { scoreFraction } from '../lib/resultsStats.js';
 import { paperOptions } from '../lib/paperFilter.js';
+import { formatName } from '../lib/personName';
 
 // Every sitting on an unlimited-retake paper. These never reach `results` —
 // submit_assessment() routes them to review_attempts so practice cannot move a
@@ -274,7 +275,7 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
                         <td style={{ color: 'var(--ink-4)' }}>
                           <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={14} />
                         </td>
-                        <td style={{ fontWeight: 600 }}>{g.name}</td>
+                        <td style={{ fontWeight: 600 }}>{formatName(g.name)}</td>
                         <td style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{g.section}</td>
                         <td>{g.title}</td>
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{g.rows.length}</td>

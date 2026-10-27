@@ -386,16 +386,20 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .grid-item { position: relative; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .grid-item:hover  { border-color: var(--navy); color: var(--navy); background: var(--navy-100); }
-.grid-item.active { background: var(--gold); color: var(--navy-900); border-color: var(--gold); }
+/* Current is a gold ring, never a fill: a gold fill hid whether the item it
+   sat on was answered, so the one being looked at always read as blank. */
 .grid-item.answered { background: var(--navy); color: white; border-color: var(--navy); }
-.grid-item.active.answered { background: var(--gold); color: var(--navy-900); border-color: var(--gold); }
+.grid-item.active,
+.grid-item.active:hover { border-color: var(--gold); box-shadow: inset 0 0 0 1.5px var(--gold); color: var(--navy-900); }
+.grid-item.active.answered,
+.grid-item.active.answered:hover { background: var(--navy); color: white; }
 .grid-item:focus-visible { outline: 2px solid var(--navy-500); outline-offset: 2px; }
 .grid-flag {
-  position: absolute; top: 2px; right: 2px;
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #E67E22;
+  position: absolute; top: 0; right: 0;
+  width: 0; height: 0;
+  border-top: 10px solid #E67E22; border-left: 10px solid transparent;
+  border-top-right-radius: var(--r-xs);
 }
-.grid-item.active .grid-flag { background: var(--navy); }
 
 .side-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .side-count { margin-left: auto; font-size: 12px; color: var(--ink-4); font-weight: 600; }
@@ -406,9 +410,9 @@ tbody tr:last-child td { border-bottom: none; }
 .nav-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .nav-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; }
 .nav-legend .lg-answered { background: var(--navy); }
-.nav-legend .lg-current  { background: var(--gold); }
+.nav-legend .lg-current  { background: var(--surface-2); box-shadow: inset 0 0 0 2px var(--gold); }
 .nav-legend .lg-open     { background: var(--surface-2); border: 1px solid var(--line); }
-.nav-legend .lg-flagged  { width: 7px; height: 7px; border-radius: 50%; background: #E67E22; }
+.nav-legend .lg-flagged  { width: 0; height: 0; border-radius: 0; border-top: 10px solid #E67E22; border-left: 10px solid transparent; }
 
 /* The two "go to next" shortcuts under the progress bar. Hover is restated
    because the global button:hover would otherwise repaint them navy. */
@@ -570,6 +574,12 @@ box that fills with a tick — a student must be able to see that several
   position: sticky; top: 0; z-index: 10;
 }
 .exam-logo { height: 34px; object-fit: contain; flex-shrink: 0; }
+.exam-id { min-width: 0; line-height: 1.3; }
+.exam-id p { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exam-paper-title { font-size: 13.5px; font-weight: 700; color: white; }
+.exam-student-name { font-size: 12px; font-weight: 500; color: rgba(255,255,255,.68); }
+.exam-receipt { margin: 6px 0 0; font-size: 12.5px; color: rgba(255,255,255,.85); font-variant-numeric: tabular-nums; }
+.q-text:focus { outline: none; }
 .exam-layout { padding: 20px 24px 8px; }
 
 .q-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
@@ -780,6 +790,12 @@ input:checked + .slider::before { transform: translateX(26px); }
    RESPONSIVE
    ═══════════════════════════════════════════════ */
 
+/* Between a phone and a laptop the paper's title needs the header more than
+   the wall clock does. */
+@media (max-width: 900px) {
+  .exam-header-meta { display: none !important; }
+}
+
 @media (max-width: 1024px) {
   .app-container { padding: 16px; }
   .main-panel { padding: 22px; }
@@ -787,7 +803,10 @@ input:checked + .slider::before { transform: translateX(26px); }
   .header { padding: 14px 20px; }
 }
 
-@media (max-width: 768px) {
+/* 759, not 768: a tablet held upright (768px and up) keeps the navigator
+   beside the question instead of the phone's bottom bar and half a screen
+   of nothing. */
+@media (max-width: 759px) {
   .app-container { padding: 14px; }
   .exam-header-meta { display: none !important; }
 
@@ -882,7 +901,7 @@ input:checked + .slider::before { transform: translateX(26px); }
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; border-radius: var(--r-sm);
   }
-  .grid-flag { width: 8px; height: 8px; top: 3px; right: 3px; }
+  .grid-flag { border-top-width: 12px; border-left-width: 12px; border-top-right-radius: var(--r-sm); }
   .admin-tabs > div { scrollbar-width: none; }
   .admin-tabs > div::-webkit-scrollbar { display: none; }
   .exam-card { flex-direction: column !important; align-items: stretch !important; gap: 14px !important; }
@@ -896,18 +915,24 @@ input:checked + .slider::before { transform: translateX(26px); }
 /* While the student is typing, a keyboard owns the bottom of the screen and a
    bar pinned there only gets in its way. One rule each, so a browser without
    :has() drops these alone and keeps the bar. */
-@media (max-width: 768px) {
+@media (max-width: 759px) {
   .exam-shell:has(textarea:focus) .exam-bottom-bar { display: none; }
   .exam-shell:has(math-field:focus-within) .exam-bottom-bar { display: none; }
   body:has(.ML__keyboard.is-visible) .exam-bottom-bar { display: none; }
 }
 
 @media (max-width: 480px) {
+  /* The student's name is how they check it is their account, so on a phone
+     it gets the room — two lines if needed — and the greeting and section
+     (shown again under "Hello") step aside. !important: inline styles. */
+  .shell-welcome { white-space: normal !important; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.3; }
+  .shell-welcome-word, .shell-welcome-section { display: none; }
   .login-container { margin: 0 !important; border-radius: 0 !important; min-height: 100dvh; }
-  .exam-student-name { display: none !important; }
+  .exam-logo { display: none; }
+  .exam-paper-title { font-size: 12.5px; }
+  .exam-student-name { font-size: 11px; }
   .exam-header-right { gap: 8px !important; }
   .exam-timer { font-size: 18px !important; padding: 5px 10px !important; }
-  .exam-logo { height: 28px; }
   .exam-layout { padding: 10px; }
   .main-panel { padding: 16px 14px 18px; }
   .exam-overlay { padding: 12px; align-items: flex-start; }
@@ -1449,11 +1474,13 @@ button.card { color: var(--ink-1); background: var(--surface); }
 
 /* ── Instructor dashboard on a phone ──
    The dashboard is laid out in inline styles as a 240px sidebar beside the
-   page, which left a phone about 150px of page. Up to 760px the sidebar is
+   page, which left a phone about 150px of page. Up to 1024px the sidebar is
    a drawer opened from the menu button in the toolbar, and the page takes
-   the full width. !important because the layout it overrides is inline. */
+   the full width — on a tablet the sidebar beside the page clipped the
+   Results table's score and actions off the screen. !important because the
+   layout it overrides is inline. */
 .dash-menu-btn, .dash-backdrop, .dash-tabbar, .dash-filters-toggle { display: none; }
-@media (max-width: 760px) {
+@media (max-width: 1024px) {
   .dash-shell { grid-template-columns: minmax(0, 1fr) !important; }
   .dash-side-placeholder { display: none; }
   .dash-side {

@@ -184,6 +184,7 @@ export default function App() {
       exam={selectedExam}
       examSet={examSet}
       student={student}
+      onLogout={handleLogout}
       // What was just sat has to show on the home tabs, so their shared copy
       // goes — see src/lib/studentHome.js.
       onFinish={() => { forgetPaper(); forgetStudentHome(); setSelectedExam(null); setExamSet(null); }}

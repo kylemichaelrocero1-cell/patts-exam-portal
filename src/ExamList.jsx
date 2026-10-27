@@ -19,6 +19,7 @@ import { papersToReview } from './lib/studentHomeCore';
 import { useAnswerReview } from './lib/useAnswerReview';
 import { combinedScore } from './lib/workedShape.js';
 import { scoreFraction } from './lib/resultsStats.js';
+import { formatName } from './lib/personName.js';
 
 // What the realtime listener asks for: no spinner, and past the shared copy.
 const LIVE_REFRESH = { silent: true, fresh: true };
@@ -394,6 +395,22 @@ export default function ExamList({ embedded = false, kind = null, student, selec
     </div>
   );
 
+  // The badge counts what a student can start now; a scheduled paper and one
+  // already handed in are listed but are not "open" to them.
+  const counts = exams.reduce((c, exam) => {
+    const done = isPaperFinished(exam, completedExams.includes(exam.id));
+    const state = availabilityState(exam);
+    if (state === 'scheduled') c.upcoming++;
+    else if (done) c.done++;
+    else c.open++;
+    return c;
+  }, { open: 0, upcoming: 0, done: 0 });
+  const countLabel = [
+    `${counts.open} open`,
+    counts.upcoming ? `${counts.upcoming} upcoming` : '',
+    counts.done ? `${counts.done} done` : '',
+  ].filter(Boolean).join(' · ');
+
   return (
     <div style={embedded ? undefined : { minHeight: '100vh', background: 'var(--bg)' }}>
 
@@ -467,7 +484,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <img src="/patts-logo.png" alt="PATTS" style={{ height: '40px', width: 'auto', objectFit: 'contain' }} />
           <p style={{ margin: 0, color: 'rgba(255,255,255,.8)', fontSize: '13.5px' }}>
-            Welcome, <strong style={{ color: 'white' }}>{student.full_name}</strong>
+            Welcome, <strong style={{ color: 'white' }}>{formatName(student.full_name)}</strong>
           </p>
         </div>
         <button onClick={onLogout} style={{ background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.25)', color: 'white', padding: '9px 20px', width: 'auto', fontSize: '13px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
@@ -485,10 +502,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
       {/* Content */}
       <div style={{ maxWidth: '860px', margin: '0 auto', padding: '36px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px 12px', marginBottom: '28px', flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>{kind === 'seatwork' ? 'Available Seatwork' : 'Available Examinations'}</h2>
-          <span style={{ background: 'var(--navy-tint)', color: 'var(--navy)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}>
-            {exams.length} open
+          <span style={{ background: 'var(--navy-tint)', color: 'var(--navy)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+            {countLabel}
           </span>
         </div>
 

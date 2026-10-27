@@ -1,6 +1,7 @@
 import { useState, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import ExamList from './ExamList';
+import { formatName } from './lib/personName.js';
 
 // Lazy for the same reason as the instructor side: this pulls in
 // react-markdown + KaTeX (~600kB). A student who only ever sits exams should
@@ -33,9 +34,9 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       <header className="header" style={{ borderRadius: 0, marginBottom: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
           <img src="/patts-logo.png" alt="PATTS" style={{ height: 40, width: 'auto', objectFit: 'contain' }} />
-          <p style={{ margin: 0, color: 'rgba(255,255,255,.8)', fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            Welcome, <strong style={{ color: 'white' }}>{student.full_name}</strong>
-            <span style={{ opacity: .7 }}> · {selectedSection}</span>
+          <p className="shell-welcome" style={{ margin: 0, color: 'rgba(255,255,255,.8)', fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span className="shell-welcome-word">Welcome, </span><strong style={{ color: 'white' }}>{formatName(student.full_name)}</strong>
+            <span className="shell-welcome-section" style={{ opacity: .7 }}> · {selectedSection}</span>
           </p>
         </div>
         <button

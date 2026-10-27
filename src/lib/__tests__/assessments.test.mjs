@@ -10,7 +10,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import {
   makeAssessmentReader, isAvailableNow, availabilityState,
-  normaliseExamRow, isMissingTableError, isMissingFunctionError, formatWindow,
+  normaliseExamRow, isMissingTableError, isMissingFunctionError, formatWindow, closingNote,
 } from '../assessmentsCore.js';
 
 let pass = 0, fail = 0;
@@ -175,6 +175,18 @@ check('no window -> empty string', formatWindow({}) === '');
 check('both bounds joined', formatWindow({ opens_at: iso(0), closes_at: iso(H) }).includes('—'));
 check('opens only', formatWindow({ opens_at: iso(0) }).startsWith('Opens'));
 check('closes only', formatWindow({ closes_at: iso(0) }).startsWith('Closes'));
+{
+  const noon = new Date(2026, 9, 27, 12, 0);
+  const at = (h, m = 0, d = 27) => new Date(2026, 9, d, h, m).toISOString();
+  check('no closing time -> no note', closingNote({}, noon) === null && closingNote(null, noon) === null);
+  check('closing today shows the clock time only',
+    /^closes \S*5:41/.test(closingNote({ closes_at: at(17, 41) }, noon).label)
+    && !/Oct/.test(closingNote({ closes_at: at(17, 41) }, noon).label));
+  check('closing another day shows the date too', /Oct/.test(closingNote({ closes_at: at(9, 0, 29) }, noon).label));
+  check('the last hour is soon', closingNote({ closes_at: at(12, 45) }, noon).soon === true);
+  check('more than an hour out is not soon', closingNote({ closes_at: at(13, 30) }, noon).soon === false);
+  check('already past is not soon', closingNote({ closes_at: at(11, 0) }, noon).soon === false);
+}
 
 console.log('\n=== "NOT MIGRATED YET" vs "REFUSED" ===');
 // The gate in sql/020 falls back to the old unguarded read when the function

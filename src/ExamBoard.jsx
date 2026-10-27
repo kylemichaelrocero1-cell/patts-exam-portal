@@ -17,6 +17,7 @@ import { createFocusLossWatcher, isTypingTarget, COVER_MS, COVER_GRACE_MS } from
 import { isUpdateReload } from './lib/staleBuild.js';
 import { deviceOf, leaveText, pushViolationsNow, withAway, PAUSE_MS } from './lib/leaveReport.js';
 import { paperNoun } from './lib/paperNoun.js';
+import { formatName } from './lib/personName.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -56,6 +57,7 @@ const TIME_NOTICES = [
   { at: 60, text: '1 minute left. Your paper is submitted automatically when time runs out.' },
   { at: 300, text: '5 minutes left. Check your unanswered and bookmarked questions.' },
   { at: 600, text: '10 minutes left.' },
+  { at: 1800, text: '30 minutes left.' },
 ];
 
 // How long to let an instructor's force submit finish before deciding what a
@@ -73,7 +75,34 @@ const SESSION_CHECK_MS = 60000;
 const AUTO_SUBMIT_SPREAD_MS = 15000;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-export default function ExamBoard({ student, exam, examSet, onFinish }) {
+// The way off the finish screen. It said "Return to Login" and reloaded into
+// the student's home, still signed in — so a student on a shared lab computer
+// walked away from it signed in. Back and Sign out are now two buttons; on a
+// graded paper, where the next person at the machine matters most, Sign out
+// comes first.
+function FinishButtons({ onLogout, signOutFirst }) {
+  const back = () => window.location.reload();
+  const signOut = async () => {
+    try { await onLogout?.(); } finally { window.location.reload(); }
+  };
+  const buttons = [
+    <button key="out" onClick={signOut} className={`btn lg${signOutFirst ? '' : ' ghost'}`} style={{ width: '100%' }}>
+      <Icon name="logout" size={16} />
+      Sign out
+    </button>,
+    <button key="back" onClick={back} className={`btn lg${signOutFirst ? ' ghost' : ''}`} style={{ width: '100%' }}>
+      <Icon name="home" size={16} />
+      Back to my papers
+    </button>,
+  ];
+  return (
+    <div style={{ display: 'grid', gap: 10, marginTop: 22 }}>
+      {signOutFirst ? buttons : buttons.reverse()}
+    </div>
+  );
+}
+
+export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
   // instructor wants that signal — but are never locked for it. Locking a
   // revision paper the student can simply restart is pure friction, and it
@@ -152,6 +181,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   });
   const [timeNotice, setTimeNotice] = useState(null);
   const lastTimeLeftRef = useRef(null);
+  // A letter key that replaced a picked answer says so, briefly: one stray
+  // keypress used to change an answer without a sign that anything happened.
+  const [keyNotice, setKeyNotice] = useState(null);
+  const questionTextRef = useRef(null);
+  // What was handed in and when, for the finish screen — something to show
+  // if there is ever a question of whether a paper went in.
+  const [receipt, setReceipt] = useState(null);
   // The figure viewer covers the whole screen, so nothing can move to another
   // question while it is open; it always opens fitted to the screen.
   const [figureOpen, setFigureOpen] = useState(false);
@@ -715,6 +751,11 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       const mcTotal = outcome?.total_items ?? 0;
       setCanReviewAnswers(!!outcome?.can_review);
       setAttemptNo(outcome?.attempt_no ?? 1);
+      setReceipt({
+        at: new Date(),
+        answered: countAnswered(questions, submittedAnswers, submittedEssayAnswers, submittedWork),
+        of: questions.length,
+      });
 
       // Filed: the sitting is over. Said now rather than after the working
       // is marked, which can take a while on a busy database — the
@@ -1239,9 +1280,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // A new question starts at its top. On a phone the Next button is at the
   // bottom of a long page, and without this the next question opened already
   // scrolled past its own text.
+  // Focus goes to the question too, so a screen reader reads the new one and
+  // the ring is not left on the button that was pressed. Not while typing:
+  // an answer box keeps its own focus.
+  const firstQuestionRef = useRef(true);
   useEffect(() => {
     window.scrollTo(0, 0);
+    if (firstQuestionRef.current) { firstQuestionRef.current = false; return; }
+    const el = document.activeElement;
+    if (el?.closest?.('input, textarea, select, math-field, [contenteditable="true"]')) return;
+    questionTextRef.current?.focus?.({ preventScroll: true });
   }, [currentQuestion]);
+
+  useEffect(() => {
+    if (!keyNotice) return;
+    const t = setTimeout(() => setKeyNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [keyNotice]);
 
   useEffect(() => {
     try { localStorage.setItem(TEXT_SIZE_KEY, String(textSize)); } catch { /* private mode */ }
@@ -1288,6 +1343,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       const original = (q.choice_order || [])[position];
       if (original === undefined) return;
       e.preventDefault();
+      const before = answers[q.id];
+      if (!isMultiSelect(q) && before !== undefined && before !== null && before !== original) {
+        const was = (q.choice_order || []).indexOf(before);
+        if (was >= 0) {
+          setKeyNotice(`Answer changed: ${String.fromCharCode(65 + was)} → ${String.fromCharCode(65 + position)}`);
+        }
+      }
       setAnswers(prev => ({
         ...prev,
         [q.id]: isMultiSelect(q) ? toggleIndex(prev[q.id], original) : original,
@@ -1295,7 +1357,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [questions, currentQuestion, showSubmitModal, figureOpen, navOpen, goTo,
+  }, [questions, currentQuestion, showSubmitModal, figureOpen, navOpen, goTo, answers,
       isLoading, scoreDisplay, isSubmitting, endedByInstructor, examStatus]);
 
   // Escape closes whatever is open over the paper.
@@ -1342,7 +1404,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
               <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
               <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your instructor has ended this exam.</h2>
               <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
-                {student?.full_name}{examSet ? ` · Set ${examSet}` : ''}
+                {formatName(student?.full_name)}{examSet ? ` · Set ${examSet}` : ''}
               </p>
             </div>
             <div style={{ padding: '28px 32px', textAlign: 'center' }}>
@@ -1353,12 +1415,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
               <p style={{ margin: '12px 0 0', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.6 }}>
                 If you believe this was a mistake, speak to your instructor — only they can reopen a paper.
               </p>
-              <button
-                onClick={() => window.location.reload()}
-                style={{ marginTop: 22, width: '100%', background: 'var(--navy)', color: 'white', fontWeight: 700, padding: '12px' }}
-              >
-                Back to my papers
-              </button>
+              <FinishButtons onLogout={onLogout} signOutFirst />
             </div>
           </div>
         </div>
@@ -1389,8 +1446,14 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
               <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
               <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your answers have been saved.</h2>
               <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
-                {student?.full_name} · Set {examSet}
+                {formatName(student?.full_name)}{examSet ? ` · Set ${examSet}` : ''}
               </p>
+              {receipt && (
+                <p className="exam-receipt">
+                  Submitted {receipt.at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+                  {' · '}{receipt.answered} of {receipt.of} answered
+                </p>
+              )}
             </div>
             <div style={{ padding: '28px 32px', textAlign: 'center' }}>
               {/* On a paper that reveals answers there is no reason to withhold
@@ -1433,12 +1496,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
               <p style={{ margin: '0 0 22px', color: 'var(--ink-3)', fontSize: 13.5, lineHeight: 1.65 }}>
                 {canReviewAnswers
                   ? 'You can retake this as many times as you like. Review your answers below to see what you missed.'
-                  : 'Your submission is recorded. You may now close this window or return to the login screen.'}
+                  : 'Your submission is recorded. On a shared computer, sign out before you leave.'}
               </p>
-              <button onClick={() => window.location.reload()} className="btn lg" style={{ width: '100%' }}>
-                <Icon name="login" size={16} />
-                Return to Login
-              </button>
+              <FinishButtons onLogout={onLogout} signOutFirst={!canReviewAnswers} />
             </div>
           </div>
         </div>
@@ -1677,9 +1737,14 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       <header className="patts-header exam-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative', zIndex: 1, minWidth: 0 }}>
           <img src="/patts-logo.png" alt="PATTS" className="exam-logo" />
-          <p className="exam-student-name" style={{ margin: 0, fontSize: 12.5, color: 'rgba(255,255,255,.68)', fontWeight: 500 }}>
-            {student?.full_name} &nbsp;·&nbsp; Set {examSet}
-          </p>
+          {/* Which paper this is, and whose — the first thing a proctor
+              walking the room looks for, as on a board exam's answer sheet. */}
+          <div className="exam-id">
+            <p className="exam-paper-title" title={exam?.title || ''}>{exam?.title || noun}</p>
+            <p className="exam-student-name">
+              {formatName(student?.full_name)}{examSet ? ` · Set ${examSet}` : ''}
+            </p>
+          </div>
         </div>
         <div className="exam-header-right" style={{ display: 'flex', alignItems: 'center', gap: 12, position: 'relative', zIndex: 1 }}>
           <div className="exam-header-meta" style={{ fontSize: 11, textAlign: 'right', color: 'rgba(255,255,255,.52)', lineHeight: 1.5 }}>
@@ -1707,6 +1772,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
           </div>
         </div>
       </header>
+
+      {keyNotice && !timeNotice && (
+        <div className="exam-toast" role="status" aria-live="polite">
+          <Icon name="edit" size={15} />
+          <span style={{ flex: 1 }}>{keyNotice}</span>
+        </div>
+      )}
 
       {timeNotice && (
         <div className="exam-toast" role="status" aria-live="polite">
@@ -1787,7 +1859,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             </button>
           </div>
 
-          <p className="q-text">
+          <p className="q-text" ref={questionTextRef} tabIndex={-1}>
             {currentQ?.question_text}
           </p>
 

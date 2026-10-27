@@ -3,6 +3,7 @@ import Icon from '../components/Icon';
 import { submittedDateTime } from '../lib/examDates.js';
 import { combinedScore } from '../lib/workedShape.js';
 import { scoreFraction } from '../lib/resultsStats.js';
+import { paperOptions } from '../lib/paperFilter.js';
 
 // Every sitting on an unlimited-retake paper. These never reach `results` —
 // submit_assessment() routes them to review_attempts so practice cannot move a
@@ -100,11 +101,14 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
     });
   }, [attempts, students, titleFor]);
 
-  const papers = useMemo(() => {
-    const ids = [...new Set(groups.map(g => g.assessment_id))];
-    return ids.map(id => ({ id, title: titleFor[id] || 'Untitled paper' }))
-      .sort((a, b) => a.title.localeCompare(b.title));
-  }, [groups, titleFor]);
+  // Grouped by course, newest first, as on the Results tab (src/lib/paperFilter.js);
+  // the count is students who have sat it.
+  const paperGroups = useMemo(() => {
+    const counts = {};
+    groups.forEach(g => { counts[g.assessment_id] = (counts[g.assessment_id] || 0) + 1; });
+    const meta = Object.fromEntries((examsList || []).map(e => [e.id, e]));
+    return paperOptions({ titles: titleFor, meta, counts, showArchived: true }).groups;
+  }, [groups, titleFor, examsList]);
 
   const sections = useMemo(() => {
     const set = new Set();
@@ -189,12 +193,16 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
         <>
           {/* Filters */}
           <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-            <div>
+            <div style={{ minWidth: 0, flex: '1 1 260px', maxWidth: 520 }}>
               <label className="label">Paper</label>
-              <select className="input" style={{ width: 'auto', minWidth: 200, display: 'inline-block' }}
+              <select className="input" style={{ width: '100%' }}
                 value={paper} onChange={e => setPaper(e.target.value)}>
                 <option value="All">All papers</option>
-                {papers.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                {paperGroups.map(g => (
+                  <optgroup key={g.course} label={g.course}>
+                    {g.papers.map(p => <option key={p.id} value={p.id}>{p.title} ({p.count}){p.archived ? ' — archived' : ''}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </div>
             <div>

@@ -18,6 +18,7 @@ import { rowsMissingWork, workPatchFrom } from './lib/workRecovery';
 import { submittedDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
+import { paperOptions, resultInView } from './lib/paperFilter';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -164,6 +165,11 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   // Filter States
   const [selectedSection, setSelectedSection] = useState('All');
   const [selectedExam, setSelectedExam] = useState('All');
+  // The paper picker (src/lib/paperFilter.js): a course first, and archived
+  // papers only on request — in the picker and in the rows alike.
+  const [selectedCourse, setSelectedCourse] = useState('All');
+  const [showArchivedResults, setShowArchivedResults] = useState(false);
+  const [resultQuery, setResultQuery] = useState('');
   const [studentSectionFilter, setStudentSectionFilter] = useState('All');
 
   // Edit Time State
@@ -1020,7 +1026,7 @@ const [targetSection, setTargetSection] = useState('');
       }
       closePwModal();
       alert('Password updated successfully.');
-    } catch (e) {
+    } catch {
       setIsChangingPw(false);
       setPwError('Something went wrong. Please try again.');
     }
@@ -1709,7 +1715,7 @@ const [targetSection, setTargetSection] = useState('');
     if (!dupSection.trim()) return alert('Target section is required — students find the exam by section.');
     setIsDuplicating(true);
     const targetId = dupAssignTo === 'self' ? instructorId : dupAssignTo;
-    const { data: newExamId, error } = await supabase.rpc('duplicate_exam', {
+    const { error } = await supabase.rpc('duplicate_exam', {
       p_source_exam_id: dupModal.id,
       p_new_title: dupTitle.trim(),
       p_target_section: dupSection.trim(),
@@ -2486,6 +2492,12 @@ const deleteResult = async (studentId, examId) => {
   // instructor's picker.
   const allKnownSections = [...instructorSections].sort((a, b) => a.localeCompare(b));
 
+  const paperMeta = Object.fromEntries(examsList.map(e => [e.id, e]));
+  const paperView = { titles: examsDict, meta: paperMeta, course: selectedCourse, showArchived: showArchivedResults };
+  const resultCounts = {};
+  results.forEach(r => { resultCounts[r.exam_id] = (resultCounts[r.exam_id] || 0) + 1; });
+  const paperPicker = paperOptions({ ...paperView, counts: resultCounts, keep: selectedExam === 'All' ? null : selectedExam });
+
   const filteredAndSortedResults = results
     .filter(row => {
       const studentInfo = students[row.student_id] || {};
@@ -2493,8 +2505,12 @@ const deleteResult = async (studentId, examId) => {
       // or a student in "AENG 223L-2, AENG 223L" is invisible under either section.
       const matchesSection = selectedSection === 'All' ||
         (studentInfo.section || '').split(',').map(x => x.trim()).includes(selectedSection);
-      const matchesExam = selectedExam === 'All' || row.exam_id === selectedExam;
-      return matchesSection && matchesExam;
+      const matchesExam = selectedExam === 'All'
+        ? resultInView(row.exam_id, paperView)
+        : row.exam_id === selectedExam;
+      const q = resultQuery.trim().toLowerCase();
+      const matchesName = !q || (studentInfo.name || '').toLowerCase().includes(q);
+      return matchesSection && matchesExam && matchesName;
     })
     .sort((a, b) => {
       // On the score the column shows (src/lib/resultsStats.js), not the
@@ -2924,19 +2940,44 @@ const deleteResult = async (studentId, examId) => {
             {/* Filters */}
             <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
-                <label className="label">Filter by Exam</label>
-                <select className="input" style={{ width: 'auto', minWidth: 200, display: 'inline-block' }} value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
-                  <option value="All">All Exams</option>
-                  {Object.entries(examsDict).map(([id, title]) => (
-                    <option key={id} value={id}>{title}</option>
+                <label className="label">Course</label>
+                <select className="input" style={{ width: 'auto', minWidth: 130, display: 'inline-block' }} value={selectedCourse}
+                  onChange={e => { setSelectedCourse(e.target.value); setSelectedExam('All'); }}>
+                  <option value="All">All courses</option>
+                  {paperPicker.courses.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div style={{ minWidth: 0, flex: '1 1 260px', maxWidth: 520 }}>
+                <label className="label">Paper</label>
+                <select className="input" style={{ width: '100%' }} value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
+                  <option value="All">All papers{selectedCourse !== 'All' ? ` in ${selectedCourse}` : ''}</option>
+                  {paperPicker.groups.map(g => (
+                    <optgroup key={g.course} label={g.course}>
+                      {g.papers.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.title} ({p.count}){p.archived ? ' — archived' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
+                {(paperPicker.hiddenArchived > 0 || showArchivedResults) && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', marginTop: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={showArchivedResults} onChange={e => setShowArchivedResults(e.target.checked)} />
+                    Include archived papers{!showArchivedResults ? ` (${paperPicker.hiddenArchived})` : ''}
+                  </label>
+                )}
               </div>
               <div>
                 <label className="label">Filter by Section</label>
                 <select className="input" style={{ width: 'auto', minWidth: 160, display: 'inline-block' }} value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
                   {uniqueSections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="label">Student</label>
+                <input className="input" style={{ width: 'auto', minWidth: 170, display: 'inline-block' }}
+                  placeholder="Search by name" value={resultQuery} onChange={e => setResultQuery(e.target.value)} />
               </div>
               <div>
                 <label className="label">Sort by</label>
@@ -3009,7 +3050,7 @@ const deleteResult = async (studentId, examId) => {
                     <tr>
                       <th>Student</th>
                       <th>Section</th>
-                      <th>Exam</th>
+                      {selectedExam === 'All' && <th>Paper</th>}
                       <th style={{ textAlign: 'right' }}>Score</th>
                       <th>Time</th>
                       <th>Violations</th>
@@ -3018,7 +3059,7 @@ const deleteResult = async (studentId, examId) => {
                   </thead>
                   <tbody>
                     {filteredAndSortedResults.length === 0 ? (
-                      <tr><td colSpan="7" style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>No results found.</td></tr>
+                      <tr><td colSpan={selectedExam === 'All' ? 7 : 6} style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>No results found.</td></tr>
                     ) : (
                       filteredAndSortedResults.map((row, index) => {
                         const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
@@ -3037,7 +3078,9 @@ const deleteResult = async (studentId, examId) => {
                           <tr key={index}>
                             <td style={{ fontWeight: 600 }}>{student.name}</td>
                             <td><span className="px-pill brand">{student.section}</span></td>
-                            <td style={{ color: 'var(--ink-2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
+                            {selectedExam === 'All' && (
+                              <td title={examTitle} style={{ color: 'var(--ink-2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
+                            )}
                             <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                               {/* The percentage has a fixed width so every
                                   fraction lines up under the header, 9% or

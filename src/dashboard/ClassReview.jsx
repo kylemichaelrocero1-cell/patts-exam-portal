@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { combinedScore } from '../lib/workedShape';
+import { classRecordSheets, groupOf } from '../lib/classRecord';
+import { workbookBytes } from '../lib/xlsx';
 
 // One section at a time, answering the questions an instructor actually asks:
 // who hasn't submitted, who is struggling, and how did the class do on each
@@ -51,6 +53,11 @@ function latestAttempt(attempts) {
 export default function ClassReview({ studentsList, results, practiceAttempts, examsList }) {
   const [section, setSection] = useState('');
   const [sort, setSort] = useState('name');
+  // Archived papers (last term's prelims) stay out unless asked for — here
+  // and in the class record alike.
+  const [showArchived, setShowArchived] = useState(false);
+  const [retakes, setRetakes] = useState('best');
+  const [scope, setScope] = useState('section');
 
   // Sections this instructor actually teaches, from their own assessments.
   const sections = useMemo(() => {
@@ -71,7 +78,30 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
   // The assessments aimed at this section.
   const items = useMemo(() => (examsList || []).filter(e =>
     (e.target_section || '').split(',').map(x => x.trim()).includes(active)
-  ), [examsList, active]);
+    && (showArchived || !e.archived_at)
+  ), [examsList, active, showArchived]);
+  const archivedHere = (examsList || []).filter(e =>
+    e.archived_at && (e.target_section || '').split(',').map(x => x.trim()).includes(active)).length;
+
+  // The class record (src/lib/classRecord.js), written as an .xlsx here in
+  // the browser: Excel opens it, and Google Sheets imports it.
+  const downloadClassRecord = () => {
+    const chosen = scope === 'all' ? sections : [active];
+    const sheets = classRecordSheets({
+      sections: chosen, students: studentsList || [], papers: examsList || [],
+      results: results || [], practiceAttempts: practiceAttempts || [],
+      retakes, includeArchived: showArchived,
+    });
+    const blob = new Blob([workbookBytes({ sheets })],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const label = scope === 'all' ? 'all_sections' : active.replace(/[^A-Za-z0-9-]+/g, '_');
+    a.download = `class_record_${label}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // student_id -> exam_id -> { score, total_items, is_practice, attempts }
   const byStudent = useMemo(() => {
@@ -166,9 +196,43 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
             <option value="missing">Most missing first</option>
           </select>
         </div>
+        {(archivedHere > 0 || showArchived) && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-3)', cursor: 'pointer', paddingBottom: 8 }}>
+            <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
+            Include archived papers{!showArchived ? ` (${archivedHere})` : ''}
+          </label>
+        )}
         <span className="px-pill brand" style={{ marginLeft: 'auto' }}>
           {rows.length} student{rows.length !== 1 ? 's' : ''} · {items.length} assessment{items.length !== 1 ? 's' : ''}
         </span>
+      </div>
+
+      {/* Class record download */}
+      <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>Class record</div>
+          <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>
+            An Excel file: a student a row, each paper in points, grouped into quizzes, seatworks,
+            assignments and exams, with subtotals and a total you can weight. Opens in Excel; in Google Sheets use File → Import.
+          </div>
+        </div>
+        <div>
+          <label className="label">Sections</label>
+          <select className="input" style={{ width: 'auto', minWidth: 150, display: 'inline-block' }} value={scope} onChange={e => setScope(e.target.value)}>
+            <option value="section">{active} only</option>
+            <option value="all">All my sections ({sections.length})</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Papers with retakes</label>
+          <select className="input" style={{ width: 'auto', minWidth: 140, display: 'inline-block' }} value={retakes} onChange={e => setRetakes(e.target.value)}>
+            <option value="best">Best attempt</option>
+            <option value="latest">Latest attempt</option>
+          </select>
+        </div>
+        <button className="btn sm" style={{ width: 'auto' }} onClick={downloadClassRecord}>
+          <Icon name="download" size={14} /> Download .xlsx
+        </button>
       </div>
 
       {/* Headline numbers */}
@@ -213,12 +277,15 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                   <tr key={it.id}>
                     <td style={{ fontWeight: 600 }}>{it.title}</td>
                     <td>
+                      {/* The class record's grouping (src/lib/classRecord.js), so a quiz
+                          or an assignment is not called an exam. */}
                       <span className="px-pill" style={{
-                        background: it.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
-                        color: it.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
+                        background: groupOf(it) === 'Exams' ? 'var(--gold-pale)' : 'var(--navy-tint)',
+                        color: groupOf(it) === 'Exams' ? 'var(--gold-700)' : 'var(--navy)',
                         border: '1px solid var(--line)',
                       }}>
-                        {it.kind === 'seatwork' ? 'Seatwork' : 'Exam'}
+                        {{ Quizzes: 'Quiz', Seatworks: 'Seatwork', Assignments: 'Assignment', Exams: 'Exam',
+                          'Practice & review': 'Practice', Other: it.kind === 'seatwork' ? 'Seatwork' : 'Paper' }[groupOf(it)]}
                       </span>
                     </td>
                     <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{rs.length}/{rows.length}</td>

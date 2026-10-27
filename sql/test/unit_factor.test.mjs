@@ -186,12 +186,14 @@ console.log('\n=== 102 re-marks, raise-only ===');
   await x(M102);
   const m = Object.fromEntries((await q(`SELECT student_id, work_marks FROM public.results WHERE assessment_id = $1`, [PAPER])).map(r => [r.student_id, Number(r.work_marks)]));
   ck('…raises the right ones 4 → 5, leaves the other at 1, and nothing is left', m[STU] === 5 && m[STU2] === 1 && (await left()) === 0, JSON.stringify(m));
-  await q(`UPDATE public.results SET work_marks = 9, work_marked_at = '2000-01-01',
-           answers_json = jsonb_set(answers_json, ARRAY[$2, 'marks'], '9') WHERE student_id = $1`, [STU, qid]);
-  let refused = '';
-  try { await x(M102); } catch (e) { refused = e.message; await x('ROLLBACK'); }
-  ck('a run where one would go down is refused, and changes nothing', /would go DOWN/i.test(refused)
-    && Number((await q(`SELECT work_marks FROM public.results WHERE student_id = $1`, [STU]))[0].work_marks) === 9, refused);
+  // A mark today's rules would not give (an older paper's, or the dashboard's
+  // own credit): the re-mark keeps it, and still raises the rest.
+  await q(`UPDATE public.results SET work_marks = 3, work_marked_at = '2000-01-01',
+           answers_json = jsonb_set(answers_json, ARRAY[$2, 'marks'], '3') WHERE student_id = $1`, [STU2, qid]);
+  await x(M102);
+  const kept = (await q(`SELECT work_marks, answers_json FROM public.results WHERE student_id = $1`, [STU2]))[0];
+  ck('an item the re-mark would lower keeps its mark, and the sitting is done', Number(kept.work_marks) === 3
+    && Number(kept.answers_json[qid].marks) === 3 && (await left()) === 0, JSON.stringify(kept.work_marks));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

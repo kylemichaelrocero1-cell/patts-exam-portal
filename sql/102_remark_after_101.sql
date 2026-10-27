@@ -8,17 +8,19 @@
 -- first, then practice attempts. Not while a paper is being sat.
 --
 -- Only sittings whose answers hold a (1) are marked again, through
--- score_worked_answers(), as a submission is marked. RAISE-ONLY: if any
--- item or any sitting would go down, that run changes nothing and says
--- which. Anything an instructor marked by hand is skipped and not counted
--- as left.
+-- score_worked_answers(), as a submission is marked. RAISE-ONLY, item by
+-- item: an item the re-mark would lower keeps the mark it had — an older
+-- paper may hold marks today's rules would not give (the dashboard's own
+-- check credited them, or a rule since changed), and a re-mark never takes
+-- a mark away — while every other item that rises, rises. Anything an
+-- instructor marked by hand is skipped and not counted as left.
 -- =====================================================================
 
 BEGIN;
 
 DO $$
-DECLARE r record; v_new jsonb; v_total numeric; k text; v_n int;
-        v_start timestamptz := clock_timestamp(); n_done int := 0; n_up int := 0;
+DECLARE r record; v_new jsonb; v_total numeric; k text; v_kept int;
+        v_start timestamptz := clock_timestamp(); n_done int := 0; n_up int := 0; n_kept int := 0;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                  WHERE n.nspname = 'public' AND p.proname = 'remark_101_since') THEN
@@ -56,14 +58,26 @@ BEGIN
       SELECT answers_json, coalesce(work_marks, 0) INTO v_new, v_total FROM public.review_attempts
       WHERE student_id = r.student_id AND assessment_id = r.assessment_id AND attempt_no = r.attempt_no;
     END IF;
+    -- An item the re-mark would lower keeps what it had.
+    v_kept := 0;
     FOR k IN SELECT jsonb_object_keys(coalesce(r.answers_json, '{}'::jsonb)) LOOP
       CONTINUE WHEN jsonb_typeof(r.answers_json -> k) <> 'object' OR NOT (r.answers_json -> k ? 'marks');
       IF coalesce((v_new -> k ->> 'marks')::numeric, 0) < (r.answers_json -> k ->> 'marks')::numeric THEN
-        SELECT question_number INTO v_n FROM public.questions WHERE id::text = k;
-        RAISE EXCEPTION 'Item % would go DOWN from % to % (student %, attempt %). Nothing in this run was changed.',
-          v_n, r.answers_json -> k ->> 'marks', coalesce(v_new -> k ->> 'marks', '0'), r.student_id, coalesce(r.attempt_no::text, 'graded');
+        v_total := v_total + (r.answers_json -> k ->> 'marks')::numeric - coalesce((v_new -> k ->> 'marks')::numeric, 0);
+        v_new := jsonb_set(v_new, ARRAY[k], r.answers_json -> k);
+        v_kept := v_kept + 1;
       END IF;
     END LOOP;
+    IF v_kept > 0 THEN
+      n_kept := n_kept + v_kept;
+      IF r.attempt_no IS NULL THEN
+        UPDATE public.results SET answers_json = v_new, work_marks = v_total
+        WHERE student_id = r.student_id AND assessment_id = r.assessment_id;
+      ELSE
+        UPDATE public.review_attempts SET answers_json = v_new, work_marks = v_total
+        WHERE student_id = r.student_id AND assessment_id = r.assessment_id AND attempt_no = r.attempt_no;
+      END IF;
+    END IF;
     IF v_total < r.old THEN
       RAISE EXCEPTION 'Would go DOWN from % to % (student %, attempt %). Nothing in this run was changed.',
         r.old, v_total, r.student_id, coalesce(r.attempt_no::text, 'graded');
@@ -71,7 +85,7 @@ BEGIN
     n_done := n_done + 1;
     IF v_total > r.old THEN n_up := n_up + 1; END IF;
   END LOOP;
-  RAISE NOTICE '% re-marked in this run, % went up.', n_done, n_up;
+  RAISE NOTICE '% re-marked in this run, % went up, % items kept a mark the re-mark would have lowered.', n_done, n_up, n_kept;
 END $$;
 
 COMMIT;

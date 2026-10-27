@@ -33,6 +33,7 @@ const PATHS = {
   'download':     <><path d="M12 4v12"/><path d="m6 12 6 6 6-6"/><path d="M4 20h16"/></>,
   'upload':       <><path d="M12 20V8"/><path d="m6 12 6-6 6 6"/><path d="M4 4h16"/></>,
   'send':         <path d="m22 2-7 20-4-9-9-4 20-7z"/>,
+  'sliders':      <><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h2"/><path d="M10 17h10"/><circle cx="8" cy="17" r="2"/></>,
   'more':         <><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></>,
   'more-v':       <><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></>,
 

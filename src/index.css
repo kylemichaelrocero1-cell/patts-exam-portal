@@ -1447,7 +1447,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
    page, which left a phone about 150px of page. Up to 760px the sidebar is
    a drawer opened from the menu button in the toolbar, and the page takes
    the full width. !important because the layout it overrides is inline. */
-.dash-menu-btn, .dash-backdrop { display: none; }
+.dash-menu-btn, .dash-backdrop, .dash-tabbar, .dash-filters-toggle { display: none; }
 @media (max-width: 760px) {
   .dash-shell { grid-template-columns: minmax(0, 1fr) !important; }
   .dash-side-placeholder { display: none; }
@@ -1479,6 +1479,63 @@ button.card { color: var(--ink-1); background: var(--surface); }
     background: #E74C3C; color: white; font-size: 11px; font-weight: 700;
     padding: 1px 6px; border-radius: 99px; line-height: 1.5;
   }
+
+  /* The views used most, under the thumb. */
+  .dash-tabbar {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
+    background: var(--white, #fff); border-top: 1px solid var(--line);
+    box-shadow: 0 -4px 18px rgba(6, 18, 40, .07);
+  }
+  .dash-tab {
+    position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; width: auto; min-height: 52px; padding: 6px 2px;
+    background: none; border: 0; border-radius: 12px; box-shadow: none;
+    color: var(--ink-3); font-size: 10.5px; font-weight: 600; letter-spacing: .01em; cursor: pointer;
+    transition: none;
+  }
+  .dash-tab:hover:not(:disabled) { background: none; color: var(--ink-3); transform: none; box-shadow: none; }
+  .dash-tab.is-active, .dash-tab.is-active:hover:not(:disabled) { color: var(--navy); background: var(--navy-tint); }
+  .dash-tab-badge {
+    position: absolute; top: 3px; left: calc(50% + 5px);
+    background: #E74C3C; color: #fff; font-size: 10px; font-weight: 700; line-height: 1.5;
+    padding: 0 5px; border-radius: 99px;
+  }
+  .dash-main { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+
+  /* Grids that sat side by side stack, and may shrink below their text. */
+  .dash-two-col, .dash-stats-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .dash-two-col > *, .dash-stats-grid > * { min-width: 0; }
+
+  /* Results filters, folded behind one button. */
+  .dash-filters-toggle { display: flex !important; align-items: center; gap: 8px; width: 100% !important; min-height: 44px; text-align: left; }
+  .dash-filters-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .dash-filters.is-collapsed .dash-filter-field { display: none; }
+  .dash-filters .dash-filter-field { flex: 1 1 100% !important; max-width: none !important; }
+  .dash-filters .dash-filter-field .input { width: 100% !important; min-width: 0 !important; }
+
+  /* A table, one card per row: each cell its label on the left. */
+  .tbl-stack thead { display: none; }
+  .tbl-stack, .tbl-stack tbody, .tbl-stack tr { display: block; width: 100%; }
+  .tbl-stack tr {
+    margin: 10px; width: auto; padding: 8px 12px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--white, #fff);
+  }
+  .tbl-stack td {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 6px 0 !important; border: 0 !important; text-align: right !important;
+    max-width: none !important; white-space: normal !important; overflow: visible !important; width: auto !important;
+  }
+  .tbl-stack td::before {
+    content: attr(data-label); flex: 0 0 auto; text-align: left;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-4);
+  }
+  .tbl-stack td[data-label=""]::before, .tbl-stack td:not([data-label])::before { content: none; }
+  .tbl-stack td[data-label=""] { justify-content: flex-end; }
+  .tbl-stack td.tbl-stack-title { justify-content: flex-start; text-align: left !important; font-size: 15px; font-weight: 700; color: var(--ink-1); }
+  .tbl-stack td[colspan] { display: block; text-align: center !important; }
+  .tbl-stack td .input, .tbl-stack td select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .dash-side, .dash-side.is-open { transition: none; }

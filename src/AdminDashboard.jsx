@@ -170,6 +170,8 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [selectedCourse, setSelectedCourse] = useState('All');
   const [showArchivedResults, setShowArchivedResults] = useState(false);
   const [resultQuery, setResultQuery] = useState('');
+  // On a phone the Results filters fold away behind one button (index.css).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [studentSectionFilter, setStudentSectionFilter] = useState('All');
 
   // Edit Time State
@@ -2787,19 +2789,20 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 ))}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div className="dash-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>Your Exams</div>
                   {examsList.length === 0 ? (
                     <p style={{ fontSize: 13, color: 'var(--ink-4)' }}>No exams yet — create one in Manage Exams.</p>
-                  ) : examsList.slice(0, 6).map(e => (
+                  ) : [...examsList].filter(e => !e.archived_at)
+                    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 6).map(e => (
                     <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', marginBottom: 5 }}>
                       <span style={{ width: 7, height: 7, borderRadius: '50%', background: e.is_open ? '#27AE60' : 'var(--ink-4)', flexShrink: 0 }} />
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
                       <span style={{ fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{e.target_section}</span>
                     </div>
                   ))}
-                  {examsList.length > 6 && <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '4px 0 0' }}>+{examsList.length - 6} more — view all in Manage Exams</p>}
+                  {examsList.filter(e => !e.archived_at).length > 6 && <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '4px 0 0' }}>+{examsList.filter(e => !e.archived_at).length - 6} more — view all in Manage Exams</p>}
                 </div>
                 <div>
                   <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>Quick Actions</div>
@@ -2937,9 +2940,19 @@ const deleteResult = async (studentId, examId) => {
               );
             })()}
 
-            {/* Filters */}
-            <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div>
+            {/* Filters — on a phone, folded behind one button that says what is picked */}
+            <div className={`card dash-filters${filtersOpen ? '' : ' is-collapsed'}`} style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <button type="button" className="btn ghost sm dash-filters-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(o => !o)}>
+                <Icon name="sliders" size={14} />
+                <span className="dash-filters-summary">
+                  {[selectedCourse === 'All' ? 'All courses' : selectedCourse,
+                    selectedExam === 'All' ? 'All papers' : (examsDict[selectedExam] || 'Paper'),
+                    selectedSection === 'All' ? 'All sections' : selectedSection,
+                    resultQuery.trim() ? `“${resultQuery.trim()}”` : null].filter(Boolean).join(' · ')}
+                </span>
+                <Icon name={filtersOpen ? 'chevron-up' : 'chevron-down'} size={14} style={{ marginLeft: 'auto' }} />
+              </button>
+              <div className="dash-filter-field">
                 <label className="label">Course</label>
                 <select className="input" style={{ width: 'auto', minWidth: 130, display: 'inline-block' }} value={selectedCourse}
                   onChange={e => { setSelectedCourse(e.target.value); setSelectedExam('All'); }}>
@@ -2947,7 +2960,7 @@ const deleteResult = async (studentId, examId) => {
                   {paperPicker.courses.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div style={{ minWidth: 0, flex: '1 1 260px', maxWidth: 520 }}>
+              <div className="dash-filter-field" style={{ minWidth: 0, flex: '1 1 260px', maxWidth: 520 }}>
                 <label className="label">Paper</label>
                 <select className="input" style={{ width: '100%' }} value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
                   <option value="All">All papers{selectedCourse !== 'All' ? ` in ${selectedCourse}` : ''}</option>
@@ -2968,18 +2981,18 @@ const deleteResult = async (studentId, examId) => {
                   </label>
                 )}
               </div>
-              <div>
+              <div className="dash-filter-field">
                 <label className="label">Filter by Section</label>
                 <select className="input" style={{ width: 'auto', minWidth: 160, display: 'inline-block' }} value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
                   {uniqueSections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
                 </select>
               </div>
-              <div>
+              <div className="dash-filter-field">
                 <label className="label">Student</label>
                 <input className="input" style={{ width: 'auto', minWidth: 170, display: 'inline-block' }}
                   placeholder="Search by name" value={resultQuery} onChange={e => setResultQuery(e.target.value)} />
               </div>
-              <div>
+              <div className="dash-filter-field">
                 <label className="label">Sort by</label>
                 <select className="input" style={{ width: 'auto', minWidth: 180, display: 'inline-block' }} value={resultSort} onChange={e => setResultSort(e.target.value)}>
                   <option value="section">Section (A–Z)</option>
@@ -3003,7 +3016,7 @@ const deleteResult = async (studentId, examId) => {
 
             {/* Stats */}
             {resultStats && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, marginBottom: 16 }}>
+              <div className="dash-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, marginBottom: 16 }}>
                 <div className="card" style={{ padding: 18 }}>
                   <h4 style={{ marginBottom: resultStats.pending > 0 ? 2 : 12 }}>Quick stats</h4>
                   {resultStats.pending > 0 && (
@@ -3045,7 +3058,7 @@ const deleteResult = async (studentId, examId) => {
             {/* Table */}
             <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
-                <table className="tbl">
+                <table className="tbl tbl-stack">
                   <thead>
                     <tr>
                       <th>Student</th>
@@ -3076,12 +3089,12 @@ const deleteResult = async (studentId, examId) => {
                         const essayCount = (examQuestionsCache[row.exam_id] || []).filter(q => q.question_type === 'essay').length;
                         return (
                           <tr key={index}>
-                            <td style={{ fontWeight: 600 }}>{student.name}</td>
-                            <td><span className="px-pill brand">{student.section}</span></td>
+                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{student.name}</td>
+                            <td data-label="Section"><span className="px-pill brand">{student.section}</span></td>
                             {selectedExam === 'All' && (
-                              <td title={examTitle} style={{ color: 'var(--ink-2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
+                              <td data-label="Paper" title={examTitle} style={{ color: 'var(--ink-2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
                             )}
-                            <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <td data-label="Score" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                               {/* The percentage has a fixed width so every
                                   fraction lines up under the header, 9% or
                                   100%. The manual-score pencil used to sit
@@ -3108,14 +3121,14 @@ const deleteResult = async (studentId, examId) => {
                                 </span>
                               )}
                             </td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : 'N/A'}</td>
-                            <td>
+                            <td data-label="Time" style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : 'N/A'}</td>
+                            <td data-label="Flags">
                               {row.tab_switches > 0
                                 ? <span className="px-pill bad"><Icon name="flag" size={11} /> {row.tab_switches}</span>
                                 : <span className="px-pill ok"><Icon name="check" size={10} /> Clean</span>
                               }
                             </td>
-                            <td>
+                            <td data-label="">
                               <div style={{ display: 'flex', gap: 4 }}>
                                 <button onClick={() => openStudentDetails(row)} className="btn ghost sm"><Icon name="eye" size={13} /></button>
                                 <button onClick={() => deleteResult(row.student_id, row.exam_id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
@@ -3154,7 +3167,7 @@ const deleteResult = async (studentId, examId) => {
 
             <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
             <div className="table-scroll">
-            <table className="tbl">
+            <table className="tbl tbl-stack">
             <thead>
               <tr>
               <th>Exam Title</th>
@@ -3175,7 +3188,7 @@ const deleteResult = async (studentId, examId) => {
             )}
             {examsList.filter(e => showArchived ? true : !e.archived_at).map((exam) => (
               <tr key={exam.id} style={exam.archived_at ? { opacity: 0.55 } : undefined}>
-                <td>
+                <td data-label="Title">
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="text"
@@ -3192,7 +3205,7 @@ const deleteResult = async (studentId, examId) => {
                 </td>
 
                {/* Section Field */}
-                <td>
+                <td data-label="Sections">
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                     <SectionPicker
                       value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
@@ -3222,7 +3235,7 @@ const deleteResult = async (studentId, examId) => {
                 </td>
 
                 {/* Toggle */}
-                <td>
+                <td data-label="Status">
                   <button
                     onClick={() => toggleExamStatus(exam.id, exam.is_open)}
                     className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}
@@ -3233,7 +3246,7 @@ const deleteResult = async (studentId, examId) => {
                 </td>
 
                 {/* Time */}
-                <td>
+                <td data-label="Time limit">
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="number"
@@ -3248,7 +3261,7 @@ const deleteResult = async (studentId, examId) => {
                 </td>
 
                 {/* Password */}
-                <td>
+                <td data-label="Password">
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <input
                       type="text"
@@ -3267,7 +3280,7 @@ const deleteResult = async (studentId, examId) => {
                 </td>
 
                 {/* Actions */}
-                <td>
+                <td data-label="">
                   {/* Six buttons is wide for a phone; let them wrap onto a
                       second line rather than stretch the table. */}
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -3323,7 +3336,7 @@ const deleteResult = async (studentId, examId) => {
               </div>
               <div className="card" style={{ overflow: 'hidden' }}>
                 <div className="table-scroll">
-                  <table className="tbl">
+                  <table className="tbl tbl-stack">
                     <thead>
                       <tr>
                         <th>Exam Title</th>
@@ -3338,19 +3351,19 @@ const deleteResult = async (studentId, examId) => {
                         const owner = instructorsList.find(i => i.id === exam.shared_by);
                         return (
                           <tr key={exam.share_id}>
-                            <td><span style={{ fontWeight: 500 }}>{exam.title}</span></td>
-                            <td>{exam.target_section || '—'}</td>
-                            <td>
+                            <td className="tbl-stack-title"><span style={{ fontWeight: 500 }}>{exam.title}</span></td>
+                            <td data-label="Section">{exam.target_section || '—'}</td>
+                            <td data-label="Status">
                               <span className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}>
                                 {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
                               </span>
                             </td>
-                            <td>
+                            <td data-label="Shared by">
                               <span style={{ fontSize: 13, color: 'var(--ink-2)' }}>
                                 {owner?.full_name || owner?.email || 'Unknown Instructor'}
                               </span>
                             </td>
-                            <td>
+                            <td data-label="">
                               <button
                                 onClick={() => { if (window.confirm('Remove this shared exam from your dashboard?')) removeSharedAccess(exam.share_id); }}
                                 className="btn ghost sm"
@@ -3610,7 +3623,7 @@ const deleteResult = async (studentId, examId) => {
 
               <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
-              <table className="tbl">
+              <table className="tbl tbl-stack">
                 <thead>
                   <tr>
                     <th style={{ width: 40 }}>
@@ -3659,7 +3672,7 @@ const deleteResult = async (studentId, examId) => {
                             });
                           }}
                         >
-                          <td onClick={e => e.stopPropagation()}>
+                          <td data-label="" onClick={e => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               style={{ width: 16, height: 16, cursor: 'pointer' }}
@@ -3674,7 +3687,7 @@ const deleteResult = async (studentId, examId) => {
                               }}
                             />
                           </td>
-                          <td style={{ fontWeight: 600 }}>
+                          <td className="tbl-stack-title" style={{ fontWeight: 600 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                               <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--navy-100)', color: 'var(--navy)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
                                 {(student.full_name || '?').split(' ').slice(0,2).map(n => n[0]).join('').toUpperCase()}
@@ -3682,8 +3695,8 @@ const deleteResult = async (studentId, examId) => {
                               {student.full_name || 'Unknown'}
                             </div>
                           </td>
-                          <td><span className="px-pill brand">{mySectionsOf(student.section).join(', ') || '—'}</span></td>
-                          <td onClick={e => e.stopPropagation()}>
+                          <td data-label="Section"><span className="px-pill brand">{mySectionsOf(student.section).join(', ') || '—'}</span></td>
+                          <td data-label="Edit section" onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                               <SectionPicker
                                 value={editingStudentSections[student.id] !== undefined ? editingStudentSections[student.id] : ''}
@@ -3695,7 +3708,7 @@ const deleteResult = async (studentId, examId) => {
                               <button onClick={() => saveStudentSection(student.id)} className="btn sm" style={{ opacity: editingStudentSections[student.id] !== mySectionsOf(student.section).join(', ') ? 1 : 0.4 }}>Save</button>
                             </div>
                           </td>
-                          <td onClick={e => e.stopPropagation()}>
+                          <td data-label="" onClick={e => e.stopPropagation()}>
                             <button onClick={() => deleteStudent(student.id)} className="btn ghost sm" title="Remove from your sections" aria-label="Remove from your sections" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}>
                               <Icon name="trash" size={13} />
                             </button>
@@ -3938,7 +3951,7 @@ const deleteResult = async (studentId, examId) => {
 
               <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
-              <table className="tbl">
+              <table className="tbl tbl-stack">
                 <thead>
                   <tr>
                     <th>Student Name</th>
@@ -3959,9 +3972,9 @@ const deleteResult = async (studentId, examId) => {
                         : isSessionForceSubmittable(session) ? { background: 'var(--warn-bg, #FFFDE7)' }
                         : {}
                       }>
-                        <td style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{session.student_name}</td>
-                        <td style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
-                        <td>
+                        <td className="tbl-stack-title" style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{session.student_name}</td>
+                        <td data-label="Paper" style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
+                        <td data-label="Status">
                           {session.status === 'locked'
                             ? <span className="px-pill bad"><Icon name="lock" size={11} /> LOCKED</span>
                             : isSessionForceSubmittable(session)
@@ -3970,8 +3983,8 @@ const deleteResult = async (studentId, examId) => {
                                 </span>
                               : <span className="px-pill ok"><Icon name="dot" size={11} /> Active</span>}
                         </td>
-                        <td style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{session.answers_count}</td>
-                        <td>
+                        <td data-label="Answered" style={{ fontWeight: 700, color: 'var(--ink-1)' }}>{session.answers_count}</td>
+                        <td data-label="Flags">
                           <div style={{ position: 'relative', display: 'inline-block' }}
                             onMouseEnter={e => {
                               if (session.violation_count > 0) {
@@ -3980,6 +3993,12 @@ const deleteResult = async (studentId, examId) => {
                               }
                             }}
                             onMouseLeave={() => setLiveViolationTooltip(null)}
+                            // A phone has no hover: a tap opens the flags, and a second tap closes them.
+                            onClick={e => {
+                              if (!(session.violation_count > 0)) return;
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              setLiveViolationTooltip(t => (t?.session.id === session.id ? null : { session, rect }));
+                            }}
                           >
                             <span
                               className={`px-pill ${session.violation_count >= 2 ? 'bad' : session.violation_count === 1 ? 'warn' : 'ok'}`}
@@ -3990,7 +4009,7 @@ const deleteResult = async (studentId, examId) => {
                             </span>
                           </div>
                         </td>
-                        <td>
+                        <td data-label="">
                           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                             {isAutoSubmittable(session) ? (
                               <span className="px-pill" style={{ fontWeight: 600 }}>
@@ -4106,7 +4125,7 @@ const deleteResult = async (studentId, examId) => {
             <div className="card" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div>
                 <label className="label">Select Exam</label>
-                <select className="input" style={{ width: 'auto', minWidth: '200px' }} value={attendanceExam} onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}>
+                <select className="input" style={{ width: 'auto', minWidth: 'min(200px, 100%)', maxWidth: '100%' }} value={attendanceExam} onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}>
                   <option value="">— Choose an exam —</option>
                   {sharedExamsList.length > 0 ? (
                     <>
@@ -4155,7 +4174,7 @@ const deleteResult = async (studentId, examId) => {
                 ) : (
                   <div className="card" style={{ overflow: 'hidden' }}>
                   <div className="table-scroll">
-                  <table className="tbl">
+                  <table className="tbl tbl-stack">
                     <thead>
                       <tr>
                         <th>#</th>
@@ -4173,10 +4192,10 @@ const deleteResult = async (studentId, examId) => {
 
                         return (
                           <tr key={s.id} style={rowBg ? { background: rowBg } : {}}>
-                            <td style={{ color: 'var(--ink-4)', width: 40 }}>{idx + 1}</td>
-                            <td style={{ fontWeight: 600 }}>{s.full_name || 'Unknown'}</td>
-                            <td style={{ color: 'var(--ink-2)' }}>{s.section || '—'}</td>
-                            <td><span className={`px-pill ${pillClass}`}>{pillLabel}</span></td>
+                            <td data-label="#" style={{ color: 'var(--ink-4)', width: 40 }}>{idx + 1}</td>
+                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{s.full_name || 'Unknown'}</td>
+                            <td data-label="Section" style={{ color: 'var(--ink-2)' }}>{s.section || '—'}</td>
+                            <td data-label="Status"><span className={`px-pill ${pillClass}`}>{pillLabel}</span></td>
                           </tr>
                         );
                       })}
@@ -4718,6 +4737,30 @@ const deleteResult = async (studentId, examId) => {
         </div>{/* end panel content */}
 
       </main>
+
+      {/* On a phone, the views used most sit under the thumb (index.css hides
+          this above 760px); everything else is in the menu behind "More". */}
+      <nav className="dash-tabbar" aria-label="Dashboard">
+        {[
+          { id: 'home', label: 'Overview', icon: 'home' },
+          { id: 'live', label: 'Live', icon: 'activity', badge: liveSessions.length > 0 ? liveSessions.length : null },
+          { id: 'results', label: 'Results', icon: 'bar-chart' },
+          { id: 'class', label: 'Class', icon: 'graduation' },
+        ].map(t => (
+          <button key={t.id} type="button" className={`dash-tab${activeView === t.id ? ' is-active' : ''}`}
+            aria-current={activeView === t.id ? 'page' : undefined}
+            onClick={() => { setActiveView(t.id); setSideOpen(false); window.scrollTo({ top: 0 }); }}>
+            <Icon name={t.icon} size={20} />
+            {t.label}
+            {t.badge && <span className="dash-tab-badge">{t.badge}</span>}
+          </button>
+        ))}
+        <button type="button" className={`dash-tab${['home', 'live', 'results', 'class'].includes(activeView) ? '' : ' is-active'}`}
+          aria-expanded={sideOpen} aria-controls="dash-side" onClick={() => setSideOpen(o => !o)}>
+          <Icon name="menu" size={20} />
+          More
+        </button>
+      </nav>
 
 {/* ========================================= */}
       {/* MODAL: DUPLICATE EXAM                     */}
@@ -5561,10 +5604,13 @@ const deleteResult = async (studentId, examId) => {
         return (
           <div style={{
             position: 'fixed',
-            top: rect.bottom + 8,
-            left: Math.min(rect.left, window.innerWidth - 340),
+            ...(rect.bottom + 280 < window.innerHeight
+              ? { top: rect.bottom + 8 }
+              : { bottom: window.innerHeight - rect.top + 8 }),
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - 328)),
             zIndex: 9999,
-            width: 320,
+            width: 'min(320px, calc(100vw - 16px))',
+            maxHeight: '60vh', overflow: 'hidden',
             background: 'var(--navy-900)',
             color: 'white',
             borderRadius: 'var(--r-md)',

@@ -40,6 +40,7 @@ import { mathAnswersMatch, sameUnbracketed } from './mathNormalize.js';
 import { answerVerdict, isLineByLine, markWorking } from './stepMarking.js';
 import { isTextAnswer, markTextAnswer } from './textAnswer.js';
 import { isLogicMode, markLogic } from './logicProof.js';
+import { isQuantity, markQuantityAnswer } from './quantityAnswer.js';
 
 // Re-exported so a caller that already holds the marking code need not know
 // the shape helpers live in their own module; a caller that wants ONLY the
@@ -158,6 +159,9 @@ export function markAnswer(lines, rubric, opts = {}) {
   // A word, not maths (sql/046): compared as the database compares it, with
   // capitals and spaces ignored and no algebra at all.
   if (isTextAnswer(rubric)) return markTextAnswer(lines, rubric);
+  // Quantities (sql/105): each part's number and unit, read and marked
+  // exactly as the database does.
+  if (isQuantity(rubric)) return markQuantityAnswer(lines, rubric);
   // Propositional logic (sql/073): statements read into trees and proofs
   // checked law by law, exactly as the database does — no algebra engine.
   if (isLogicMode(rubric)) {

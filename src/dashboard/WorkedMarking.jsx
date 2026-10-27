@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import { MathStatic } from '../components/MathField.jsx';
 import { linesOf } from '../lib/workedShape.js';
+import { quantityParts, splitPartLine } from '../lib/quantityAnswer.js';
 
 // Marking a student's worked solutions, in the instructor's browser.
 //
@@ -145,7 +146,7 @@ export default function WorkedMarking({
             <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
               Q{q.question_number}. {q.question_text}
             </div>
-            {q.work_given && (
+            {q.work_given && q.work_rubric?.mode !== 'quantity' && (
               <div className="ws-given" style={{ marginBottom: 10 }}>
                 <span className="ws-given-label">Given</span>
                 <MathStatic latex={q.work_given} />
@@ -156,6 +157,29 @@ export default function WorkedMarking({
               <p style={{ fontSize: 13, fontStyle: 'italic', color: 'var(--ink-4)', margin: 0 }}>
                 Nothing was written.
               </p>
+            ) : q.work_rubric?.mode === 'quantity' ? (
+              // Quantities (sql/105): each part as typed, its value and its
+              // unit judged apart.
+              <ol className="ws-qty-parts" style={{ margin: '0 0 10px' }}>
+                {quantityParts(q.work_given).map(p => {
+                  const typed = lines.map(splitPartLine).filter(x => x?.key === p.key).pop()?.text || '';
+                  const pr = r?.parts?.find(x => x.key === p.key);
+                  return (
+                    <li key={p.key} className="ws-qty-part">
+                      <span className="ws-qty-label"><span className="ws-qty-key">{p.key})</span> {p.label}</span>
+                      <div className={`ws-answer-shown ${pr ? (pr.value_ok && pr.unit_ok ? 'ws-ok' : 'ws-broken') : ''}`} style={{ marginBottom: 0 }}>
+                        {typed ? <span className="ws-text-shown">{typed}</span>
+                          : <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>blank</em>}
+                        {pr && !pr.blank && (
+                          <span className="ws-given-label" style={{ marginLeft: 'auto' }}>
+                            value {pr.value_ok ? '✓' : '✗'} · unit {pr.unit_ok ? '✓' : '✗'}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
             ) : q.work_rubric?.mode === 'lines' || q.work_rubric?.mode === 'proof' ? (
               // A full solution: every line, ticked where it was a step of
               // the solution (sql/042, marked by stepMarking.js here). A

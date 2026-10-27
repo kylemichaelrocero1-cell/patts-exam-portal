@@ -1622,3 +1622,11 @@ button.card { color: var(--ink-1); background: var(--surface); }
   letter-spacing: 0; font-size: 11px; padding: 1px 7px; border-radius: 99px;
   background: var(--surface-2); color: var(--ink-3);
 }
+
+/* ── A problem answered as quantities (WorkedSolution, sql/105) ── */
+.ws-qty-parts { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.ws-qty-part { display: grid; gap: 6px; }
+.ws-qty-label { font-size: calc(14.5px * var(--q-scale, 1)); line-height: 1.5; color: var(--ink-1); font-weight: 500; }
+.ws-qty-key { font-weight: 700; color: var(--navy); margin-right: 2px; }
+.ws-qty .ws-text-answer { font-size: 16px; }
+

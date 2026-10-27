@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { letterFor } from '../lib/choices';
 import { indexSet } from '../lib/answers';
+import { quantityParts, splitPartLine } from '../lib/quantityAnswer.js';
 
 // Rendering LaTeX pulls in KaTeX, which a paper of plain multiple choice has
 // no use for. Split, so only a review containing maths fetches it.
@@ -82,13 +83,31 @@ export default function AnswerReview({ rows }) {
                 </span>
               </div>
               <Suspense fallback={null}>
-                {r.work_given && (
+                {r.work_given && r.work_mode !== 'quantity' && (
                   <div className="ws-given" style={{ marginBottom: 10 }}>
                     <span className="ws-given-label">Given</span>
                     <MathStatic latex={r.work_given} />
                   </div>
                 )}
-                {r.work_mode === 'lines' || r.work_mode === 'proof' ? (
+                {r.work_mode === 'quantity' ? (
+                  // Quantities (sql/105): each part as typed. Which parts
+                  // lost marks is in the reason below; the key stays with
+                  // the server.
+                  <ol className="ws-qty-parts" style={{ margin: '0 0 8px' }}>
+                    {quantityParts(r.work_given).map(p => {
+                      const typed = (r.lines || []).map(splitPartLine).filter(x => x?.key === p.key).pop()?.text || '';
+                      return (
+                        <li key={p.key} className="ws-qty-part">
+                          <span className="ws-qty-label"><span className="ws-qty-key">{p.key})</span> {p.label}</span>
+                          <div className="ws-answer-shown" style={{ marginBottom: 0 }}>
+                            {typed ? <span className="ws-text-shown">{typed}</span>
+                              : <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>nothing</em>}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                ) : r.work_mode === 'lines' || r.work_mode === 'proof' ? (
                   // A full solution: every line, and whether it was a step of
                   // the solution. Which step, and the steps themselves, stay
                   // with the server.

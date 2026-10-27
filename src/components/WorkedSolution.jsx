@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import MathField, { MathStatic } from './MathField.jsx';
 import { PALETTES, paletteFor, insertIntoFocusedField } from '../lib/mathPalette.js';
 import { LOGIC_LAWS, isLogicMode, joinLine, splitLine } from '../lib/logicProof.js';
+import { quantityParts, partLine, splitPartLine } from '../lib/quantityAnswer.js';
 
 // The student's answer to a worked_solution item: ONE line of maths, typed the
 // way Google Docs or Symbolab let you type it.
@@ -63,6 +64,9 @@ export default function WorkedSolution({
   // A word, not maths (sql/046): a plain text box, no maths keyboard and no
   // symbol strip. The keyboard turns "and" into ∧ as it is typed.
   const text = mode === 'text';
+  // A problem answered as quantities (sql/105): a box per part, each a
+  // number and its unit, typed as words — so no maths keyboard here either.
+  const quantity = mode === 'quantity';
 
   // The answer is the first line of the stored shape, so a paper answered
   // before this change still reads back correctly.
@@ -166,6 +170,64 @@ export default function WorkedSolution({
       </div>
     );
   };
+
+  if (quantity) {
+    const parts = quantityParts(given);
+    const typed = {};
+    for (const l of Array.isArray(value?.lines) ? value.lines : []) {
+      const p = splitPartLine(l);
+      if (p) typed[p.key] = p.text;
+    }
+    // Only the parts with something in them are stored, each with its
+    // letter, so an emptied box leaves the item unanswered.
+    const setPart = (key, t) => onChange?.({
+      ...(value || {}),
+      lines: parts.map(p => [p.key, p.key === key ? t : (typed[p.key] ?? '')])
+        .filter(([, v]) => /\S/.test(v)).map(([k, v]) => partLine(k, v)),
+    });
+    return (
+      <div className="worked-solution ws-qty">
+        <p className="ws-hint" style={{ marginTop: 0 }}>
+          Worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>: in each part, one point for the
+          value and one for its unit. Type the number and the unit together, e.g.{' '}
+          <em>25 bottles per order</em>, and round as the part says.
+        </p>
+        <p className="ws-count" style={{ margin: '6px 0 0' }}>
+          {parts.filter(p => /\S/.test(typed[p.key] ?? '')).length} of {parts.length} parts answered
+        </p>
+        <ol className="ws-qty-parts">
+          {parts.map((p, i) => (
+            <li key={p.key} className="ws-qty-part">
+              <label className="ws-qty-label" htmlFor={`ws-qty-${question?.id}-${p.key}`}>
+                <span className="ws-qty-key">{p.key})</span> {p.label}
+              </label>
+              <input
+                id={`ws-qty-${question?.id}-${p.key}`}
+                className="input ws-text-answer"
+                value={typed[p.key] ?? ''}
+                onChange={e => setPart(p.key, e.target.value)}
+                readOnly={readOnly}
+                placeholder="Number and unit…"
+                maxLength={80}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                enterKeyHint={i === parts.length - 1 ? 'done' : 'next'}
+                onKeyDown={e => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  const boxes = e.currentTarget.closest('.ws-qty')?.querySelectorAll('input');
+                  const next = boxes?.[i + 1];
+                  if (next) next.focus(); else e.currentTarget.blur();
+                }}
+              />
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
 
   if (text) {
     return (

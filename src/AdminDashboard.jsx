@@ -20,6 +20,7 @@ import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
 import { paperOptions, resultInView } from './lib/paperFilter';
 import { formatName, nameInitials, instructorName as displayInstructor } from './lib/personName';
+import { quantityParts } from './lib/quantityAnswer.js';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -44,6 +45,26 @@ const MathStatic = lazy(() => import('./components/MathField.jsx')
 const TypedShown = ({ q, value }) => (q?.work_rubric?.mode === 'text'
   ? <span className="ws-text-shown">{value}</span>
   : <MathStatic latex={value} />);
+// A problem answered as quantities (sql/105), for the instructor: each part
+// with the value and unit the key holds.
+const QuantityKey = ({ q }) => (
+  <ol className="ws-qty-parts" style={{ margin: '4px 0 8px', width: '100%' }}>
+    {quantityParts(q.work_given).map(p => {
+      const part = (q.work_rubric?.parts || []).find(x => x.key === p.key);
+      return (
+        <li key={p.key} className="ws-qty-part" style={{ gap: 2 }}>
+          <span className="ws-qty-label" style={{ fontSize: 13 }}><span className="ws-qty-key">{p.key})</span> {p.label}</span>
+          <span style={{ fontSize: 13, color: part ? 'var(--ok)' : 'var(--bad)', fontWeight: 600 }}>
+            {part ? `${part.value} ${part.units?.[0] || ''}` : 'No key for this part'}
+            {part?.units?.length > 1 && (
+              <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}> · +{part.units.length - 1} other spelling{part.units.length === 2 ? '' : 's'}</span>
+            )}
+          </span>
+        </li>
+      );
+    })}
+  </ol>
+);
 const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
@@ -1279,7 +1300,11 @@ const [targetSection, setTargetSection] = useState('');
     if (qForm.question_type === 'text_answer' && !String(qForm.text?.answer || '').trim()) {
       return alert('Type the answer students must give. Capital letters and spaces are ignored when it is compared.');
     }
-    if (qForm.question_type === 'worked_solution') {
+    // A problem answered as quantities (sql/105) keeps its parts, keys,
+    // units and points exactly as its loader wrote them; only the wording
+    // is edited here.
+    const keepsQuantity = qForm.question_type === 'worked_solution' && editingQ?.work_rubric?.mode === 'quantity';
+    if (qForm.question_type === 'worked_solution' && !keepsQuantity) {
       const steps = (qForm.work?.steps || []).filter(s => String(s?.latex || '').trim());
       if (steps.length === 0) {
         return alert('A worked solution needs at least one expected step, with the marks it carries. The last step is the final answer.');
@@ -1351,9 +1376,9 @@ const [targetSection, setTargetSection] = useState('');
       // What the item is worth. Everything that is not a worked solution stays
       // at 1, which is what keeps a sum of marks equal to the old count of
       // items for every paper that already exists.
-      marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)),
-      work_given: isWorked && !isText ? (qForm.work?.given || null) : null,
-      work_variable: isWorked && !isText ? (qForm.work?.variable || 'x') : null,
+      marks: keepsQuantity ? editingQ.marks : Math.max(1, Math.min(100, Number(qForm.marks) || 1)),
+      work_given: keepsQuantity ? editingQ.work_given : isWorked && !isText ? (qForm.work?.given || null) : null,
+      work_variable: keepsQuantity ? editingQ.work_variable : isWorked && !isText ? (qForm.work?.variable || 'x') : null,
       // A full solution marked line by line (sql/042) carries a scheme this
       // editor cannot show — per-step accept lists and the marks for the
       // answer alone — so it is written back exactly as it was loaded. The
@@ -1362,7 +1387,7 @@ const [targetSection, setTargetSection] = useState('');
         mode: 'text',
         steps: [{ latex: String(qForm.text.answer).trim(), marks: Math.max(1, Math.min(100, Number(qForm.marks) || 1)) }],
         accept: String(qForm.text?.accept || '').split('\n').map(v => v.trim()).filter(Boolean),
-      } : isWorked && ['lines', 'proof', 'simplify', 'logic'].includes(editingQ?.work_rubric?.mode) ? editingQ.work_rubric
+      } : isWorked && ['lines', 'proof', 'simplify', 'logic', 'quantity'].includes(editingQ?.work_rubric?.mode) ? editingQ.work_rubric
         : isWorked ? {
         steps: (qForm.work?.steps || [])
           .filter(st => String(st?.latex || '').trim())
@@ -4597,6 +4622,14 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 )}
 
+                {qForm.question_type === 'worked_solution' && editingQ?.work_rubric?.mode === 'quantity' && (
+                  <div className="ws-marked-reason" style={{ marginBottom: 12 }}>
+                    <strong>A problem answered with values and units.</strong>{' '}
+                    {(editingQ.work_rubric.parts || []).length} parts, each worth a point for the value and a point
+                    for the unit. The parts, keys, accepted units and points are kept exactly as loaded; only the
+                    question text is edited here.
+                  </div>
+                )}
                 {qForm.question_type === 'worked_solution' && ['proof', 'simplify', 'logic'].includes(editingQ?.work_rubric?.mode) && (
                   <div style={{ padding: '12px 14px', marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.55 }}>
                     <strong>{editingQ.work_rubric.mode === 'proof' ? 'A proof, marked line by line.'
@@ -4715,7 +4748,7 @@ const deleteResult = async (studentId, examId) => {
                               <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
                               {q.question_text}
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
-                              {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>{q.work_rubric?.mode === 'text' ? 'Text' : 'Maths'}</span>}
+                              {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>{q.work_rubric?.mode === 'text' ? 'Text' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Maths'}</span>}
                               <InlinePoints
                                 value={Number(q.marks) || 1}
                                 busy={savingPointsFor === q.id}
@@ -4731,7 +4764,8 @@ const deleteResult = async (studentId, examId) => {
                             {q.question_type === 'worked_solution' && (
                               <Suspense fallback={null}>
                                 <div className="q-maths">
-                                  {q.work_given && (
+                                  {q.work_rubric?.mode === 'quantity' && <QuantityKey q={q} />}
+                                  {q.work_given && q.work_rubric?.mode !== 'quantity' && (
                                     <span className="q-maths-part">
                                       <span className="q-maths-tag">Problem</span>
                                       <MathStatic latex={q.work_given} />
@@ -5444,7 +5478,7 @@ const deleteResult = async (studentId, examId) => {
                     <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
                         {idx + 1}. {q.question_text}
-                        <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : 'Type your answer'}</span>
+                        <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Type your answer'}</span>
                         <span className="px-pill muted" style={{ marginLeft: 6 }}>
                           {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
                         </span>
@@ -5454,7 +5488,8 @@ const deleteResult = async (studentId, examId) => {
                       )}
                       <Suspense fallback={null}>
                         <div className="q-maths">
-                          {q.work_given && (
+                          {q.work_rubric?.mode === 'quantity' && <QuantityKey q={q} />}
+                          {q.work_given && q.work_rubric?.mode !== 'quantity' && (
                             <span className="q-maths-part">
                               <span className="q-maths-tag">Problem</span>
                               <MathStatic latex={q.work_given} />

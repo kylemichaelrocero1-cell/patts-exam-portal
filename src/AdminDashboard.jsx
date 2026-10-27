@@ -3167,7 +3167,7 @@ const deleteResult = async (studentId, examId) => {
 
             <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
             <div className="table-scroll">
-            <table className="tbl tbl-stack">
+            <table className="tbl tbl-stack tbl-stack-block">
             <thead>
               <tr>
               <th>Exam Title</th>
@@ -3623,7 +3623,7 @@ const deleteResult = async (studentId, examId) => {
 
               <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
-              <table className="tbl tbl-stack">
+              <table className="tbl tbl-stack tbl-stack-block">
                 <thead>
                   <tr>
                     <th style={{ width: 40 }}>

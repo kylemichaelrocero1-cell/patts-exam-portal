@@ -734,6 +734,11 @@ box that fills with a tick — a student must be able to see that several
   pointer-events: none;
 }
 .exam-away-card { max-width: 380px; text-align: center; }
+/* Behind the cover the paper is not just out of sight: hidden, it is out of
+   the page's text too, so an assistant reading the page (a browser's AI side
+   panel, a screen reader) finds nothing to read. In place, so nothing moves
+   when the student is back. */
+.exam-shell.is-away .exam-layout, .exam-shell.is-away .exam-bottom-bar { visibility: hidden; }
 .exam-away-card h2 { color: #fff; margin: 12px 0 8px; font-size: 20px; }
 .exam-away-card p { margin: 0; font-size: 14px; line-height: 1.55; color: rgba(255,255,255,.82); }
 
@@ -1515,22 +1520,33 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .dash-filters .dash-filter-field { flex: 1 1 100% !important; max-width: none !important; }
   .dash-filters .dash-filter-field .input { width: 100% !important; min-width: 0 !important; }
 
-  /* A table, one card per row: each cell its label on the left. */
+  /* A table, one card per row: each cell its label on the left. The card
+     the table sat in goes, so the row cards use the full width. */
+  .card:has(> .table-scroll > .tbl-stack) { background: transparent; border: 0; box-shadow: none; overflow: visible; padding: 0; }
+  .table-scroll:has(> .tbl-stack) { overflow: visible; }
   .tbl-stack thead { display: none; }
   .tbl-stack, .tbl-stack tbody, .tbl-stack tr { display: block; width: 100%; }
   .tbl-stack tr {
-    margin: 10px; width: auto; padding: 8px 12px;
+    margin: 0 0 10px; padding: 8px 14px;
     border: 1px solid var(--line); border-radius: 12px; background: var(--white, #fff);
   }
   .tbl-stack td {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 6px 0 !important; border: 0 !important; text-align: right !important;
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 10px;
+    padding: 5px 0 !important; border: 0 !important; text-align: right !important;
     max-width: none !important; white-space: normal !important; overflow: visible !important; width: auto !important;
   }
   .tbl-stack td::before {
-    content: attr(data-label); flex: 0 0 auto; text-align: left;
+    content: attr(data-label); flex: 0 0 auto; margin-right: auto; text-align: left;
     font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-4);
   }
+  /* Where the values are wide — a title to edit, a row of sections — the
+     label sits above, and the value has the whole width. */
+  .tbl-stack-block td { display: block; text-align: left !important; }
+  .tbl-stack-block td::before { display: block; margin: 0 0 5px; }
+  .tbl-stack-block td > div, .tbl-stack-block td > span { justify-content: flex-start; }
+  .tbl-stack-block td .input { width: 100% !important; }
+  .tbl-stack-block tr { position: relative; }
+  .tbl-stack-block td[data-label=""]:first-child { position: absolute; top: 10px; right: 14px; padding: 0 !important; }
   .tbl-stack td[data-label=""]::before, .tbl-stack td:not([data-label])::before { content: none; }
   .tbl-stack td[data-label=""] { justify-content: flex-end; }
   .tbl-stack td.tbl-stack-title { justify-content: flex-start; text-align: left !important; font-size: 15px; font-weight: 700; color: var(--ink-1); }

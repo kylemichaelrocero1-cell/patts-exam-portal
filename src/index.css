@@ -725,6 +725,17 @@ box that fills with a tick — a student must be able to see that several
   -webkit-user-select: none;
   -moz-user-select: none;
 }
+/* The paper while the page is out of focus (ExamBoard). Opaque, above every
+   dialog, and never in the way of a touch. */
+.exam-away-cover {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: var(--navy-dark, #061829); color: #fff;
+  pointer-events: none;
+}
+.exam-away-card { max-width: 380px; text-align: center; }
+.exam-away-card h2 { color: #fff; margin: 12px 0 8px; font-size: 20px; }
+.exam-away-card p { margin: 0; font-size: 14px; line-height: 1.55; color: rgba(255,255,255,.82); }
 
 /* ── Admin tab buttons — no lift on hover ───── */
 .admin-tabs button:hover:not(:disabled),

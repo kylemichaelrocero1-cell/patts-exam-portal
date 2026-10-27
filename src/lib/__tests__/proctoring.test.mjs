@@ -53,6 +53,9 @@ console.log('\n=== parseViolation ===');
   check('lost focus is its own type',
     parseViolation('[3:35:12 PM] Screen lost focus (Split-screen or notifications opened)', NOW)
       .label === 'Lost focus');
+  check('…and so is the wording since chat bubbles were named',
+    parseViolation('[3:35:12 PM] Screen lost focus (a chat bubble, split screen or notification opened)', NOW)
+      .label === 'Lost focus');
   check('a screenshot attempt is its own type',
     parseViolation('[3:35:12 PM] Screenshot or Print shortcut attempted', NOW)
       .label === 'Screenshot / print');

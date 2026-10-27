@@ -9,12 +9,21 @@
 // changed — the whole history would otherwise have to be migrated to show a
 // feed of the last few incidents.
 
-/** Incident sentences, longest-standing first. Order matters: first match wins. */
+/**
+ * Incident sentences. Order matters: first match wins. The wording since
+ * src/lib/leaveReport.js comes first — it says which device and how long,
+ * and its sentences share words with the older ones ("another app") — then
+ * the older wording, which is on file in every paper sat before it.
+ */
 const TYPES = [
-  { match: /screenshot|print/i,                     label: 'Screenshot / print', tone: 'bad'  },
-  { match: /tab hidden|another app|tab switch/i,    label: 'Tab switch',         tone: 'bad'  },
-  { match: /refresh/i,                              label: 'Page refresh',       tone: 'warn' },
-  { match: /lost focus|split-?screen|notification/i,label: 'Lost focus',         tone: 'warn' },
+  { match: /screenshot|print/i,                                   label: 'Screenshot / print', tone: 'bad'  },
+  { match: /stopped running/i,                                    label: 'Browser paused',     tone: 'bad'  },
+  { match: /clicked away|opened over/i,                           label: 'Lost focus',         tone: 'warn' },
+  { match: /switched to another tab|minimi[sz]ed/i,               label: 'Tab switch',         tone: 'bad'  },
+  { match: /left the exam page/i,                                 label: 'Left the page',      tone: 'bad'  },
+  { match: /tab hidden|another app|tab switch/i,                  label: 'Tab switch',         tone: 'bad'  },
+  { match: /refresh/i,                                            label: 'Page refresh',       tone: 'warn' },
+  { match: /lost focus|split-?screen|notification/i,              label: 'Lost focus',         tone: 'warn' },
 ];
 
 /** 12-hour or 24-hour, with or without seconds — toLocaleTimeString is locale-dependent. */

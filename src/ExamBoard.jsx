@@ -13,8 +13,9 @@ import { sittingDecision, restartPatch } from './lib/retakes';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
-import { createFocusLossWatcher, isTypingTarget } from './lib/focusLoss.js';
+import { createFocusLossWatcher, isTypingTarget, COVER_MS, COVER_GRACE_MS } from './lib/focusLoss.js';
 import { isUpdateReload } from './lib/staleBuild.js';
+import { deviceOf, leaveText, pushViolationsNow, withAway, PAUSE_MS } from './lib/leaveReport.js';
 import { paperNoun } from './lib/paperNoun.js';
 
 // The maths editor and the step checker are megabytes between them, and most
@@ -108,6 +109,9 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   const [workAnswers, setWorkAnswers] = useState(initialState.workAnswers || {});
   const [flaggedQuestions, setFlaggedQuestions] = useState(initialState.flaggedQuestions || {});
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
+  // The paper is covered while the page is out of focus (a chat bubble, a
+  // split screen): see the anti-cheat effect below.
+  const [awayCovered, setAwayCovered] = useState(false);
   // Bug fix: restore violation logs from localStorage so they survive page refreshes
   const [violationLogs, setViolationLogs] = useState(initialState.violationLogs || []);
   const endTimeRef = useRef(initialState.endTime); // mutable so initLiveSession can clamp it
@@ -351,6 +355,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
             prevViolationCountRef.current = serverViolations;
             tabSwitchCountRef.current = serverViolations;
             setTabSwitchCount(serverViolations);
+            // …and its log with it: the flags this device lost (a page Safari
+            // threw away) are on the server, sent the moment they happened.
+            const serverLog = Array.isArray(existing.violation_log) ? existing.violation_log : [];
+            if (serverLog.length > violationLogsRef.current.length) {
+              violationLogsRef.current = serverLog;
+              setViolationLogs(serverLog);
+            }
           }
           // Clamp endTime to server-authoritative max — prevents localStorage inflation
           if (existing.created_at) {
@@ -854,10 +865,49 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
   // clock, so its timer was restarted every second and never once fired.
   // Every exam has run without it, and that is now the intended behaviour.
 
+  // The live session's id where a handler set up once can read it.
+  const liveSessionIdRef = useRef(null);
+  useEffect(() => { liveSessionIdRef.current = liveSessionId; }, [liveSessionId]);
+
   // --- ANTI-CHEAT ---
   useEffect(() => {
     if (scoreDisplay || isSubmitting || examStatus === 'locked' || endedByInstructor) return;
 
+    // Which device and browser, for every flag (src/lib/leaveReport.js).
+    const device = deviceOf(navigator);
+    // The leave in progress, { index, at }: its flag gets "— away 48 s" once
+    // the student is back. Kept under its own key, not in the progress
+    // object the auto-saver rewrites, so a page Safari threw away and
+    // reloaded can still find it.
+    const awayKey = `${storageKey}_away`;
+    let pendingLeave = null;
+    let focusLeave = null;
+    let blurAt = null;
+    // The heartbeat: when the poll last ran.
+    let lastTick = Date.now();
+    // Saved the instant a student leaves, before anything else: iOS freezes
+    // the page as Safari leaves the screen, so the debounced pushes and the
+    // auto-saver only run once it is back — and if Safari throws the page
+    // away meanwhile, never. That is how an iPhone home-screen leave went
+    // unflagged while a Safari tab switch was caught.
+    const persistNow = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+        localStorage.setItem(storageKey, JSON.stringify({
+          ...saved, tabSwitchCount: tabSwitchCountRef.current, violationLogs: violationLogsRef.current,
+        }));
+      } catch { /* storage full or blocked */ }
+      try {
+        if (pendingLeave) localStorage.setItem(awayKey, JSON.stringify(pendingLeave));
+        else localStorage.removeItem(awayKey);
+      } catch { /* storage full or blocked */ }
+      pushViolationsNow({
+        url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        sessionId: liveSessionIdRef.current, count: tabSwitchCountRef.current, logs: violationLogsRef.current,
+      });
+    };
+
+    /** Logs one flag; returns where it sits in the log. */
     const logViolation = (reason) => {
       const timeStr = new Date().toLocaleTimeString();
       const log = `[${timeStr}] ${reason}`;
@@ -866,22 +916,78 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       violationLogsRef.current = [...violationLogsRef.current, log];
       setViolationLogs(violationLogsRef.current);
       setTabSwitchCount(tabSwitchCountRef.current);
+      return violationLogsRef.current.length - 1;
     };
+    /** Adds how long the student was away to the flag at `index`, once. */
+    const annotate = (index, ms, note = '') => {
+      const logs = violationLogsRef.current;
+      if (index === null || index === undefined || !logs[index]) return;
+      const next = withAway(logs[index], ms, note);
+      if (next === logs[index]) return;
+      violationLogsRef.current = logs.map((l, i) => (i === index ? next : l));
+      setViolationLogs(violationLogsRef.current);
+      persistNow();
+    };
+
+    // A leave the page never saw the end of: Safari threw the page away
+    // while the student was elsewhere, and reloaded it on their return. The
+    // flag itself was saved when they left; it gets its duration here.
+    try {
+      const stale = JSON.parse(localStorage.getItem(awayKey) || 'null');
+      localStorage.removeItem(awayKey);
+      if (stale && Number.isInteger(stale.index)) annotate(stale.index, Date.now() - stale.at, 'the page was reloaded on return');
+    } catch { /* nothing usable */ }
+
+    // Dialogs stop the page's clock as surely as a frozen browser: after
+    // one closes, the heartbeat starts again from now.
+    const nativeDialogs = { alert: window.alert, confirm: window.confirm, prompt: window.prompt };
+    Object.keys(nativeDialogs).forEach(k => {
+      window[k] = (...args) => {
+        try { return nativeDialogs[k].apply(window, args); } finally { lastTick = Date.now(); }
+      };
+    });
 
     // A blur counts only if focus stays gone: a phone's keyboard takes it for
     // a moment as it slides up (lib/focusLoss.js).
     const focusLoss = createFocusLossWatcher({
-      onLoss: () => logViolation("Screen lost focus (Split-screen or notifications opened)"),
+      onLoss: () => {
+        focusLeave = { index: logViolation(leaveText('blur', device)), at: blurAt ?? Date.now() };
+        persistNow();
+      },
       hasFocus: () => document.hasFocus(),
       isHidden: () => document.hidden,
     });
+    // Sooner than that, the paper is covered: a chat bubble (Messenger's,
+    // with Meta AI in it) or a split screen must not have the question
+    // sitting beside it. No page can see or close another app's window; it
+    // can only see that it no longer has the focus, and hide itself.
+    const cover = createFocusLossWatcher({
+      onLoss: () => setAwayCovered(true),
+      hasFocus: () => document.hasFocus(),
+      isHidden: () => false,
+      lossMs: COVER_MS,
+      graceMs: COVER_GRACE_MS,
+    });
 
     const handleVisibilityChange = () => {
-      if (!document.hidden) { visibilityViolationRef.current = false; return; }
+      if (!document.hidden) {
+        visibilityViolationRef.current = false;
+        lastTick = Date.now();
+        if (pendingLeave) {
+          const { index, at } = pendingLeave;
+          pendingLeave = null;
+          annotate(index, Date.now() - at);
+          persistNow();
+        }
+        return;
+      }
       visibilityViolationRef.current = true; // mark so beforeunload doesn't double-count
       // Cancel any pending blur log — visibilitychange is the authoritative tab-switch event
       focusLoss.cancel();
-      logViolation("Tab hidden or switched to another app");
+      setAwayCovered(true);
+      pendingLeave = { index: null, at: Date.now() };
+      pendingLeave.index = logViolation(leaveText('hidden', device));
+      persistNow();
       // Counted either way; only a real exam interrupts the student for it.
       if (!isPractice) {
         alertActiveRef.current = true;
@@ -922,16 +1028,52 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       } catch { /* ignore */ }
     };
 
+    // Set by a blur or by the poll; the poll clears it when focus is back,
+    // in case the focus event never arrives.
+    let away = false;
     const handleBlur = () => {
       // Ignore blur caused by our own alert dialogs
       if (alertActiveRef.current) return;
+      if (!away) blurAt = Date.now();
+      away = true;
       focusLoss.blur();
+      cover.blur();
     };
-    const handleFocus = () => focusLoss.cancel();
+    const back = () => {
+      away = false;
+      focusLoss.cancel(); cover.cancel(); setAwayCovered(false);
+      if (focusLeave) { const { index, at } = focusLeave; focusLeave = null; annotate(index, Date.now() - at); }
+      blurAt = null;
+    };
+    const handleFocus = back;
     // An answer box gaining or losing focus, or the screen resizing around a
     // keyboard: a keyboard is coming or going.
-    const handleTyping = (e) => { if (isTypingTarget(e.target)) focusLoss.typing(); };
-    const handleViewport = () => focusLoss.typing();
+    const handleTyping = (e) => { if (isTypingTarget(e.target)) { focusLoss.typing(); cover.typing(); } };
+    const handleViewport = () => { focusLoss.typing(); cover.typing(); };
+    // A touch or a key on the paper means the student is on it, whatever
+    // hasFocus() says: the cover never stands between a student and the exam.
+    const handleUse = () => setAwayCovered(false);
+    // Once a second, ask: some windows that float over the browser take the
+    // focus without the page being sent a blur. Counted once per absence.
+    // The same tick is the heartbeat: a clock that jumped by more than
+    // PAUSE_MS means the browser stopped running the page with no event to
+    // say so — iOS freezes Safari's page as it leaves the screen, and does
+    // not always say it is going.
+    const focusPoll = setInterval(() => {
+      const now = Date.now(), gap = now - lastTick;
+      lastTick = now;
+      if (alertActiveRef.current || document.hidden) return;
+      if (gap > PAUSE_MS && !pendingLeave) {
+        const index = logViolation(leaveText('paused', device));
+        persistNow();
+        annotate(index, gap);
+      }
+      if (document.hasFocus()) { if (away) back(); return; }
+      if (!away) blurAt = now;
+      away = true;
+      focusLoss.check();
+      cover.check();
+    }, 1000);
 
     const handleKeyDown = (e) => {
       const forbidden = e.key === 'PrintScreen'
@@ -952,8 +1094,16 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
     window.visualViewport?.addEventListener("resize", handleViewport);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("pointerdown", handleUse, true);
+    document.addEventListener("keydown", handleUse, true);
 
     return () => {
+      clearInterval(focusPoll);
+      Object.assign(window, nativeDialogs);
+      document.removeEventListener("pointerdown", handleUse, true);
+      document.removeEventListener("keydown", handleUse, true);
+      cover.cancel();
+      setAwayCovered(false);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
@@ -1392,6 +1542,23 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
       style={{ '--q-scale': TEXT_SCALES[textSize] }}
       onContextMenu={e => e.preventDefault()}
     >
+
+      {/* ── The paper, covered while the page is out of focus ── A chat bubble
+          (Messenger's, with Meta AI in it), a split screen or a notification
+          shade over the exam must not have the question beside it. It lets
+          every touch through and goes the moment the student is back. */}
+      {awayCovered && !scoreDisplay && !isSubmitting && (
+        <div className="exam-away-cover" role="alert" aria-live="assertive">
+          <div className="exam-away-card">
+            <Icon name="eye-off" size={30} />
+            <h2>Paper hidden</h2>
+            <p>
+              Something is open over the exam — a chat bubble, a split screen or a notification.
+              Close it and come back to this page to carry on. Leaving the page is recorded.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* ── Handing in when the clock ran out ── Nothing typed from here on is
           sent (the paper was fixed at zero), and on a busy database it can take

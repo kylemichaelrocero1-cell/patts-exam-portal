@@ -13,6 +13,13 @@
 export const FOCUS_LOSS_MS = 1500;
 export const KEYBOARD_GRACE_MS = 3000;
 
+// The paper is covered sooner than a violation is counted: a chat bubble
+// (Messenger's, with Meta AI in it) or a split screen opened over the exam
+// must not have the question sitting beside it. A keyboard's blink of a
+// blur is shorter than this, so it never shows the cover.
+export const COVER_MS = 600;
+export const COVER_GRACE_MS = 1500;
+
 /** Is this element one the phone raises a keyboard for? */
 export function isTypingTarget(el) {
   if (!el || typeof el !== 'object') return false;
@@ -27,29 +34,42 @@ export function isTypingTarget(el) {
 
 /**
  * onLoss() is called once per focus loss that lasts. hasFocus() and
- * isHidden() are read when the wait is over.
+ * isHidden() are read when the wait is over. lossMs and graceMs are the
+ * waits (normally, and just after an answer box was used).
  */
 export function createFocusLossWatcher({
   onLoss, hasFocus, isHidden,
+  lossMs = FOCUS_LOSS_MS, graceMs = KEYBOARD_GRACE_MS,
   now = () => Date.now(), setTimer = setTimeout, clearTimer = clearTimeout,
 }) {
   let pending = null;
   let lastTyping = -Infinity;
+  // This loss has been reported: no second report until focus comes back.
+  let reported = false;
   const cancel = () => {
     if (pending !== null) { clearTimer(pending); pending = null; }
+    reported = false;
+  };
+  const blur = () => {
+    if (pending !== null) { clearTimer(pending); pending = null; }
+    const wait = now() - lastTyping < graceMs ? graceMs : lossMs;
+    pending = setTimer(() => {
+      pending = null;
+      if (isHidden() || hasFocus()) return;
+      reported = true;
+      onLoss();
+    }, wait);
   };
   return {
     /** An answer box gained or lost focus, so a keyboard is on its way. */
     typing() { lastTyping = now(); },
-    blur() {
-      cancel();
-      const wait = now() - lastTyping < KEYBOARD_GRACE_MS ? KEYBOARD_GRACE_MS : FOCUS_LOSS_MS;
-      pending = setTimer(() => {
-        pending = null;
-        if (isHidden() || hasFocus()) return;
-        onLoss();
-      }, wait);
-    },
+    blur,
+    /**
+     * A poll found the page without focus. Some windows that float over the
+     * browser may take focus without the page being sent a blur; this starts
+     * the same wait, once, and never re-reports a loss already counted.
+     */
+    check() { if (pending === null && !reported) blur(); },
     /** Focus came back, or the page was hidden (counted elsewhere). */
     cancel,
   };

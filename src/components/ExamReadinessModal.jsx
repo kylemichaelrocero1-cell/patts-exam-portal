@@ -15,6 +15,11 @@ const RULES = [
     body: 'Turn on Do Not Disturb / Focus. A banner from Messenger, email or Viber takes the focus off this page and is logged as a violation.',
   },
   {
+    icon: '💬',
+    title: 'Turn off chat heads and bubbles',
+    body: 'Messenger chat heads, Android bubbles and any floating chat window must be off before you start — in Messenger\'s settings, and on Android under Settings → Notifications → Bubbles (on Samsung: Floating notifications). Anything opened over the exam hides the paper and is recorded as a violation.',
+  },
+  {
     icon: '⏾',
     title: 'Stop the screen from sleeping',
     body: 'Switch off auto-lock, auto-sleep and the screensaver. If the screen locks while you are thinking, coming back counts against you.',

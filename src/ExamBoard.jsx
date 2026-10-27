@@ -1538,7 +1538,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish }) {
 
   return (
     <div
-      className={`exam-shell prevent-select${navOpen ? ' nav-open' : ''}`}
+      className={`exam-shell prevent-select${navOpen ? ' nav-open' : ''}${awayCovered && !scoreDisplay && !isSubmitting ? ' is-away' : ''}`}
       style={{ '--q-scale': TEXT_SCALES[textSize] }}
       onContextMenu={e => e.preventDefault()}
     >

@@ -743,7 +743,13 @@ box that fills with a tick — a student must be able to see that several
   position: fixed; inset: 0; z-index: 1200;
   display: flex; align-items: center; justify-content: center; padding: 24px;
   background: var(--navy-dark, #061829); color: #fff;
-  pointer-events: none;
+  /* It holds the screen until the student taps back in. */
+  pointer-events: auto; touch-action: manipulation;
+}
+.exam-away-clock { margin-top: 14px !important; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--gold-bright, #F4D03F) !important; }
+.exam-shell .exam-away-return,
+.exam-shell .exam-away-return:hover:not(:disabled) {
+  margin-top: 20px; width: 100%; background: #fff; color: var(--navy); border: 0; transform: none;
 }
 .exam-away-card { max-width: 380px; text-align: center; }
 /* Behind the cover the paper is not just out of sight: hidden, it is out of

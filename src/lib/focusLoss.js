@@ -13,11 +13,13 @@
 export const FOCUS_LOSS_MS = 1500;
 export const KEYBOARD_GRACE_MS = 3000;
 
-// The paper is covered sooner than a violation is counted: a chat bubble
-// (Messenger's, with Meta AI in it) or a split screen opened over the exam
-// must not have the question sitting beside it. A keyboard's blink of a
-// blur is shorter than this, so it never shows the cover.
-export const COVER_MS = 600;
+// The exam screen covers the paper — and logs one flag — once focus has
+// been gone this long. Short, so that a glance at the app switcher or a
+// notification that is over in a second is still caught; a keyboard's
+// blink of a blur is shorter, and just after an answer box is used the
+// longer COVER_GRACE_MS applies. (FOCUS_LOSS_MS above is the older, slower
+// rule this replaced on the exam screen, kept for its tests.)
+export const COVER_MS = 300;
 export const COVER_GRACE_MS = 1500;
 
 /** Is this element one the phone raises a keyboard for? */

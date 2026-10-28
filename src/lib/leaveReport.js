@@ -60,7 +60,7 @@ export function leaveText(kind, device) {
       ? 'Left the exam page — home screen, another app, another tab or the screen locked'
       : 'Switched to another tab or minimised the browser',
     blur: phone
-      ? 'A window opened over the exam — a chat bubble, the notification shade or Control Centre, or split screen'
+      ? 'A window opened over the exam — a notification, Control Centre, the app switcher, a chat bubble or split screen'
       : 'Clicked away from the browser — another app or window was in front of the exam',
     paused: phone
       ? 'The browser stopped running the exam — the screen locked, or the phone went to another app'

@@ -75,6 +75,37 @@ const SESSION_CHECK_MS = 60000;
 const AUTO_SUBMIT_SPREAD_MS = 15000;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// What covers the paper while the exam has lost the screen. A plain clock
+// counts the time away; the button is the only way back in.
+function AwayCover({ since, onReturn }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const secs = since ? Math.max(0, Math.round((now - since) / 1000)) : null;
+  return (
+    <div className="exam-away-cover" role="alertdialog" aria-modal="true" aria-labelledby="away-title" aria-describedby="away-text">
+      <div className="exam-away-card">
+        <Icon name="eye-off" size={30} />
+        <h2 id="away-title">Exam hidden</h2>
+        <p id="away-text">
+          The exam lost the screen — a notification, the app switcher, the home screen, a chat bubble or
+          a split screen. This was recorded, with the time until you return.
+        </p>
+        {secs !== null && (
+          <p className="exam-away-clock" aria-live="off">
+            Away for {secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min ${secs % 60} s`}
+          </p>
+        )}
+        <button type="button" className="btn lg exam-away-return" onClick={onReturn} autoFocus>
+          Return to the exam
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // The way off the finish screen. It said "Return to Login" and reloaded into
 // the student's home, still signed in — so a student on a shared lab computer
 // walked away from it signed in. Back and Sign out are now two buttons; on a
@@ -138,9 +169,18 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
   const [workAnswers, setWorkAnswers] = useState(initialState.workAnswers || {});
   const [flaggedQuestions, setFlaggedQuestions] = useState(initialState.flaggedQuestions || {});
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
-  // The paper is covered while the page is out of focus (a chat bubble, a
-  // split screen): see the anti-cheat effect below.
-  const [awayCovered, setAwayCovered] = useState(false);
+  // The paper is covered while the exam has lost the screen: see the
+  // anti-cheat effect below. An absence still open when the page was reloaded (Safari threw it away
+  // while the student was elsewhere): the paper opens covered.
+  const [awaySince, setAwaySince] = useState(() => {
+    try {
+      const stale = JSON.parse(localStorage.getItem(`${storageKey}_away`) || 'null');
+      return Number.isFinite(stale?.at) ? stale.at : null;
+    } catch { return null; }
+  });
+  const [awayCovered, setAwayCovered] = useState(() => awaySince !== null);
+  // The anti-cheat effect's way to end an absence, for the cover's button.
+  const returnToExamRef = useRef(null);
   // Bug fix: restore violation logs from localStorage so they survive page refreshes
   const [violationLogs, setViolationLogs] = useState(initialState.violationLogs || []);
   const endTimeRef = useRef(initialState.endTime); // mutable so initLiveSession can clamp it
@@ -923,8 +963,11 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
     // object the auto-saver rewrites, so a page Safari threw away and
     // reloaded can still find it.
     const awayKey = `${storageKey}_away`;
-    let pendingLeave = null;
-    let focusLeave = null;
+    // One absence at a time, { index, at, kind, note }: the flag it logged and
+    // when it began. It ends only when the student taps Return to the exam on
+    // the cover — not when focus comes back by itself — so the time recorded
+    // is the time the paper was out of their hands.
+    let absence = null;
     let blurAt = null;
     // The heartbeat: when the poll last ran.
     let lastTick = Date.now();
@@ -941,7 +984,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
         }));
       } catch { /* storage full or blocked */ }
       try {
-        if (pendingLeave) localStorage.setItem(awayKey, JSON.stringify(pendingLeave));
+        if (absence) localStorage.setItem(awayKey, JSON.stringify(absence));
         else localStorage.removeItem(awayKey);
       } catch { /* storage full or blocked */ }
       pushViolationsNow({
@@ -975,11 +1018,60 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
     // A leave the page never saw the end of: Safari threw the page away
     // while the student was elsewhere, and reloaded it on their return. The
     // flag itself was saved when they left; it gets its duration here.
+    // It stays an absence: the paper is covered again until the tap.
     try {
       const stale = JSON.parse(localStorage.getItem(awayKey) || 'null');
-      localStorage.removeItem(awayKey);
-      if (stale && Number.isInteger(stale.index)) annotate(stale.index, Date.now() - stale.at, 'the page was reloaded on return');
+      if (stale && Number.isInteger(stale.index) && Number.isFinite(stale.at)) {
+        absence = { ...stale, note: 'the page was reloaded on return' };
+      } else {
+        localStorage.removeItem(awayKey);
+      }
     } catch { /* nothing usable */ }
+
+    /** Rewrites a logged flag's reason, keeping its time. */
+    const relabel = (index, reason) => {
+      const logs = violationLogsRef.current;
+      if (!logs[index]) return;
+      const stamp = (logs[index].match(/^\[[^\]]*\]/) || [''])[0];
+      violationLogsRef.current = logs.map((l, i) => (i === index ? `${stamp} ${reason}` : l));
+      setViolationLogs(violationLogsRef.current);
+    };
+    /**
+     * The exam lost the screen: cover the paper and log one flag, now — a
+     * glance at the app switcher that is over in a second still counts.
+     * A second cause during the same absence logs nothing more, except that
+     * a blur which turns out to be the page being left is named as that.
+     */
+    const startAbsence = (kind, at = Date.now()) => {
+      if (absence) {
+        if (kind === 'hidden' && absence.kind === 'blur') {
+          relabel(absence.index, leaveText('hidden', device));
+          absence = { ...absence, kind };
+          persistNow();
+        }
+        return;
+      }
+      absence = { index: logViolation(leaveText(kind, device)), at, kind };
+      setAwayCovered(true);
+      setAwaySince(at);
+      persistNow();
+    };
+    /** The student tapped Return to the exam: the flag gets its time away. */
+    const returnToExam = () => {
+      if (absence) {
+        const { index, at, note } = absence;
+        absence = null;
+        annotate(index, Date.now() - at, note || '');
+        persistNow();
+      }
+      cover.cancel();
+      away = false;
+      blurAt = null;
+      lastTick = Date.now();
+      setAwayCovered(false);
+      setAwaySince(null);
+    };
+    returnToExamRef.current = returnToExam;
 
     // Dialogs stop the page's clock as surely as a frozen browser: after
     // one closes, the heartbeat starts again from now.
@@ -990,22 +1082,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       };
     });
 
-    // A blur counts only if focus stays gone: a phone's keyboard takes it for
-    // a moment as it slides up (lib/focusLoss.js).
-    const focusLoss = createFocusLossWatcher({
-      onLoss: () => {
-        focusLeave = { index: logViolation(leaveText('blur', device)), at: blurAt ?? Date.now() };
-        persistNow();
-      },
-      hasFocus: () => document.hasFocus(),
-      isHidden: () => document.hidden,
-    });
-    // Sooner than that, the paper is covered: a chat bubble (Messenger's,
-    // with Meta AI in it) or a split screen must not have the question
-    // sitting beside it. No page can see or close another app's window; it
-    // can only see that it no longer has the focus, and hide itself.
+    // A blur hides the paper once focus has stayed gone for COVER_MS — or
+    // COVER_GRACE_MS just after an answer box was used, since a phone's
+    // keyboard takes the focus for a moment as it slides up (lib/focusLoss.js).
+    // No page can see another app's window; it can only see that it no
+    // longer has the focus.
     const cover = createFocusLossWatcher({
-      onLoss: () => setAwayCovered(true),
+      onLoss: () => startAbsence('blur', blurAt ?? Date.now()),
       hasFocus: () => document.hasFocus(),
       isHidden: () => false,
       lossMs: COVER_MS,
@@ -1014,29 +1097,16 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
 
     const handleVisibilityChange = () => {
       if (!document.hidden) {
+        // Back on the page, still covered: the absence ends at the tap.
         visibilityViolationRef.current = false;
         lastTick = Date.now();
-        if (pendingLeave) {
-          const { index, at } = pendingLeave;
-          pendingLeave = null;
-          annotate(index, Date.now() - at);
-          persistNow();
-        }
         return;
       }
       visibilityViolationRef.current = true; // mark so beforeunload doesn't double-count
-      // Cancel any pending blur log — visibilitychange is the authoritative tab-switch event
-      focusLoss.cancel();
-      setAwayCovered(true);
-      pendingLeave = { index: null, at: Date.now() };
-      pendingLeave.index = logViolation(leaveText('hidden', device));
-      persistNow();
-      // Counted either way; only a real exam interrupts the student for it.
-      if (!isPractice) {
-        alertActiveRef.current = true;
-        alert("Warning: leaving the exam page was recorded.");
-        alertActiveRef.current = false;
-      }
+      cover.cancel();
+      // A blur just before is the same leave; it is named as this one. The
+      // cover says it was recorded, so there is no alert to tap through too.
+      startAbsence('hidden', blurAt ?? Date.now());
     };
 
     // Fires on both tab close AND page refresh.
@@ -1079,23 +1149,20 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       if (alertActiveRef.current) return;
       if (!away) blurAt = Date.now();
       away = true;
-      focusLoss.blur();
       cover.blur();
     };
+    // Focus came back before the cover went up (a keyboard's blink): nothing
+    // happened. After it went up, the cover stays until the tap.
     const back = () => {
       away = false;
-      focusLoss.cancel(); cover.cancel(); setAwayCovered(false);
-      if (focusLeave) { const { index, at } = focusLeave; focusLeave = null; annotate(index, Date.now() - at); }
-      blurAt = null;
+      cover.cancel();
+      if (!absence) blurAt = null;
     };
     const handleFocus = back;
     // An answer box gaining or losing focus, or the screen resizing around a
     // keyboard: a keyboard is coming or going.
-    const handleTyping = (e) => { if (isTypingTarget(e.target)) { focusLoss.typing(); cover.typing(); } };
-    const handleViewport = () => { focusLoss.typing(); cover.typing(); };
-    // A touch or a key on the paper means the student is on it, whatever
-    // hasFocus() says: the cover never stands between a student and the exam.
-    const handleUse = () => setAwayCovered(false);
+    const handleTyping = (e) => { if (isTypingTarget(e.target)) cover.typing(); };
+    const handleViewport = () => { cover.typing(); };
     // Once a second, ask: some windows that float over the browser take the
     // focus without the page being sent a blur. Counted once per absence.
     // The same tick is the heartbeat: a clock that jumped by more than
@@ -1106,15 +1173,10 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       const now = Date.now(), gap = now - lastTick;
       lastTick = now;
       if (alertActiveRef.current || document.hidden) return;
-      if (gap > PAUSE_MS && !pendingLeave) {
-        const index = logViolation(leaveText('paused', device));
-        persistNow();
-        annotate(index, gap);
-      }
+      if (gap > PAUSE_MS) startAbsence('paused', now - gap);
       if (document.hasFocus()) { if (away) back(); return; }
       if (!away) blurAt = now;
       away = true;
-      focusLoss.check();
       cover.check();
     }, 1000);
 
@@ -1137,16 +1199,22 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
     window.visualViewport?.addEventListener("resize", handleViewport);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("beforeunload", handleBeforeUnload);
-    document.addEventListener("pointerdown", handleUse, true);
-    document.addEventListener("keydown", handleUse, true);
 
     return () => {
       clearInterval(focusPoll);
       Object.assign(window, nativeDialogs);
-      document.removeEventListener("pointerdown", handleUse, true);
-      document.removeEventListener("keydown", handleUse, true);
       cover.cancel();
+      // Handed in, locked or ended mid-absence: the absence ends here. (A
+      // page being unloaded never gets this far, so a reload still finds it.)
+      if (absence) {
+        const { index, at, note } = absence;
+        absence = null;
+        annotate(index, Date.now() - at, note || '');
+        persistNow();
+      }
+      returnToExamRef.current = null;
       setAwayCovered(false);
+      setAwaySince(null);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
@@ -1155,7 +1223,6 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       window.visualViewport?.removeEventListener("resize", handleViewport);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      focusLoss.cancel();
     };
   }, [scoreDisplay, isSubmitting, examStatus, endedByInstructor]);
 
@@ -1605,21 +1672,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       onContextMenu={e => e.preventDefault()}
     >
 
-      {/* ── The paper, covered while the page is out of focus ── A chat bubble
-          (Messenger's, with Meta AI in it), a split screen or a notification
-          shade over the exam must not have the question beside it. It lets
-          every touch through and goes the moment the student is back. */}
+      {/* ── The paper, covered once the page has lost the screen ── A
+          notification, the app switcher, the home screen, a chat bubble or a
+          split screen: the question must not sit beside any of them. The
+          cover stays until the student taps back in, so the flag records
+          how long the paper was out of their hands. */}
       {awayCovered && !scoreDisplay && !isSubmitting && (
-        <div className="exam-away-cover" role="alert" aria-live="assertive">
-          <div className="exam-away-card">
-            <Icon name="eye-off" size={30} />
-            <h2>Paper hidden</h2>
-            <p>
-              Something is open over the exam — a chat bubble, a split screen or a notification.
-              Close it and come back to this page to carry on. Leaving the page is recorded.
-            </p>
-          </div>
-        </div>
+        <AwayCover since={awaySince} onReturn={() => returnToExamRef.current?.()} />
       )}
 
       {/* ── Handing in when the clock ran out ── Nothing typed from here on is

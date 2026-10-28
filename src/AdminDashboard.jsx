@@ -185,6 +185,7 @@ const [targetSection, setTargetSection] = useState('');
   const [viewingStudent, setViewingStudent] = useState(null);
   const [viewingStatsExam, setViewingStatsExam] = useState(null);
   const [examQuestionsCache, setExamQuestionsCache] = useState({});
+  const [statsSet, setStatsSet] = useState(null);   // the set Item Analysis shows
   const [answersJsonCache, setAnswersJsonCache] = useState({}); // keyed by `studentId_examId`
   // Item analysis on a practice paper: each student's first attempt's
   // answers_json, keyed by paper. Refetched on every open — practice keeps
@@ -410,6 +411,7 @@ const [targetSection, setTargetSection] = useState('');
       console.error('Failed to load exam stats:', err);
     }
     setIsLoadingQuestions(false);
+    setStatsSet(null);
     setViewingStatsExam(examId);
   };
 
@@ -582,6 +584,14 @@ const [targetSection, setTargetSection] = useState('');
     const cmp = compareLive(sortBy);
     setLiveSessions(prev => [...prev].sort((a, b) => cmp(keyOf(a), keyOf(b))));
   };
+
+  // A paper in sets is analysed one set at a time, as a student sat it: that
+  // set's items and the shared ones, numbered from 1. Listing every set at
+  // once read as one paper with every version's problems in it.
+  const statsQuestions = examQuestionsCache[viewingStatsExam] || [];
+  const statsSets = setsOf(statsQuestions);
+  const statsShownSet = statsSets.includes(statsSet) ? statsSet : (statsSets[0] || null);
+  const statsShownQuestions = questionsForSet(statsQuestions, statsShownSet);
 
   const printAnalysis = () => {
     const zone = document.querySelector('.print-zone');
@@ -5698,11 +5708,29 @@ const deleteResult = async (studentId, examId) => {
                     {(() => {
                       const src = statsSourceFor(viewingStatsExam);
                       const n = src.answers.length;
-                      return src.practice
+                      const base = src.practice
                         ? `Practice paper — each student's first attempt (${n} student${n === 1 ? '' : 's'}).`
                         : `How many students chose each option, and what they typed on maths items (${n} submission${n === 1 ? '' : 's'}).`;
+                      if (!statsShownSet) return base;
+                      const k = src.answers.filter(a => setOfAnswers(statsQuestions, a) === statsShownSet).length;
+                      return `Set ${statsShownSet} — ${k} of ${n} sat it. ${base}`;
                     })()}
                   </p>
+                  {statsSets.length > 0 && (
+                    <div role="group" aria-label="Set" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                      {statsSets.map(set => {
+                        const on = set === statsShownSet;
+                        return (
+                          <button key={set} type="button" aria-pressed={on} onClick={() => setStatsSet(set)}
+                            style={{ width: 'auto', padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+                              border: '1px solid rgba(255,255,255,.35)',
+                              background: on ? 'white' : 'rgba(255,255,255,.08)', color: on ? 'var(--navy)' : 'white' }}>
+                            Set {set}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn ghost sm" onClick={printAnalysis} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
@@ -5716,12 +5744,12 @@ const deleteResult = async (studentId, examId) => {
             </div>
 
             <div style={{ padding: '24px 28px', display: 'grid', gap: '16px' }}>
-              {(examQuestionsCache[viewingStatsExam] || []).map((q, idx) => {
+              {statsShownQuestions.map((q, idx) => {
                 if (q.question_type === 'essay') {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px', borderLeft: '4px solid var(--info)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}</p>
+                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
                         <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                       </div>
                       {q.image_url && (
@@ -5734,9 +5762,8 @@ const deleteResult = async (studentId, examId) => {
 
                 // An item in one set is out of the students who sat that set.
                 const allAnswers = statsSourceFor(viewingStatsExam).answers;
-                const statQs = examQuestionsCache[viewingStatsExam] || [];
                 const statAnswers = q.set_label
-                  ? allAnswers.filter(a => setOfAnswers(statQs, a) === q.set_label)
+                  ? allAnswers.filter(a => setOfAnswers(statsQuestions, a) === q.set_label)
                   : allAnswers;
                 const totalAnswers = statAnswers.length;
 
@@ -5751,7 +5778,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                        {idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}
+                        {idx + 1}. {q.question_text}
                         <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Type your answer'}</span>
                         <span className="px-pill muted" style={{ marginLeft: 6 }}>
                           {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
@@ -5865,7 +5892,7 @@ const deleteResult = async (studentId, examId) => {
                 return (
                   <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                     <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                      {idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}
+                      {idx + 1}. {q.question_text}
                       {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
                     </p>
                     {multi && (

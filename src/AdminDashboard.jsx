@@ -21,7 +21,7 @@ import { firstAttempts } from './lib/retakes';
 import { paperOptions, resultInView } from './lib/paperFilter';
 import { formatName, nameInitials, instructorName as displayInstructor } from './lib/personName';
 import { quantityParts } from './lib/quantityAnswer.js';
-import { sittingSection, sectionOptions, filterLive, compareLive } from './lib/liveMonitor';
+import { sittingSection, sectionOptions, filterLive, compareLive, compareWaiting } from './lib/liveMonitor';
 import { isWaitingNow, waitedFor } from './lib/admission';
 import { normaliseSetLabel, questionsForSet, setOfAnswers, inSet, setsOf, setsLabel } from './lib/paperSets';
 // Extracted from this file so it can be tested against the format's own
@@ -135,6 +135,7 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [batchSection, setBatchSection] = useState('');
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [liveSort, setLiveSort] = useState('name');
+  const [waitingSort, setWaitingSort] = useState('name');   // check-in list: name | section | arrival
   // Students waiting to be let in to a paper (sql/115), and the monitor's filters.
   const [admissions, setAdmissions] = useState([]);
   const [deciding, setDeciding] = useState({});
@@ -4166,14 +4167,14 @@ const deleteResult = async (studentId, examId) => {
           }));
           const waitingRows = admissions.filter(r => isWaitingNow(r, admissionClock)).map(r => ({
             r, name: formatName(r.student_name), section: sittingSectionOf(r.student_id, r.assessment_id),
-            paperId: r.assessment_id, status: 'waiting',
+            paperId: r.assessment_id, status: 'waiting', requestedAt: r.requested_at,
           }));
           const placeFilter = { ...liveFilter, status: '' };
           const shownSittings = filterLive(sittingRows, liveFilter);
           // The status filter is for sittings; whoever is waiting is shown
           // unless the section, paper or name filters rule them out.
           const shownWaiting = filterLive(waitingRows, placeFilter)
-            .sort((a, b) => compareLive(liveSort)(a, b) || new Date(a.r.requested_at) - new Date(b.r.requested_at));
+            .sort(compareWaiting(waitingSort));
           const liveSectionChoices = sectionOptions([...sittingRows, ...waitingRows]);
           const livePaperChoices = [...new Set([...sittingRows, ...waitingRows].map(r => r.paperId))]
             .map(id => ({ id, title: examsDict[id] || 'Paper' }))
@@ -4199,6 +4200,17 @@ const deleteResult = async (studentId, examId) => {
                         : 'Nobody is waiting. Students on a paper with check-in on appear here after the password.'}
                       {waitingRows.length > shownWaiting.length && ` ${waitingRows.length - shownWaiting.length} hidden by the filters below.`}
                     </span>
+                    {waitingRows.length > 1 && (
+                      <div role="group" aria-label="Order the waiting list" style={{ display: 'flex', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' }}>
+                        {[['name', 'A–Z'], ['section', 'By section'], ['arrival', 'First come']].map(([k, label]) => (
+                          <button key={k} type="button" className="btn ghost sm" aria-pressed={waitingSort === k}
+                            onClick={() => setWaitingSort(k)}
+                            style={{ width: 'auto', padding: '4px 10px', fontSize: 12, ...(waitingSort === k ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}) }}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {shownWaiting.length > 0 && (
                     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>

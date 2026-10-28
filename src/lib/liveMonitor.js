@@ -43,3 +43,14 @@ export function compareLive(by) {
     return (a.section || '').localeCompare(b.section || '', undefined, { numeric: true }) || name(a, b);
   };
 }
+
+/**
+ * The check-in list's order (sql/115): 'name' A–Z, 'section' then A–Z, or
+ * 'arrival', first to ask first. Ties fall back to who asked first, so two
+ * students of the same name keep a stable order. Rows carry requestedAt.
+ */
+export function compareWaiting(by) {
+  const arrival = (a, b) => (Date.parse(a.requestedAt) || 0) - (Date.parse(b.requestedAt) || 0);
+  if (by === 'arrival') return (a, b) => arrival(a, b) || compareLive('name')(a, b);
+  return (a, b) => compareLive(by)(a, b) || arrival(a, b);
+}

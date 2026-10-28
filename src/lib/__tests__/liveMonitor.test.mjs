@@ -1,7 +1,7 @@
 // The live monitor's section slice, filters and sort, and the waiting-screen
 // states for letting students in (sql/115).
 //   npm run test:live-monitor
-import { sittingSection, sectionOptions, filterLive, compareLive } from '../liveMonitor.js';
+import { sittingSection, sectionOptions, filterLive, compareLive, compareWaiting } from '../liveMonitor.js';
 import { newEntryId, isWaitingNow, admissionView, waitedFor, WAITING_STALE_MS } from '../admission.js';
 
 let pass = 0, fail = 0;
@@ -62,6 +62,19 @@ ck('denied, withdrawn and expired can ask again', ['denied', 'withdrawn', 'expir
 ck('waiting tells the student to keep the screen open', /keep this screen open/i.test(admissionView('waiting').text));
 ck('an unknown answer is shown as waiting, never as entering', !admissionView('surprise').enter);
 ck('waited: seconds, then minutes', waitedFor(now - 42000, now) === '42 s' && waitedFor(now - 125000, now) === '2 min 05 s' && waitedFor(now + 5000, now) === '0 s');
+
+{
+  const waiting = [
+    { name: 'Santos, Maria', section: 'Aeng 427 -5B', requestedAt: '2026-10-29T08:02:00Z' },
+    { name: 'Abad, Leo', section: 'Aeng 427 -5B', requestedAt: '2026-10-29T08:05:00Z' },
+    { name: 'Cruz, Ana', section: 'Aeng 427 -3B', requestedAt: '2026-10-29T08:01:00Z' },
+    { name: 'Abad, Leo', section: 'Aeng 427 -3B', requestedAt: '2026-10-29T08:00:00Z' },
+  ];
+  const order = by => J([...waiting].sort(compareWaiting(by)).map(r => `${r.name} ${r.section.slice(-2)}`));
+  ck('check-in A–Z, same name by who asked first', order('name') === J(['Abad, Leo 3B', 'Abad, Leo 5B', 'Cruz, Ana 3B', 'Santos, Maria 5B']), order('name'));
+  ck('check-in by section, then A–Z', order('section') === J(['Abad, Leo 3B', 'Cruz, Ana 3B', 'Abad, Leo 5B', 'Santos, Maria 5B']), order('section'));
+  ck('check-in first come, first shown', order('arrival') === J(['Abad, Leo 3B', 'Cruz, Ana 3B', 'Santos, Maria 5B', 'Abad, Leo 5B']), order('arrival'));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

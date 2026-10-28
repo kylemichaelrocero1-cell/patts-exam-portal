@@ -24,8 +24,14 @@ function Loading({ label }) {
   );
 }
 
-export default function StudentShell({ student, selectedSection, onStartExam, onLogout }) {
+export default function StudentShell({ student, selectedSection, onStartExam, onLogout, onSwitchSection }) {
   const [tab, setTab] = useState('summary');
+  // Every section the student is enrolled in. With more than one, a switch
+  // sits under the header: picking a section used to be final until the
+  // student logged out and back in.
+  const sections = [...new Set(String(student.section || '').split(',').map(s => s.trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (selectedSection && !sections.includes(selectedSection)) sections.unshift(selectedSection);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
@@ -46,6 +52,23 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
           Log Out
         </button>
       </header>
+
+      {onSwitchSection && sections.length > 1 && (
+        <div className="section-switch">
+          <label htmlFor="section-switch-select">
+            <Icon name="book" size={14} />
+            Section
+          </label>
+          <select
+            id="section-switch-select"
+            className="input"
+            value={selectedSection}
+            onChange={e => onSwitchSection(e.target.value)}
+          >
+            {sections.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="student-tabs" style={{
@@ -95,7 +118,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
           kind. `key` forces the remount. */}
       {(tab === 'seatwork' || tab === 'exams') && (
         <ExamList
-          key={tab}
+          key={`${tab}-${selectedSection}`}
           embedded
           kind={tab === 'seatwork' ? 'seatwork' : 'exam'}
           student={student}

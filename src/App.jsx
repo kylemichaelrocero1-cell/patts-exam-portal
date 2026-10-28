@@ -175,6 +175,7 @@ export default function App() {
         selectedSection={selectedSection}
         onStartExam={(exam, set) => { rememberPaper(student.id, exam, set); setSelectedExam(exam); setExamSet(set || null); }}
         onLogout={handleLogout}
+        onSwitchSection={setSelectedSection}
       />
     );
   }

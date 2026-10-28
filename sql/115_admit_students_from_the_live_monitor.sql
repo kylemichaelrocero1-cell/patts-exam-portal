@@ -343,7 +343,9 @@ CREATE OR REPLACE FUNCTION public.filed_after_admission()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
-  v_paper uuid := coalesce(NEW.assessment_id, NEW.exam_id);
+  -- Read through jsonb: review_attempts has no exam_id column, and naming a
+  -- field a row does not have is an error in plpgsql (sql/118).
+  v_paper uuid := coalesce((to_jsonb(NEW) ->> 'assessment_id')::uuid, (to_jsonb(NEW) ->> 'exam_id')::uuid);
   v_on    boolean;
   v_since timestamptz;
 BEGIN

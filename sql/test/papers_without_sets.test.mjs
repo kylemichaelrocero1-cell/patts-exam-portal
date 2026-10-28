@@ -83,6 +83,16 @@ ck('every existing paper keeps its sets',
   await x(s115.slice(from, s115.lastIndexOf('\n-- -----', to)));
 }
 
+// 116's paper sets column and its grant, likewise.
+{
+  const s116 = fs.readFileSync(`${P}/sql/116_papers_with_sets.sql`, 'utf8');
+  const from = s116.indexOf('ALTER TABLE public.assessments ADD COLUMN IF NOT EXISTS set_labels');
+  const grant = 'GRANT SELECT (set_labels) ON public.assessments TO anon, authenticated;';
+  const to = s116.indexOf(grant);
+  if (from < 0 || to < 0) throw new Error('116 no longer has its set_labels column and grant');
+  await x(s116.slice(from, to + grant.length));
+}
+
 console.log('\n=== who reads and who switches ===');
 {
   const r = await as('anon', null, studentRead);

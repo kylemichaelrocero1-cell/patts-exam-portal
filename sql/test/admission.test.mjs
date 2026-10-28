@@ -218,5 +218,28 @@ ck('and asking says not_required', (await ask(PAPER, STU, TOK, E(20))).rows?.[0]
   ck('…which an instructor cannot backdate', new Date((await q(`SELECT admission_since FROM public.assessments WHERE id = $1`, [PAPER]))[0].admission_since).getTime() === new Date(after).getTime());
 }
 
+console.log('\n=== PAPERS WITH RETAKES (filed in review_attempts, which has no exam_id) ===');
+{
+  const PRAC = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b35', QP = 'aaaaaaaa-0000-4000-8000-000000000003';
+  await x(`INSERT INTO public.assessments (id, kind, title, target_section, instructor_id, is_open, duration_minutes, allow_retakes)
+           VALUES ('${PRAC}','exam','Practice','Aeng 427 -3B, Aeng 427 -5B','${INS}',true,60,true);
+           INSERT INTO public.questions (id, exam_id, assessment_id, question_number, question_text, question_type, choices, correct_answer, marks)
+           VALUES ('${QP}','${PRAC}','${PRAC}',1,'Look-alike practice item','multiple_choice','["a","b"]'::jsonb,0,1);`);
+  const file = () => asAnon(`SELECT public.submit_assessment($1,$2,$3::jsonb,60,0,'[]'::jsonb) r`, [ABS, PRAC, JSON.stringify({ [QP]: 0 })]);
+  const r1 = await file();
+  ck('a practice paper with the switch off files its attempt', r1.ok, r1.message);
+  await asInstructor(`UPDATE public.assessments SET requires_admission = true WHERE id = $1`, [PRAC], INS);
+  const r2 = await file();
+  ck('switched on, an attempt from a student never let in is refused — by the check, not a crash',
+    !r2.ok && /not let you in/i.test(r2.message || ''), r2.message);
+  const r3 = await asInstructor(`SELECT public.submit_assessment($1,$2,$3::jsonb,60,0,'[]'::jsonb) r`, [ABS, PRAC, JSON.stringify({ [QP]: 0 })], INS);
+  ck('…and the instructor can still force-submit it', r3.ok, r3.message);
+  ck('two attempts on file', (await q(`SELECT count(*)::int n FROM public.review_attempts WHERE assessment_id = $1`, [PRAC]))[0].n === 2);
+  const s118 = fs.readFileSync(`${P}/sql/118_practice_papers_file_again.sql`, 'utf8');
+  await x(s118); await x(s118);
+  const [v] = await q(s118.slice(s118.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck('118 applies, twice, and its VERIFY is true', v.reads_either_table === true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

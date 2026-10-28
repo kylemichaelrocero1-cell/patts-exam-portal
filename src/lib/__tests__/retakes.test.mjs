@@ -3,7 +3,7 @@
 //
 //   npm run test:retakes
 
-import { isPaperFinished, sittingDecision, restartPatch, firstAttempts } from '../retakes.js';
+import { isPaperFinished, sittingDecision, sittingNotFiled, restartPatch, firstAttempts } from '../retakes.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -54,6 +54,26 @@ console.log('\n=== sittingDecision ===');
     sittingDecision({ sessionStatus: 'finished', allowRetakes: true }) === 'reopen');
 
   check('no arguments at all does not throw', sittingDecision() === 'continue');
+
+  check('a sitting closed without being filed is carried on, not wiped — even with an attempt on file',
+    sittingDecision({ sessionStatus: 'finished', allowRetakes: true, hasPriorAttempt: true, unfiledWork: true }) === 'reopen');
+  check('…but a graded paper already filed with no retakes is still done',
+    sittingDecision({ sessionStatus: 'finished', hasGradedResult: true, unfiledWork: true }) === 'blocked');
+}
+
+console.log('\n=== sittingNotFiled ===');
+{
+  const began = '2026-10-28T09:10:00Z';
+  check('answers, and nothing filed since the sitting began: not filed',
+    sittingNotFiled({ hasWork: true, startedAt: began, filedAt: '2026-10-28T08:40:00Z' }) === true);
+  check('answers, and nothing on file at all: not filed',
+    sittingNotFiled({ hasWork: true, startedAt: began, filedAt: null }) === true);
+  check('filed after it began: this sitting was filed',
+    sittingNotFiled({ hasWork: true, startedAt: began, filedAt: '2026-10-28T09:45:00Z' }) === false);
+  check('no answers: nothing to lose',
+    sittingNotFiled({ hasWork: false, startedAt: began, filedAt: null }) === false);
+  check('a time that will not read is not taken as a loss',
+    sittingNotFiled({ hasWork: true, startedAt: 'never', filedAt: '2026-10-28T09:45:00Z' }) === false);
 }
 
 console.log('\n=== restartPatch ===');

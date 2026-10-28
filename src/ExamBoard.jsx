@@ -9,13 +9,14 @@ import {
   isMultiSelect, isSelected, toggleIndex, answeredCount, answersPayload,
   isItemAnswered, answeredOnPaper, keepOnPaper,
 } from './lib/answers';
-import { sittingDecision, restartPatch } from './lib/retakes';
+import { sittingDecision, sittingNotFiled, restartPatch } from './lib/retakes';
+import { hasSavedWork } from './lib/proctoring';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
 import { createFocusLossWatcher, isTypingTarget, COVER_MS, COVER_GRACE_MS } from './lib/focusLoss.js';
 import { isUpdateReload } from './lib/staleBuild.js';
-import { deviceOf, leaveText, pushViolationsNow, withAway, PAUSE_MS } from './lib/leaveReport.js';
+import { deviceOf, leaveText, pushViolationsNow, withAway, awayUntilCheckIn, PAUSE_MS } from './lib/leaveReport.js';
 import { paperNoun } from './lib/paperNoun.js';
 import { formatName } from './lib/personName.js';
 
@@ -133,7 +134,7 @@ function FinishButtons({ onLogout, signOutFirst }) {
   );
 }
 
-export default function ExamBoard({ student, exam, examSet, entry, onFinish, onLogout }) {
+export default function ExamBoard({ student, exam, examSet, admission, onFinish, onLogout }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
   // instructor wants that signal — but are never locked for it. Locking a
   // revision paper the student can simply restart is pure friction, and it
@@ -171,11 +172,14 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
   const [tabSwitchCount, setTabSwitchCount] = useState(initialState.tabSwitchCount);
   // The paper is covered while the exam has lost the screen: see the
   // anti-cheat effect below. An absence still open when the page was reloaded (Safari threw it away
-  // while the student was elsewhere): the paper opens covered.
+  // while the student was elsewhere): the paper opens covered — unless they
+  // came back through check-in (sql/115), where the instructor has just seen
+  // them and the leave ended when they asked to enter.
   const [awaySince, setAwaySince] = useState(() => {
     try {
       const stale = JSON.parse(localStorage.getItem(`${storageKey}_away`) || 'null');
-      return Number.isFinite(stale?.at) ? stale.at : null;
+      if (!Number.isFinite(stale?.at) || awayUntilCheckIn(stale.at, admission)) return null;
+      return stale.at;
     } catch { return null; }
   });
   const [awayCovered, setAwayCovered] = useState(() => awaySince !== null);
@@ -338,17 +342,22 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
     // work was submitted when it was not.
     const readFiled = async () => {
       const [gradedRes, attemptRes] = await Promise.all([
-        supabase.from('results').select('student_id')
+        supabase.from('results').select('student_id, submitted_at')
           .eq('student_id', student.id).eq('exam_id', exam.id).limit(1)
           .then(r => r, () => ({ data: null })),
-        supabase.from('review_attempts').select('attempt_no')
+        supabase.from('review_attempts').select('attempt_no, submitted_at')
           .eq('student_id', student.id).eq('assessment_id', exam.id)
           .order('attempt_no', { ascending: false }).limit(1)
           .then(r => r, () => ({ data: null })),
       ]);
+      const times = [gradedRes.data?.[0]?.submitted_at, attemptRes.data?.[0]?.submitted_at].filter(Boolean);
       return {
         graded: (gradedRes.data?.length || 0) > 0,
         maxAttempt: attemptRes.data?.[0]?.attempt_no || 0,
+        // When the latest was filed: whether THIS sitting was (sittingNotFiled).
+        lastFiledAt: times.length ? times.sort().at(-1) : null,
+        // A read that failed is not "nothing on file".
+        known: !gradedRes.error && !attemptRes.error && gradedRes.data != null && attemptRes.data != null,
       };
     };
 
@@ -379,6 +388,12 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
             allowRetakes: isPractice,
             hasGradedResult: filedRef.current.graded,
             hasPriorAttempt: filedRef.current.maxAttempt > 0,
+            // Closed without being filed (a Force Submit that failed half
+            // way): its answers are carried on, never wiped by a fresh start.
+            // When what is on file could not be read, assume it was not.
+            unfiledWork: hasSavedWork(existing) && (!filedRef.current.known || sittingNotFiled({
+              hasWork: true, startedAt: existing.created_at, filedAt: filedRef.current.lastFiledAt,
+            })),
           });
 
           if (decision === 'blocked') {
@@ -1019,9 +1034,16 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
     // while the student was elsewhere, and reloaded it on their return. The
     // flag itself was saved when they left; it gets its duration here.
     // It stays an absence: the paper is covered again until the tap.
+    // Except through check-in (sql/115): the student was back when they asked
+    // to enter, so the leave ends there, and the wait for the instructor is
+    // noted beside it rather than counted as time away.
     try {
       const stale = JSON.parse(localStorage.getItem(awayKey) || 'null');
-      if (stale && Number.isInteger(stale.index) && Number.isFinite(stale.at)) {
+      const split = stale && Number.isInteger(stale.index) ? awayUntilCheckIn(stale.at, admission) : null;
+      if (split) {
+        localStorage.removeItem(awayKey);
+        annotate(stale.index, split.ms, split.note);
+      } else if (stale && Number.isInteger(stale.index) && Number.isFinite(stale.at)) {
         absence = { ...stale, note: 'the page was reloaded on return' };
       } else {
         localStorage.removeItem(awayKey);
@@ -1181,6 +1203,12 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
     }, 1000);
 
     const handleKeyDown = (e) => {
+      // Backspace with no answer box under it is Back in Safari: one press
+      // too many after a line was deleted took the student off the paper.
+      if (e.key === 'Backspace' && !e.target?.closest?.('input, textarea, math-field, [contenteditable="true"]')) {
+        e.preventDefault();
+        return;
+      }
       const forbidden = e.key === 'PrintScreen'
         || ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's'))
         || (e.metaKey && e.shiftKey);
@@ -1224,7 +1252,7 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [scoreDisplay, isSubmitting, examStatus, endedByInstructor]);
+  }, [scoreDisplay, isSubmitting, examStatus, endedByInstructor, admission]);
 
   // Dedicated lock trigger — only fires when count actually increases (not on page restore).
   // Locks at every 4th NEW violation: 4, 8, 12, ...
@@ -1267,7 +1295,9 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
         p_assessment_id: exam.id,
         p_student_id: student?.id,
         p_session_token: localStorage.getItem('local_session_token'),
-        ...(entry ? { p_entry: entry } : {}),
+        ...(admission?.entry ? { p_entry: admission.entry } : {}),
+        // A paper in sets (sql/116): only the set chosen at Start.
+        ...(exam?.set_labels?.length ? { p_set: examSet } : {}),
       });
 
       if (error || !data || data.length === 0) {
@@ -1279,7 +1309,7 @@ export default function ExamBoard({ student, exam, examSet, entry, onFinish, onL
           // server is fine. There is one session_token per student, so logging
           // in anywhere else invalidated this device.
           ? `${gateErrorMessage(error)}`
-          : error?.message && /password|section|not open|exists|let you in/i.test(error.message)
+          : error?.message && /password|section|not open|exists|let you in|set/i.test(error.message)
             ? `${error.message}`
             : "Could not load exam questions. Please refresh the page or contact your instructor.");
 

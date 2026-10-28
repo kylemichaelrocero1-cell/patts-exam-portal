@@ -22,6 +22,9 @@ export default function AdmissionWait({ exam, student, onEnter, onCancel }) {
   const [status, setStatus] = useState(null);
   const [problem, setProblem] = useState(null);   // { text, fatal }
   const [since, setSince] = useState(() => Date.now());
+  // When the student first asked, on this screen: they were back by then, so
+  // a leave that brought them here ends here — the wait is not time away.
+  const [askedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   const enteredRef = useRef(false);
 
@@ -54,7 +57,7 @@ export default function AdmissionWait({ exam, student, onEnter, onCancel }) {
       if (view.enter) {
         if (!enteredRef.current) {
           enteredRef.current = true;
-          onEnter(data === 'admitted' ? entry : null);
+          onEnter(data === 'admitted' ? { entry, askedAt, letInAt: Date.now() } : null);
         }
         return;
       }
@@ -62,7 +65,8 @@ export default function AdmissionWait({ exam, student, onEnter, onCancel }) {
     };
     ask();
     return () => { stop = true; clearTimeout(timer); };
-    // A new entry starts the asking over; onEnter is the parent's and stable enough.
+    // A new entry starts the asking over; onEnter is the parent's and stable enough,
+    // and askedAt never changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, exam.id, student.id]);
 

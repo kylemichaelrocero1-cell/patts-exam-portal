@@ -24,9 +24,10 @@ export default function App() {
   const [student, setStudent] = useState(null);
   const [selectedExam, setSelectedExam] = useState(null);
   const [examSet, setExamSet] = useState(null);
-  // The entry the instructor let in, for a paper that waits for that (sql/115).
-  // Only this page holds it; get_exam_questions() hands the paper to it alone.
-  const [examEntry, setExamEntry] = useState(null);
+  // The entry the instructor let in, for a paper that waits for that (sql/115):
+  // { entry, askedAt, letInAt }. Only this page holds the entry id;
+  // get_exam_questions() hands the paper to it alone.
+  const [examAdmission, setExamAdmission] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
   const [isRestoring, setIsRestoring] = useState(true);
 
@@ -179,7 +180,7 @@ export default function App() {
       <StudentShell
         student={student}
         selectedSection={selectedSection}
-        onStartExam={(exam, set, entry) => { rememberPaper(student.id, exam, set); setSelectedExam(exam); setExamSet(set || null); setExamEntry(entry || null); }}
+        onStartExam={(exam, set, admission) => { rememberPaper(student.id, exam, set); setSelectedExam(exam); setExamSet(set || null); setExamAdmission(admission || null); }}
         onLogout={handleLogout}
         onSwitchSection={setSelectedSection}
       />
@@ -190,12 +191,12 @@ export default function App() {
     <ExamBoard
       exam={selectedExam}
       examSet={examSet}
-      entry={examEntry}
+      admission={examAdmission}
       student={student}
       onLogout={handleLogout}
       // What was just sat has to show on the home tabs, so their shared copy
       // goes — see src/lib/studentHome.js.
-      onFinish={() => { forgetPaper(); forgetStudentHome(); setSelectedExam(null); setExamSet(null); setExamEntry(null); }}
+      onFinish={() => { forgetPaper(); forgetStudentHome(); setSelectedExam(null); setExamSet(null); setExamAdmission(null); }}
     />
   );
 }

@@ -23,6 +23,7 @@ import { formatName, nameInitials, instructorName as displayInstructor } from '.
 import { quantityParts } from './lib/quantityAnswer.js';
 import { sittingSection, sectionOptions, filterLive, compareLive } from './lib/liveMonitor';
 import { isWaitingNow, waitedFor } from './lib/admission';
+import { normaliseSetLabel, questionsForSet, setOfAnswers, inSet, setsOf } from './lib/paperSets';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -286,9 +287,13 @@ const [targetSection, setTargetSection] = useState('');
     // A text answer (sql/046): the word, and the other words accepted, one
     // per line. Written as a worked_solution rubric with mode 'text'.
     text: { answer: '', accept: '' },
+    // Which set the item is in (sql/116); '' is every set.
+    set_label: '',
   };
   const instructorExamIdsRef = useRef(new Set());
   const [qForm, setQForm] = useState(emptyQ);
+  // The question list, one set at a time (sql/116); '' shows every item.
+  const [qSetFilter, setQSetFilter] = useState('');
   const [qImageFile, setQImageFile] = useState(null);
   const [qImageUploading, setQImageUploading] = useState(false);
   const [qImagePreview, setQImagePreview] = useState(null);
@@ -402,6 +407,13 @@ const [targetSection, setTargetSection] = useState('');
   // graded sittings when there are any — a paper later opened for retakes
   // keeps its real exam as the thing analysed — otherwise, on a practice
   // paper, each student's first attempt (see firstAttempts).
+  // The items a filed paper was sat with: on a paper in sets (sql/116), the
+  // student's set — read from their answers — and the items in every set.
+  const sittingQuestions = (examId, answers) => {
+    const qs = examQuestionsCache[examId] || [];
+    return questionsForSet(qs, setOfAnswers(qs, answers));
+  };
+
   const statsSourceFor = (examId) => {
     const graded = results.filter(r => r.exam_id === examId);
     if (graded.length === 0 && practiceStatsCache[examId]) {
@@ -850,52 +862,74 @@ const [targetSection, setTargetSection] = useState('');
 
     for (const session of sessions) {
       try {
-        // Claim the session before submitting it. Co-instructors share a live
-        // monitor and the auto-sweep runs in every open dashboard; without an
-        // atomic claim the same student is submitted twice, which on a
-        // retakeable paper writes two attempts instead of one.
-        const { data: claimed, error: claimErr } = await supabase
-          .from('live_sessions')
-          .update({ status: 'finished', updated_at: new Date() })
-          .eq('id', session.id).neq('status', 'finished').select('id');
-
-        if (claimErr) { errors.push(`${session.student_name}: ${claimErr.message}`); continue; }
-        if (!claimed || claimed.length === 0) {
-          // Another dashboard got there first — nothing left to submit.
-          setLiveSessions(prev => prev.filter(s => s.id !== session.id));
+        // One step, in the database (sql/120): the paper is filed from what
+        // the sitting saved and the sitting closed in the same transaction,
+        // with the row locked so two dashboards cannot both file it. If the
+        // filing fails nothing has changed — the sitting is still open and
+        // on the monitor. Done in three round trips from here, a reopen that
+        // never arrived left a sitting closed with nothing on file.
+        let outcome, timeTaken;
+        const { data: one, error: oneErr } = await supabase.rpc('force_submit_sitting', { p_session_id: session.id });
+        if (!oneErr) {
+          if (one?.outcome !== 'filed') {
+            // Already filed by another dashboard, or the row is gone.
+            setLiveSessions(prev => prev.filter(s => s.id !== session.id));
+            continue;
+          }
+          outcome = one;
+          timeTaken = one.time_taken_seconds;
+        } else if (!isMissingFunctionError(oneErr)) {
+          errors.push(`${session.student_name}: ${oneErr.message}`);
           continue;
-        }
+        } else {
+          // Claim the session before submitting it. Co-instructors share a live
+          // monitor and the auto-sweep runs in every open dashboard; without an
+          // atomic claim the same student is submitted twice, which on a
+          // retakeable paper writes two attempts instead of one.
+          const { data: claimed, error: claimErr } = await supabase
+            .from('live_sessions')
+            .update({ status: 'finished', updated_at: new Date() })
+            .eq('id', session.id).neq('status', 'finished').select('id');
 
-        // A multi-answer item's saved progress is an array of indices, so the
-        // shape is taken from the value rather than coerced to a number.
-        const mcAnswers = answersPayload(session.answers_json);
+          if (claimErr) { errors.push(`${session.student_name}: ${claimErr.message}`); continue; }
+          if (!claimed || claimed.length === 0) {
+            // Another dashboard got there first — nothing left to submit.
+            setLiveSessions(prev => prev.filter(s => s.id !== session.id));
+            continue;
+          }
 
-        const duration = examDurationFor(session.exam_id);
-        const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
-        const timeTaken = duration ? Math.min(elapsed, duration * 60) : elapsed;
+          // A multi-answer item's saved progress is an array of indices, so the
+          // shape is taken from the value rather than coerced to a number.
+          const mcAnswers = answersPayload(session.answers_json);
 
-        // Marked in Postgres, exactly like the student's own submission.
-        // submit_assessment() routes a retakeable paper to review_attempts and
-        // a graded one to results. The old direct INSERT into results filed
-        // practice sittings in the graded table, and marked in the browser off
-        // correct_answer — which sql/003 has since revoked from the client.
-        const { data: outcome, error: rpcErr } = await supabase.rpc('submit_assessment', {
-          p_student_id: session.student_id,
-          p_assessment_id: session.exam_id,
-          p_answers: mcAnswers,
-          p_time_taken_seconds: timeTaken,
-          p_tab_switches: session.violation_count || 0,
-          p_violation_logs: session.violation_log || [],
-        });
+          const duration = examDurationFor(session.exam_id);
+          const elapsed = Math.floor((Date.now() - new Date(session.created_at).getTime()) / 1000);
+          timeTaken = duration ? Math.min(elapsed, duration * 60) : elapsed;
 
-        if (rpcErr) {
-          // Hand the session back so it stays visible and force-submittable
-          // instead of vanishing from the monitor unsubmitted.
-          await supabase.from('live_sessions')
-            .update({ status: session.status === 'locked' ? 'locked' : 'active' })
-            .eq('id', session.id);
-          errors.push(`${session.student_name}: ${rpcErr.message}`);
-          continue;
+          // Marked in Postgres, exactly like the student's own submission.
+          // submit_assessment() routes a retakeable paper to review_attempts and
+          // a graded one to results. The old direct INSERT into results filed
+          // practice sittings in the graded table, and marked in the browser off
+          // correct_answer — which sql/003 has since revoked from the client.
+          const { data: legacyOutcome, error: rpcErr } = await supabase.rpc('submit_assessment', {
+            p_student_id: session.student_id,
+            p_assessment_id: session.exam_id,
+            p_answers: mcAnswers,
+            p_time_taken_seconds: timeTaken,
+            p_tab_switches: session.violation_count || 0,
+            p_violation_logs: session.violation_log || [],
+          });
+
+          if (rpcErr) {
+            // Hand the session back so it stays visible and force-submittable
+            // instead of vanishing from the monitor unsubmitted.
+            await supabase.from('live_sessions')
+              .update({ status: session.status === 'locked' ? 'locked' : 'active' })
+              .eq('id', session.id);
+            errors.push(`${session.student_name}: ${rpcErr.message}`);
+            continue;
+          }
+          outcome = legacyOutcome;
         }
 
         const isRetake = examAllowsRetakes(session.exam_id);
@@ -1434,6 +1468,8 @@ const [targetSection, setTargetSection] = useState('');
       correct_answer: (isEssay || isMulti || isWorked) ? null : Number(qForm.correct_answer),
       correct_answers: isMulti ? keySet : null,
       image_url: imageUrl || null,
+      // Which set it is in (sql/116); null is every set.
+      set_label: normaliseSetLabel(qForm.set_label) || null,
       // What the item is worth. Everything that is not a worked solution stays
       // at 1, which is what keeps a sum of marks equal to the old count of
       // items for every paper that already exists.
@@ -1529,6 +1565,7 @@ const [targetSection, setTargetSection] = useState('');
       question_type: q.work_rubric?.mode === 'text' ? 'text_answer' : (q.question_type || 'multiple_choice'),
       image_url: q.image_url || null,
       marks: Number(q.marks) || 1,
+      set_label: q.set_label || '',
       // A worked item's rubric comes back as stored; anything else gets a
       // blank one so switching an existing question to worked_solution has
       // something to edit rather than crashing on an undefined.
@@ -4712,6 +4749,24 @@ const deleteResult = async (studentId, examId) => {
                   </div>
                 </div>
 
+                {/* Set (sql/116): an item in one set goes only to students
+                    who start that set; one in every set goes to everyone. */}
+                <div style={{ marginBottom: '16px' }}>
+                  <label className="label" htmlFor="q-set">Set</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <select id="q-set" className="input" style={{ width: 'auto', minWidth: 140 }}
+                      value={qForm.set_label || ''} onChange={e => setQForm(f => ({ ...f, set_label: e.target.value }))}>
+                      <option value="">Every set</option>
+                      {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => <option key={l} value={l}>Set {l}</option>)}
+                    </select>
+                    <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+                      {qForm.set_label
+                        ? `Only students who start Set ${qForm.set_label} get this item.`
+                        : 'Everyone gets this item, whichever set they start.'}
+                    </span>
+                  </div>
+                </div>
+
                 <div style={{ marginBottom: '12px' }}>
                   <label className="label">Question Text</label>
                   <textarea className="input" value={qForm.question_text} onChange={e => setQForm(f => ({ ...f, question_text: e.target.value }))} placeholder="Enter the question..." rows={3} style={{ resize: 'vertical' }} />
@@ -4990,11 +5045,23 @@ const deleteResult = async (studentId, examId) => {
                 <p style={{ textAlign: 'center', color: 'var(--ink-3)', padding: '20px' }}>No questions yet. Add one above or import from CSV.</p>
               ) : (
                 <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--ink-2)', fontSize: '13px' }}>{qList.length} question{qList.length !== 1 ? 's' : ''} total</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--ink-2)', fontSize: '13px' }}>
+                      {qList.length} question{qList.length !== 1 ? 's' : ''} total
+                      {setsOf(qList).length > 0 && ` · sets ${setsOf(qList).join(', ')}`}
+                    </span>
+                    {setsOf(qList).length > 0 && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ink-2)' }}>
+                        Show
+                        <select className="input" style={{ width: 'auto' }} value={qSetFilter} onChange={e => setQSetFilter(e.target.value)}>
+                          <option value="">Every item</option>
+                          {setsOf(qList).map(l => <option key={l} value={l}>What Set {l} gets</option>)}
+                        </select>
+                      </label>
+                    )}
                   </div>
                   <div style={{ display: 'grid', gap: '8px' }}>
-                    {qList.map((q, idx) => (
+                    {qList.map((q, idx) => (qSetFilter && !inSet(q, qSetFilter)) ? null : (
                       <div key={q.id} className="card" style={{ padding: '16px 20px', ...(editingQ?.id === q.id ? { borderColor: 'var(--navy)', background: 'var(--navy-50)' } : {}) }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                           <div style={{ flex: 1 }}>
@@ -5008,6 +5075,9 @@ const deleteResult = async (studentId, examId) => {
                                 busy={savingPointsFor === q.id}
                                 onSave={pts => saveQuestionPoints(q, pts)}
                               />
+                              {q.set_label
+                                ? <span className="px-pill" style={{ marginLeft: 10, background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' }}>Set {q.set_label}</span>
+                                : setsOf(qList).length > 0 && <span className="px-pill muted" style={{ marginLeft: 10 }}>Every set</span>}
                               {isMultiSelect(q) && <span className="px-pill ok" style={{ marginLeft: 10 }}>Multiple answers</span>}
                             </p>
                             {/* "Evaluate the limit." names no limit. For a
@@ -5559,14 +5629,14 @@ const deleteResult = async (studentId, examId) => {
                   the marks are saved in a single call, so a script cannot end
                   up half-marked. They are therefore pulled out of the
                   per-question list below and shown together here. */}
-              {(examQuestionsCache[viewingStudent.exam_id] || [])
+              {sittingQuestions(viewingStudent.exam_id, viewingStudent.answers_json)
                 .some(q => q.question_type === 'worked_solution') && (
                 <Suspense fallback={<div style={{ padding: 16, fontSize: 13, color: 'var(--ink-4)' }}>Loading the marker…</div>}>
                   <WorkedMarking
                     assessmentId={viewingStudent.exam_id}
                     studentId={viewingStudent.student_id}
                     studentName={viewingStudent.full_name || viewingStudent.student_name}
-                    questions={examQuestionsCache[viewingStudent.exam_id] || []}
+                    questions={sittingQuestions(viewingStudent.exam_id, viewingStudent.answers_json)}
                     storedAnswers={viewingStudent.answers_json || {}}
                     attemptNo={viewingStudent.attempt_no ?? null}
                     onSaved={marks => {
@@ -5589,7 +5659,7 @@ const deleteResult = async (studentId, examId) => {
               )}
 
               <div style={{ display: 'grid', gap: '12px' }}>
-                {(examQuestionsCache[viewingStudent.exam_id] || []).map((q, idx) => {
+                {sittingQuestions(viewingStudent.exam_id, viewingStudent.answers_json).map((q, idx) => {
                   const sAnswer = (viewingStudent.answers_json || {})[q.id];
 
                   // Shown above, by WorkedMarking, with its ticks and its marks.
@@ -5706,7 +5776,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px', borderLeft: '4px solid var(--info)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}</p>
                         <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                       </div>
                       {q.image_url && (
@@ -5717,7 +5787,12 @@ const deleteResult = async (studentId, examId) => {
                   );
                 }
 
-                const statAnswers = statsSourceFor(viewingStatsExam).answers;
+                // An item in one set is out of the students who sat that set.
+                const allAnswers = statsSourceFor(viewingStatsExam).answers;
+                const statQs = examQuestionsCache[viewingStatsExam] || [];
+                const statAnswers = q.set_label
+                  ? allAnswers.filter(a => setOfAnswers(statQs, a) === q.set_label)
+                  : allAnswers;
                 const totalAnswers = statAnswers.length;
 
                 // A "type your answer" item has no choices, so the option bars
@@ -5731,7 +5806,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                        {idx + 1}. {q.question_text}
+                        {idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}
                         <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Type your answer'}</span>
                         <span className="px-pill muted" style={{ marginLeft: 6 }}>
                           {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
@@ -5845,7 +5920,7 @@ const deleteResult = async (studentId, examId) => {
                 return (
                   <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                     <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                      {idx + 1}. {q.question_text}
+                      {idx + 1}. {q.set_label && `[Set ${q.set_label}] `}{q.question_text}
                       {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
                     </p>
                     {multi && (

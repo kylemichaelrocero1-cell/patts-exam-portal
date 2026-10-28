@@ -33,7 +33,10 @@ export function isPaperFinished(assessment, hasGradedResult) {
  *   'restart'  a previous sitting completed and retakes are on — NEW sitting,
  *              so created_at, answers and violations all start from zero
  *   'reopen'   finished with nothing submitted — the instructor dismissed a
- *              sitting that is still running, so put it back as it was
+ *              sitting that is still running, so put it back as it was. Also
+ *              a finished sitting holding answers that nothing on file came
+ *              from (unfiledWork): it was closed without being filed, and
+ *              starting afresh would throw those answers away
  *   'continue' still active or locked — the ordinary resume path
  *
  * The distinction 'restart' vs 'reopen' matters more than it looks: reusing a
@@ -46,13 +49,33 @@ export function sittingDecision({
   allowRetakes = false,
   hasGradedResult = false,
   hasPriorAttempt = false,
+  unfiledWork = false,
 } = {}) {
   if (sessionStatus !== 'finished') return 'continue';
   if (hasGradedResult && !allowRetakes) return 'blocked';
+  // An earlier attempt on file says nothing about THIS sitting. Its answers
+  // are kept and the student carries on; submitting, or the clock, files them.
+  if (unfiledWork) return 'reopen';
   // A completed sitting on file — graded or practice — means this mount is the
   // student coming back for another go.
   if (hasGradedResult || hasPriorAttempt) return 'restart';
   return 'reopen';
+}
+
+/**
+ * Was this finished sitting closed without being filed? True when it holds
+ * answers and nothing has been filed for the paper since it began.
+ *
+ * @param hasWork   whether the row holds answers (hasSavedWork)
+ * @param startedAt the row's created_at — when this sitting began
+ * @param filedAt   the latest submitted_at on file for the paper, or null
+ */
+export function sittingNotFiled({ hasWork = false, startedAt = null, filedAt = null } = {}) {
+  if (!hasWork) return false;
+  if (!filedAt) return true;
+  const began = new Date(startedAt).getTime(), filed = new Date(filedAt).getTime();
+  if (!Number.isFinite(began) || !Number.isFinite(filed)) return false;
+  return filed < began;
 }
 
 /** The fields that make a live_sessions row a fresh sitting again. */

@@ -121,7 +121,11 @@ export function violationFeed(sessions, { now = Date.now(), limit = 8 } = {}) {
 /** Has this sitting got anything in it worth submitting? */
 export function hasSavedWork(session) {
   return Object.keys(session?.answers_json || {}).length > 0 ||
-         Object.keys(session?.essay_answers_json || {}).length > 0;
+         Object.keys(session?.essay_answers_json || {}).length > 0 ||
+         // Typed working (sql/024) is work too. Left out, a paper of maths
+         // items alone looked unanswered however much had been written.
+         Object.values(session?.work_answers_json || {}).some(w =>
+           Array.isArray(w?.lines) && w.lines.some(l => String(l ?? '').trim() !== ''));
 }
 
 /**

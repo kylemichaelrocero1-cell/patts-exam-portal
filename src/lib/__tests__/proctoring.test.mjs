@@ -133,6 +133,13 @@ console.log('\n=== hasSavedWork / canDismissSession ===');
     canDismissSession(essayOnly) === false);
   check('a ghost row whose paper is already on file can always be cleared',
     canDismissSession(working, { hasResult: true }) === true);
+
+  const typedOnly = { id: 's4', answers_json: {}, essay_answers_json: {}, work_answers_json: { q5: { lines: ['y=3x^2', "y'=6x"] } } };
+  const blankLines = { id: 's5', answers_json: {}, work_answers_json: { q5: { lines: ['', '  '] }, q6: {} } };
+  check('typed working on its own is work (a paper of maths items only)', hasSavedWork(typedOnly) === true);
+  check('…and such a sitting cannot be dismissed away', canDismissSession(typedOnly) === false);
+  check('blank lines are not work', hasSavedWork(blankLines) === false);
+  check('a working column that is not an object does not throw', hasSavedWork({ work_answers_json: null }) === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

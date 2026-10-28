@@ -36,6 +36,7 @@
 
 import { indexForLetter, letterFor, keyIsValid } from './choices.js';
 import { indexSet } from './answers.js';
+import { normaliseSetLabel } from './paperSets.js';
 
 /** Split one CSV line, honouring double quotes around a cell. */
 export function splitRow(row) {
@@ -64,12 +65,13 @@ const FIELD_ALIASES = {
   variable: 'variable', with_respect_to: 'variable', wrt: 'variable',
   accept: 'accept', also_accept: 'accept', alternatives: 'accept',
   accepted: 'accept', variations: 'accept',
+  set: 'set', set_label: 'set', version: 'set', problem_set: 'set',
 };
 
 // The presence of any of these is what switches a file into named mode. Not
 // `question_text` or `answer` on their own: files today already head their
 // first column "question_text" and must keep parsing positionally.
-const NAMED_MODE_TRIGGERS = new Set(['type', 'points', 'given', 'variable', 'accept']);
+const NAMED_MODE_TRIGGERS = new Set(['type', 'points', 'given', 'variable', 'accept', 'set']);
 
 const TYPE_ALIASES = {
   mc: 'multiple_choice', multiple_choice: 'multiple_choice', choice: 'multiple_choice',
@@ -79,6 +81,8 @@ const TYPE_ALIASES = {
   essay: 'essay', open: 'essay', written: 'essay',
   math: 'worked_solution', maths: 'worked_solution', worked: 'worked_solution',
   worked_solution: 'worked_solution', solution: 'worked_solution', working: 'worked_solution',
+  quantity: 'quantity', units: 'quantity', unit: 'quantity', value_unit: 'quantity',
+  number_unit: 'quantity', with_unit: 'quantity',
 };
 
 /** Read a header row as a column map, or null when the file is positional. */
@@ -191,6 +195,45 @@ function buildWorked({ qText, points, given, answer, variable, accept }, rowNo, 
 }
 
 /**
+ * A number typed with its unit (sql/105): "187.42 m/s". The answer cell is
+ * the key — its decimals are how far the student must round, and what
+ * follows the number is the unit; `accept` lists other spellings of the
+ * unit. The unit is worth half the points (rounded down), the number the
+ * rest; an answer with no unit puts every point on the number. One part
+ * per row: `given` names it, and says how to round unless it already does.
+ */
+function buildQuantity({ qText, points, given, answer, accept }, rowNo, errors) {
+  const m = String(answer ?? '').trim().match(/^(-?(?:\d[\d,]*(?:\.\d*)?|\.\d+))\s*(.*)$/);
+  if (!m) {
+    errors.push(`Row ${rowNo}: a quantity question needs an answer that starts with the number, then the unit — e.g. 187.42 m/s`);
+    return null;
+  }
+  const value = m[1].replace(/,/g, '');
+  const decimals = (value.split('.')[1] || '').length;
+  const unit = m[2].trim();
+  const units = [...new Set([unit, ...splitAccept(accept)].filter(Boolean))];
+  if (!unit && units.length) {
+    errors.push(`Row ${rowNo}: "accept" lists units but the answer has none — write the answer as the number then its unit`);
+    return null;
+  }
+  const unitMarks = unit ? Math.floor(points / 2) : 0;
+  const rounding = decimals === 0 ? 'nearest whole number' : `${decimals} decimal place${decimals === 1 ? '' : 's'}`;
+  const label = String(given ?? '').trim() || 'Answer';
+  return {
+    question_text: qText,
+    question_type: 'worked_solution',
+    choices: [],
+    correct_answer: null,
+    marks: points,
+    work_given: `a) ${/decimal|whole number/i.test(label) ? label : `${label} (${rounding})`}`,
+    work_variable: 'x',
+    work_rubric: { mode: 'quantity', parts: [{
+      key: 'a', value, decimals, units, value_marks: points - unitMarks, unit_marks: unitMarks,
+    }] },
+  };
+}
+
+/**
  * Parse a question CSV. Returns { questions, errors } — never throws, so a
  * malformed row is reported next to the good ones rather than losing the file.
  */
@@ -214,6 +257,14 @@ export function parseQuestionCSV(text) {
       const qText = at(f.question_text !== undefined ? f.question_text : 0);
       if (!qText) return;
 
+      // Which set the item is in (sql/116); blank is every set.
+      const setLabel = normaliseSetLabel(at(f.set));
+      if (setLabel === undefined) {
+        errors.push(`Row ${rowNo}: "${at(f.set)}" is not a set — use one letter, A to Z, or leave it blank for an item in every set`);
+        return;
+      }
+      const add = item => questions.push(setLabel ? { ...item, set_label: setLabel } : item);
+
       const points = readPoints(at(f.points), rowNo, errors);
       if (points === null) return;
 
@@ -231,8 +282,13 @@ export function parseQuestionCSV(text) {
       }
 
       if (type === 'essay') {
-        questions.push({ question_text: qText, question_type: 'essay',
+        add({ question_text: qText, question_type: 'essay',
                          choices: [], correct_answer: null, marks: points });
+        return;
+      }
+      if (type === 'quantity') {
+        const item = buildQuantity({ qText, points, given, answer, accept: at(f.accept) }, rowNo, errors);
+        if (item) add(item);
         return;
       }
       if (type === 'worked_solution') {
@@ -240,7 +296,7 @@ export function parseQuestionCSV(text) {
           qText, points, given, answer,
           variable: at(f.variable), accept: at(f.accept),
         }, rowNo, errors);
-        if (item) questions.push(item);
+        if (item) add(item);
         return;
       }
 
@@ -259,7 +315,7 @@ export function parseQuestionCSV(text) {
         errors.push(`Row ${rowNo}: the type says several answers but only "${answer}" is given — separate them with a semicolon`);
         return;
       }
-      questions.push(set.length > 1
+      add(set.length > 1
         ? { question_text: qText, question_type: 'multi_select', choices,
             correct_answer: null, correct_answers: set, marks: points }
         : { question_text: qText, question_type: 'multiple_choice', choices,

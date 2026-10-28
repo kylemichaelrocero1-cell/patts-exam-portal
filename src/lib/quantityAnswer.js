@@ -75,6 +75,8 @@ export function quantityUnitText(text) {
 export function quantityUnitKey(unit) {
   return String(unit ?? '').toLowerCase()
     .replace(/₱/g, 'php')
+    // A superscript is its digit: "kg/m³" is "kg/m3", not "kg/m" (sql/116).
+    .replace(/¹/g, '1').replace(/²/g, '2').replace(/³/g, '3')
     .replace(/\bper\b/g, '/')
     .replace(/[^a-z0-9/%$]/g, '')
     .replace(/\/+/g, '/')

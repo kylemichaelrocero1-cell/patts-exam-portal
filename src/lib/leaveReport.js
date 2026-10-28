@@ -86,6 +86,24 @@ export function withAway(entry, ms, note = '') {
 }
 
 /**
+ * A leave that ended on the check-in screen (sql/115). The student was back
+ * the moment they asked to enter again; the wait for the instructor to let
+ * them in is not time away, so it is reported beside it, not inside it.
+ * `admission` is { askedAt, letInAt } from the waiting screen. Returns
+ * { ms, note } for withAway, or null when there is nothing to split — no
+ * check-in, or a leave that began after they asked.
+ */
+export function awayUntilCheckIn(leftAt, admission) {
+  const asked = admission?.askedAt;
+  if (!Number.isFinite(leftAt) || !Number.isFinite(asked) || asked <= leftAt) return null;
+  const waited = Math.max(0, (Number.isFinite(admission.letInAt) ? admission.letInAt : asked) - asked);
+  return {
+    ms: Math.max(1000, asked - leftAt),
+    note: `the page was reloaded on return; then waited ${waited >= 1000 ? formatAway(waited) : 'under a second'} to be let in`,
+  };
+}
+
+/**
  * Send the count and the log straight to the live session, in a request the
  * browser finishes even if the page is frozen or closed a moment later
  * (keepalive). The debounced push in ExamBoard only runs once the page is

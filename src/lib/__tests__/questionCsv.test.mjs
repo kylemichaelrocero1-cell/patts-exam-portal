@@ -193,5 +193,46 @@ console.log('\n=== a mixed file, which is the point of all this ===');
     r.questions.reduce((t, q) => t + q.marks, 0) === 14);
 }
 
+console.log('\n=== SETS (sql/116) ===');
+{
+  const { questions, errors } = parseQuestionCSV([
+    'question_text,set,type,points,answer,choice_a,choice_b,choice_c',
+    'Shared concept,,mc,1,B,yes,no,maybe',
+    'Set A problem,A,mc,4,A,1.2,3.4,5.6',
+    'Set B problem,b,mc,4,C,1.2,3.4,5.6',
+    'Set C problem,Set C,mc,4,C,1.2,3.4,5.6',
+    'Every set too,all,mc,1,A,x,y,z',
+  ].join('\n'));
+  check('the set column alone switches to named mode, and reads', errors.length === 0 && questions.length === 5, errors.join(' | '));
+  check('blank and "all": in every set (no label)', !('set_label' in questions[0]) && !('set_label' in questions[4]));
+  check('a letter, any case, "Set C": the set', questions[1].set_label === 'A' && questions[2].set_label === 'B' && questions[3].set_label === 'C');
+  const bad = parseQuestionCSV('question_text,set,answer,choice_a,choice_b\nQ,AB,A,x,y\nQ2,7,A,x,y');
+  check('anything else is an error naming the row', bad.questions.length === 0 && bad.errors.length === 2 && /Row 2: "AB" is not a set/.test(bad.errors[0]), bad.errors.join(' | '));
+  const version = parseQuestionCSV('question_text,version,answer,choice_a,choice_b\nQ,d,A,x,y');
+  check('"version" is the same column', version.questions[0]?.set_label === 'D');
+}
+
+console.log('\n=== NUMBER AND UNIT (quantity, sql/105) ===');
+{
+  const { questions, errors } = parseQuestionCSV([
+    'question_text,type,points,given,answer,accept',
+    '"A gas leaves a nozzle ... find its speed.",quantity,4,Exit speed V2,187.42 m/s,m/sec;meters per second',
+    '"... find the pressure.",units,4,Pressure P1 (nearest whole number),"51,327 Pa",N/m^2',
+    '"... find the Mach number.",quantity,4,Mach number,0.7148,',
+  ].join('\n'));
+  check('three quantity rows', errors.length === 0 && questions.length === 3, errors.join(' | '));
+  const [v, p, m] = questions;
+  const pv = v?.work_rubric?.parts?.[0], pp = p?.work_rubric?.parts?.[0], pm = m?.work_rubric?.parts?.[0];
+  check('a typed item in quantity mode', v.question_type === 'worked_solution' && v.work_rubric.mode === 'quantity');
+  check('the number, its decimals, its unit and the other spellings', pv.value === '187.42' && pv.decimals === 2 && JSON.stringify(pv.units) === JSON.stringify(['m/s', 'm/sec', 'meters per second']));
+  check('half the points on the unit', pv.value_marks === 2 && pv.unit_marks === 2 && v.marks === 4);
+  check('the part says how to round', v.work_given === 'a) Exit speed V2 (2 decimal places)');
+  check('…unless it already does', p.work_given === 'a) Pressure P1 (nearest whole number)');
+  check('thousands commas are read, a whole number is 0 places', pp.value === '51327' && pp.decimals === 0);
+  check('no unit: every point on the number', pm.units.length === 0 && pm.value_marks === 4 && pm.unit_marks === 0 && pm.decimals === 4);
+  const bad = parseQuestionCSV('question_text,type,answer,accept\nQ,quantity,m/s,\nQ2,quantity,12,m/s');
+  check('no number first, or other units with none: errors', bad.questions.length === 0 && bad.errors.length === 2, bad.errors.join(' | '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

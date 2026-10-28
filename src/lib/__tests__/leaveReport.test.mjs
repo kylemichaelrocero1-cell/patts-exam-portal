@@ -3,7 +3,7 @@
 //
 //   npm run test:leave-report
 
-import { deviceOf, leaveText, formatAway, withAway, pushViolationsNow, PAUSE_MS } from '../leaveReport.js';
+import { deviceOf, leaveText, formatAway, withAway, awayUntilCheckIn, pushViolationsNow, PAUSE_MS } from '../leaveReport.js';
 import { parseViolation } from '../proctoring.js';
 
 let pass = 0, fail = 0;
@@ -94,6 +94,22 @@ console.log('\n=== sent at once ===');
   check('no session yet: nothing sent', !pushViolationsNow({ url: 'u', key: 'k', sessionId: null, count: 1, logs: [], fetchFn }) && calls.length === 1);
   check('a fetch that throws does not', pushViolationsNow({ url: 'u', key: 'k', sessionId: 's', count: 1, logs: [], fetchFn: () => { throw new Error('x'); } }) === false);
   check('a fetch that rejects is caught', pushViolationsNow({ url: 'u', key: 'k', sessionId: 's', count: 1, logs: [], fetchFn: () => Promise.reject(new Error('offline')) }) === true);
+}
+
+console.log('\n=== a leave that ended on the check-in screen (sql/115) ===');
+{
+  const left = 1_000_000;
+  const split = awayUntilCheckIn(left, { askedAt: left + 20_000, letInAt: left + 195_000 });
+  check('away runs only to when they asked to enter', split?.ms === 20_000);
+  check('the wait is named beside it', split?.note === 'the page was reloaded on return; then waited 2 min 55 s to be let in');
+  const e = '[3:05:12 PM] Left the page (iPhone, Safari)';
+  check('as the flag reads', withAway(e, split.ms, split.note) === `${e} — away 20 s (the page was reloaded on return; then waited 2 min 55 s to be let in)`);
+  check('let in at once: said so', /then waited under a second to be let in$/.test(awayUntilCheckIn(left, { askedAt: left + 9_000, letInAt: left + 9_400 }).note));
+  check('no check-in: nothing to split', awayUntilCheckIn(left, null) === null && awayUntilCheckIn(left, {}) === null);
+  check('a leave after they asked is not split', awayUntilCheckIn(left, { askedAt: left - 5_000, letInAt: left }) === null);
+  check('no let-in time: no wait counted', /under a second/.test(awayUntilCheckIn(left, { askedAt: left + 3_000 }).note));
+  check('under a second away still reads as a second', awayUntilCheckIn(left, { askedAt: left + 300, letInAt: left + 60_000 }).ms === 1000);
+  check('a bad leave time: nothing to split', awayUntilCheckIn(NaN, { askedAt: left }) === null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

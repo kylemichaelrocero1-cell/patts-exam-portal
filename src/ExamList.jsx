@@ -440,10 +440,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         <AdmissionWait
           exam={admissionGate.exam}
           student={student}
-          onEnter={(entry) => {
+          onEnter={(admission) => {
             const gate = admissionGate;
             setAdmissionGate(null);
-            onStartExam(gate.exam, gate.setChoice, entry);
+            onStartExam(gate.exam, gate.setChoice, admission);
           }}
           onCancel={() => setAdmissionGate(null)}
         />
@@ -561,9 +561,17 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               const serverSession = activeSessions[exam.id];
               const isResumable = !isAlreadyDone && !!serverSession;
               // A paper without sets (sql/107) starts with none: one button,
-              // and nothing on the exam header to ask a proctor about.
-              const usesSets = exam.uses_sets !== false;
-              const resumeSet = serverSession?.exam_set || (usesSets ? 'A' : null);
+              // and nothing on the exam header to ask a proctor about. A paper
+              // whose questions are in sets (sql/116) offers one button per
+              // set, and the student sits that set alone; otherwise Set A and
+              // Set B are only labels, as before.
+              const realSets = exam.set_labels?.length ? exam.set_labels : null;
+              const usesSets = !!realSets || exam.uses_sets !== false;
+              const startSets = realSets || ['A', 'B'];
+              const resumeSet = serverSession?.exam_set || (realSets ? null : usesSets ? 'A' : null);
+              // A sitting whose set the page does not know: the set buttons
+              // again; the server holds the student to the set they began.
+              const canResume = isResumable && !(realSets && !resumeSet);
               const answeredCount = serverSession?.answers_count || 0;
               const minutesLeft = serverSession?.created_at
                 ? Math.max(0, Math.floor((new Date(serverSession.created_at).getTime() + exam.duration_minutes * 60000 - Date.now()) / 60000))
@@ -709,7 +717,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           </button>
                         )}
                       </div>
-                    ) : isResumable ? (
+                    ) : canResume ? (
                       <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
                         style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
                         {isCheckingSession ? 'Checking…' : <><Icon name="undo" size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Resume {paperNoun(exam)}</>}
@@ -723,16 +731,15 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         </button>
                       </div>
                     ) : (
-                      <div className="exam-card-btns">
-                        <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'A')}
-                          data-retake={lastAttempt ? 'true' : undefined}
-                          style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
-                          {isCheckingSession ? 'Checking…' : 'Set A'}
-                        </button>
-                        <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'B')}
-                          style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy-mid)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
-                          {isCheckingSession ? 'Checking…' : 'Set B'}
-                        </button>
+                      <div className={`exam-card-btns${startSets.length > 2 ? ' many-sets' : ''}`}>
+                        {startSets.map((set, i) => (
+                          <button key={set} disabled={isCheckingSession} onClick={() => handleStartClick(exam, set)}
+                            data-retake={i === 0 && lastAttempt ? 'true' : undefined}
+                            aria-label={`${lastAttempt ? 'Retake' : 'Start'} Set ${set}`}
+                            style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : i % 2 ? 'var(--navy-mid)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                            {isCheckingSession ? 'Checking…' : `Set ${set}`}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>

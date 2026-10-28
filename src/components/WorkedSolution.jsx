@@ -195,9 +195,9 @@ export default function WorkedSolution({
     return (
       <div className="worked-solution ws-qty">
         <p className="ws-hint" style={{ marginTop: 0 }}>
-          Worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>: in each part, one point for the
-          value and one for its unit. Type the number and the unit together, e.g.{' '}
-          <em>25 bottles per order</em>, and round as the part says.
+          Worth <strong>{marks} point{marks === 1 ? '' : 's'}</strong>. Type each answer as the number
+          and its unit together, e.g. <em>2.67 m/s</em>, and round as the part says. Part of each
+          answer's marks is for the value and part for the unit.
         </p>
         <p className="ws-count" style={{ margin: '6px 0 0' }}>
           {parts.filter(p => /\S/.test(typed[p.key] ?? '')).length} of {parts.length} parts answered

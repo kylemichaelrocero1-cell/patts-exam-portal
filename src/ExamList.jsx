@@ -11,7 +11,7 @@ import {
   passwordKey as gatePasswordKey,
   readinessKey as gateReadinessKey,
 } from './lib/examGateKeys';
-import ExamReadinessModal from './components/ExamReadinessModal';
+import ExamReadinessModal, { ChosenSet } from './components/ExamReadinessModal';
 import AdmissionWait from './components/AdmissionWait';
 import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import Icon from './components/Icon';
@@ -430,6 +430,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       {readinessGate && (
         <ExamReadinessModal
           exam={readinessGate.exam}
+          setChoice={readinessGate.setChoice}
           onAcknowledge={acknowledgeReadiness}
           onCancel={() => setReadinessGate(null)}
         />
@@ -462,6 +463,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               </span>
               <h2 style={{ color: 'white', margin: 0, fontSize: '18px', fontWeight: 700 }}>Password Required</h2>
               <p style={{ color: 'rgba(244,208,63,.85)', margin: '6px 0 0', fontSize: '13px', fontWeight: 500 }}>{pendingExam.title}</p>
+              <ChosenSet exam={pendingExam} setChoice={pendingExam._chosenSet} />
             </div>
             <div style={{ padding: '28px' }}>
               <p style={{ color: 'var(--text-3)', fontSize: '14px', textAlign: 'center', margin: '0 0 20px' }}>

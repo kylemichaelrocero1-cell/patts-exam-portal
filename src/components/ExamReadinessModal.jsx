@@ -58,7 +58,25 @@ const RULES = [
   },
 ];
 
-export default function ExamReadinessModal({ exam, onAcknowledge, onCancel }) {
+// The set a student tapped, said back to them before the paper opens: on a
+// paper in sets (sql/116) the first set opened is the one they sit, and
+// eight buttons side by side on a phone are easy to mis-tap.
+export function ChosenSet({ exam, setChoice }) {
+  if (!exam?.set_labels?.length || !setChoice) return null;
+  return (
+    <div style={{ marginTop: 12 }}>
+      <span style={{ display: 'inline-block', background: 'var(--gold-bright, #F4D03F)', color: 'var(--navy-dark, #061829)',
+        fontWeight: 800, fontSize: 15, padding: '4px 14px', borderRadius: 999, letterSpacing: '.02em' }}>
+        Set {setChoice}
+      </span>
+      <p style={{ color: 'rgba(255,255,255,.75)', margin: '6px 0 0', fontSize: 12 }}>
+        Not your set? Cancel and choose again. Once the paper opens, the set cannot be changed.
+      </p>
+    </div>
+  );
+}
+
+export default function ExamReadinessModal({ exam, setChoice, onAcknowledge, onCancel }) {
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}
@@ -82,6 +100,7 @@ export default function ExamReadinessModal({ exam, onAcknowledge, onCancel }) {
           <p style={{ color: 'rgba(244,208,63,.85)', margin: '6px 0 0', fontSize: 13, fontWeight: 500 }}>
             {exam?.title}
           </p>
+          <ChosenSet exam={exam} setChoice={setChoice} />
         </div>
 
         <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1 }}>

@@ -793,9 +793,11 @@ input:checked + .slider::before { transform: translateX(26px); }
 .exam-card { display: flex; justify-content: space-between; align-items: center; }
 .exam-card-actions { flex-shrink: 0; margin-left: 20px; }
 .exam-card-btns { display: flex; gap: 10px; }
-/* A paper in many sets (sql/116): the buttons wrap, four to a row. */
-.exam-card-btns.many-sets { flex-wrap: wrap; max-width: 420px; }
-.exam-card-btns.many-sets button { flex: 1 0 calc(25% - 10px); padding-left: 10px !important; padding-right: 10px !important; }
+/* A paper in many sets (sql/116): four to a row, on a grid so the phone
+   rule below (every button flex: 1) cannot squeeze five into a row and
+   break "Set A" over two lines. */
+.exam-card-btns.many-sets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 420px; }
+.exam-card-btns.many-sets button { width: 100% !important; white-space: nowrap; padding-left: 6px !important; padding-right: 6px !important; }
 
 /* ═══════════════════════════════════════════════
    RESPONSIVE

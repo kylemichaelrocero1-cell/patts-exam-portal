@@ -104,6 +104,39 @@ export function quantityValueOk(numberText, key, decimals) {
   return !!a && !!b && a[0] === b[0] && a[1] === b[1];
 }
 
+/**
+ * Is the value within the part's tolerance (sql/123)? Measured from the
+ * unrounded key when the part has one: |typed − exact| ≤ ½·10^−decimals +
+ * tolerance·|exact|. No tolerance, no change: false. Capped at 5%. Worked
+ * in scaled integers so a value on the edge falls the way Postgres'
+ * numeric does, not the way a float would.
+ */
+export function quantityValueNear(numberText, key, decimals, exact, tolerance) {
+  const NUM = /^-?\d*\.?\d+$/;
+  if (numberText == null || !/^-?\d*(\.\d*)?$/.test(String(numberText)) || !/\d/.test(String(numberText))) return false;
+  const tolText = String(tolerance ?? '');
+  if (!/^\d*\.?\d+$/.test(tolText) || Number(tolText) <= 0) return false;
+  const ref = NUM.test(String(exact ?? '')) ? String(exact) : NUM.test(String(key ?? '')) ? String(key) : null;
+  if (ref === null) return false;
+  const d = /^\d+$/.test(String(decimals ?? '')) ? Math.min(10, Number(decimals)) : 0;
+  const tol = tolText.length > 0 && Number(tolText) > 0.05 ? '0.05' : tolText;
+  // Every quantity as an integer count of 10^-S, S large enough for all of them.
+  const places = t => (String(t).split('.')[1] || '').length;
+  const S = Math.max(places(numberText), places(ref), d + 1) + places(tol);
+  const big = t => {
+    const m = String(t).match(/^(-?)(\d*)(?:\.(\d*))?$/);
+    const v = BigInt((m[2] || '0') + (m[3] || '').padEnd(S, '0').slice(0, S));
+    return m[1] ? -v : v;
+  };
+  const abs = v => (v < 0n ? -v : v);
+  const tolScaled = BigInt((tol.split('.')[0] || '0') + (tol.split('.')[1] || '').padEnd(places(tol), '0'));
+  const tolPlaces = places(tol);
+  // |n − ref|·10^tolPlaces ≤ ½·10^(S−d)·10^tolPlaces + tol·|ref|, all scaled by 10^S.
+  const lhs = abs(big(numberText) - big(ref)) * 10n ** BigInt(tolPlaces);
+  const half = 5n * 10n ** BigInt(S - d - 1) * 10n ** BigInt(tolPlaces);
+  return lhs <= half + tolScaled * abs(big(ref));
+}
+
 /** Is the unit written one the part accepts? */
 export function quantityUnitOk(unitText, accepted) {
   const mine = quantityUnitKey(unitText);
@@ -127,7 +160,8 @@ export function markQuantities(lines, rubric) {
     const text = typed[part.key] ?? '';
     const blank = !/\S/.test(text);
     const number = blank ? null : quantityNumber(text);
-    const valueOk = quantityValueOk(number, part.value, part.decimals);
+    const valueOk = quantityValueOk(number, part.value, part.decimals)
+      || quantityValueNear(number, part.value, part.decimals, part.exact, part.tolerance);
     const unitOk = number !== null && quantityUnitOk(quantityUnitText(text), part.units);
     const marks = (valueOk ? marksOf(part.value_marks, 1) : 0) + (unitOk ? marksOf(part.unit_marks, 1) : 0);
     return { key: part.key, blank, value_ok: valueOk, unit_ok: unitOk, marks,

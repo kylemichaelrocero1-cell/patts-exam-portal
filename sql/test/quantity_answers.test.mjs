@@ -20,7 +20,7 @@ import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { quantityNumber, quantityUnitText, quantityUnitKey, quantityValueOk, markQuantities,
+import { quantityNumber, quantityUnitText, quantityUnitKey, quantityValueOk, quantityValueNear, markQuantities,
          markQuantityAnswer, quantityParts, partLine, splitPartLine, isQuantity } from '../../src/lib/quantityAnswer.js';
 import { markAnswer } from '../../src/lib/workedSolution.js';
 const P = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -250,6 +250,61 @@ console.log('\n=== the exam screen learns the parts, and nothing of the key ==='
   ck('…and the labels read back as four parts', quantityParts(first.work_given).length === 4);
   const raw = r.ok ? J(r.rows) : '';
   ck('…and no key, accepted unit or rubric is sent', r.ok && !/31\.42|18850|crates\/order|orders\/year|"parts"|"units"/.test(raw), raw.slice(0, 300));
+}
+
+console.log('\n=== 123: a value within the part\'s tolerance ===');
+{
+  const T = fs.readFileSync(P + '/sql/123_quantity_answers_within_a_tolerance.sql', 'utf8');
+  await x(T);
+  await x(T);
+  const [v] = await q(T.slice(T.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck("123 applies twice and its VERIFY row is all true", Object.values(v).every(b => b === true), J(v));
+  const r = await asAnon(`SELECT public.quantity_value_near('1', '1', 0, NULL, '0.1')`);
+  ck('the tolerance check is not callable from a browser', !r.ok);
+
+  // The twins agree on a grid that walks across every edge: values either
+  // side of the tolerance, on it, keys with and without an exact, tolerances
+  // that are absent, zero, odd and over the cap, and junk.
+  const cases = [];
+  const exacts = ['253.109', '0.565', '64593.000', '0.371079', '-12.5', null];
+  const keys = { '253.109': '253.11', '0.565': '0.57', '64593.000': '64593', '0.371079': '0.3711', '-12.5': '-12.50', null: '42.48' };
+  const decs = { '253.109': 2, '0.565': 2, '64593.000': 0, '0.371079': 4, '-12.5': 2, null: 2 };
+  for (const e of exacts) for (const tol of ['0.001', '0.0005', '0', '', null, '0.2', 'x', '.002']) {
+    const ref = Number(e ?? keys[e]), d = decs[e];
+    const unit = 0.5 * 10 ** -d + Number(tol || 0) * Math.abs(ref);
+    for (const k of [-1.02, -1, -0.98, -0.5, 0, 0.5, 0.98, 1, 1.02]) {
+      const n = (ref + k * unit).toFixed(d + 3);
+      cases.push([n, keys[e], d, e, tol]);
+    }
+  }
+  cases.push(['abc', '1', 0, null, '0.1'], ['', '1', 0, null, '0.1'], [null, '1', 0, null, '0.1'], ['1.', '1', 0, '1', '0.01'], ['-.5', '-0.5', 1, null, '0.01']);
+  let agree = 0; const off = [];
+  for (const [n, k, d, e, tol] of cases) {
+    const [{ v: sql }] = await q(`SELECT public.quantity_value_near($1, $2, $3, $4, $5) v`, [n, k, d, e, tol]);
+    const js = quantityValueNear(n, k, d, e, tol);
+    if (sql === js) agree++; else off.push(J([n, k, d, e, tol, sql, js]));
+  }
+  ck(`the SQL and the dashboard agree on every case (${agree}/${cases.length})`, off.length === 0, off.slice(0, 5).join(' | '));
+
+  const R = { mode: 'quantity', parts: [
+    { key: 'a', value: '0.57', decimals: 2, units: [], value_marks: 4, unit_marks: 0, exact: '0.565', tolerance: '0.001' },
+    { key: 'b', value: '64593', decimals: 0, units: ['Pa', 'N/m^2'], value_marks: 2, unit_marks: 2, exact: '64593.000', tolerance: '0.001' },
+    { key: 'c', value: '253.11', decimals: 2, units: ['m/s'], value_marks: 2, unit_marks: 2, exact: '253.109', tolerance: '0.001' },
+    { key: 'd', value: '0.3711', decimals: 4, units: [], value_marks: 4, unit_marks: 0 } ] };
+  const answers = [
+    ['a) 0.56', 'b) 64575 Pa', 'c) 253.06 m/s', 'd) 0.3711'],
+    ['a) 0.58', 'b) 64000 Pa', 'c) 250 m/s', 'd) 0.3712'],
+    ['a) 0.5651', 'b) 64,593 N/m^2', 'c) V1 = 253.3 m/s'],
+  ];
+  for (const lines of answers) {
+    const [{ m }] = await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(lines), J(R)]);
+    const js = markQuantities(lines, R);
+    ck(`marker and dashboard agree on ${J(lines)} (${m.marks}/${m.of})`, m.marks === js.marks && m.of === js.total && m.reason === js.reason, J([m, js]));
+  }
+  const [{ m: first }] = await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(answers[0]), J(R)]);
+  ck('a right method a place off earns the value marks (16/16)', Number(first.marks) === 16, J(first));
+  const [{ m: second }] = await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(answers[1]), J(R)]);
+  ck('wrong values still earn only their units, and a part without a tolerance stays exact (4/16)', Number(second.marks) === 4, J(second));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

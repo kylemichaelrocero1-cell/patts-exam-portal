@@ -27,6 +27,8 @@ import { normaliseSetLabel, questionsForSet, setOfAnswers, inSet, setsOf } from 
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
+import CsvGuide, { CsvErrors } from './components/CsvGuide';
+import { csvImportSummary } from './lib/csvGuide';
 // Lazy: pulls in react-markdown + KaTeX, ~600kB that the exam flow never needs.
 // Students load this same bundle to sit exams, often on poor connections, so the
 // markdown stack stays out of the initial download and arrives only when an
@@ -95,61 +97,6 @@ async function fetchAllRows(buildQuery) {
     if (data.length < PAGE_SIZE) break;
   }
   return all;
-}
-
-// The question CSV format, explained wherever a Download Template button is.
-// There are two of them — Create New Exam, and Import Questions on the Manage
-// Questions tab — so this lives in one place rather than being written twice
-// and drifting apart. The template file itself carries no instructions:
-// everything in it is a question, so a row that explained the format would be
-// imported as one.
-function QuestionCsvFormat({ dense = false }) {
-  const mono = { fontFamily: 'var(--font-mono)' };
-  return (
-    <div style={{ fontSize: dense ? '12px' : '12.5px', color: 'var(--ink-2)', lineHeight: 1.6 }}>
-      <div style={{ marginBottom: 6 }}>
-        <code style={{ ...mono, background: 'var(--surface-2)', padding: '2px 6px', borderRadius: 3, fontSize: '12px' }}>
-          question_text, choice_a, choice_b, … , correct_answer
-        </code>
-      </div>
-      <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
-        <li><strong>Add as many choice columns as you like</strong> — four, five, seven, more. There is no limit, and each question in the file may have a different number.</li>
-        <li><strong>The answer is always the last column.</strong> Everything between the question and it counts as a choice, so blank columns in between are ignored.</li>
-        <li>Write the answer as a letter — <code style={mono}>A</code>, <code style={mono}>B</code>, <code style={mono}>C</code>… — or as a number counting from zero (<code style={mono}>0</code> = A).</li>
-        <li><strong>For a question with several right answers</strong>, separate them: <code style={mono}>A;B;C</code>. The student then ticks boxes instead of picking one, and earns the point only by ticking every one of them and nothing else. A separator is what makes a row a multiple-answer question, so a single letter stays a single answer.</li>
-        <li>For an <strong>essay</strong> question, leave every choice column and the answer empty.</li>
-        <li>A file written for four or five choices still imports unchanged.</li>
-      </ul>
-      <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
-        <strong style={{ display: 'block', marginBottom: 4 }}>To give an item more than one point, or to ask a maths question, name your columns</strong>
-        <div style={{ marginBottom: 6 }}>
-          <code style={{ ...mono, background: 'var(--surface-2)', padding: '2px 6px', borderRadius: 3, fontSize: '12px' }}>
-            question_text, type, points, given, answer, choice_a, choice_b, …
-          </code>
-        </div>
-        <ul style={{ margin: '0 0 8px', paddingLeft: 18 }}>
-          <li>Naming <code style={mono}>points</code>, <code style={mono}>type</code> or <code style={mono}>given</code> in the header row is what switches the file to named columns. Order then stops mattering, and anything you do not name counts as a choice.</li>
-          <li><code style={mono}>points</code> — a whole number. Leave it blank for 1. An item worth 5 counts five times what a 1-point item does.</li>
-          <li><code style={mono}>type</code> — <code style={mono}>mc</code>, <code style={mono}>multi</code>, <code style={mono}>essay</code> or <code style={mono}>math</code>. Leave it out and it is worked out from the row.</li>
-          <li><strong>For a maths question:</strong> <code style={mono}>given</code> is the problem the student starts from, and <code style={mono}>answer</code> is the simplified result. The student types one answer with the maths keyboard, and it is marked in the database the moment they submit.</li>
-          <li><code style={mono}>accept</code> — other ways you will take the same answer, separated by semicolons: <code style={mono}>y'=x^{'{-1}'};1/x</code>. Write <code style={mono}>\;</code> if you need a LaTeX thin space; the split ignores it.</li>
-          <li><strong>You rarely need <code style={mono}>accept</code>.</strong> Spacing, <code style={mono}>\left</code>, <code style={mono}>\cdot</code>, braces, a <code style={mono}>y'=</code> or <code style={mono}>dy/dx=</code> on the front, and numbers like <code style={mono}>2</code> against <code style={mono}>2.0</code> or <code style={mono}>0.5</code> against <code style={mono}>\frac{'{1}{2}'}</code> all match on their own. Use it only where telling two answers apart takes real algebra — <code style={mono}>x^{'{-1}'}</code> against <code style={mono}>\frac{'{1}{x}'}</code>.</li>
-          <li>A maths question imported this way is <strong>all or nothing</strong>: the full points for an accepted answer, none otherwise. For part marks on individual steps, add the question here in the editor instead.</li>
-        </ul>
-      </div>
-      <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-xs)', padding: '8px 10px', overflowX: 'auto' }}>
-        <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>
-          Seven choices, three of them correct
-        </div>
-        <code style={{ ...mono, fontSize: '11.5px', whiteSpace: 'pre', color: 'var(--ink-2)' }}>
-          "Which of these are control surfaces?","Aileron","Elevator","Rudder","Flap","Slat","Spoiler","Trim tab",A;B;C
-        </code>
-      </div>
-      <p style={{ margin: '8px 0 0', fontSize: '11.5px', color: 'var(--ink-3)' }}>
-        The template is a plain example — six ordinary questions of different widths. Replace them with your own and keep the header row.
-      </p>
-    </div>
-  );
 }
 
 export default function AdminDashboard({ instructorId, instructorName, onLogout }) {
@@ -3721,9 +3668,9 @@ const deleteResult = async (studentId, examId) => {
                 away by default so it does not push the form down every visit. */}
             <details style={{ marginBottom: 14, background: 'var(--surface)', border: '1px solid var(--navy-200)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
               <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--navy)' }}>
-                Questions CSV format — you can add more than four choices
+                How to make the questions CSV — a guide for each kind of paper
               </summary>
-              <div style={{ marginTop: 10 }}><QuestionCsvFormat dense /></div>
+              <div style={{ marginTop: 12 }}><CsvGuide /></div>
             </details>
 
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -3785,25 +3732,30 @@ const deleteResult = async (studentId, examId) => {
 
             {/* CSV Upload row */}
             <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', ...(csvExamParsed ? { borderColor: 'var(--ok-bd)', color: 'var(--ok)', background: 'var(--ok-bg)' } : {}) }}>
-                <Icon name={csvExamParsed ? 'check' : 'file-text'} size={14} />
-                {csvExamParsed ? `${csvExamParsed.questions.length} questions loaded` : 'Upload Questions CSV (optional)'}
+              {/* Green only when the whole file can be used: a file whose
+                  every row failed read "✓ 0 questions loaded". */}
+              <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', ...(csvExamParsed
+                ? (csvExamParsed.errors.length === 0
+                  ? { borderColor: 'var(--ok-bd)', color: 'var(--ok)', background: 'var(--ok-bg)' }
+                  : { borderColor: 'var(--bad-bd)', color: 'var(--bad)', background: 'var(--bad-bg)' })
+                : {}) }}>
+                <Icon name={!csvExamParsed ? 'file-text' : csvExamParsed.errors.length === 0 ? 'check' : 'alert'} size={14} />
+                {!csvExamParsed ? 'Upload Questions CSV (optional)'
+                  : csvExamParsed.errors.length === 0 ? `${csvExamParsed.questions.length} questions loaded`
+                  : `${csvExamParsed.questions.length} of ${csvExamParsed.questions.length + csvExamParsed.errors.length} rows usable — choose the fixed file`}
                 <input type="file" accept=".csv" style={{ display: 'none' }} onChange={e => handleCsvFileSelect(e, setCsvExamParsed)} />
               </label>
               {csvExamParsed && (
-                <button onClick={() => setCsvExamParsed(null)} style={{ background: 'none', border: 'none', color: 'var(--bad)', fontWeight: 700, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>×</button>
-              )}
-              {csvExamParsed?.errors?.length > 0 && (
-                <span style={{ color: 'var(--bad)', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Icon name="alert" size={13} color="var(--bad)" /> {csvExamParsed.errors.length} row error{csvExamParsed.errors.length !== 1 ? 's' : ''} — fix CSV and re-upload
-                </span>
+                <button onClick={() => setCsvExamParsed(null)} aria-label="Remove this file" style={{ width: 'auto', padding: '2px 6px', background: 'none', border: 'none', color: 'var(--bad)', fontWeight: 700, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>×</button>
               )}
               {csvExamParsed && csvExamParsed.errors.length === 0 && (
                 <span style={{ fontSize: '12px', color: 'var(--text-4)' }}>
-                  {csvExamParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvExamParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvExamParsed.questions.filter(q => q.question_type === 'worked_solution').length} Maths · {csvExamParsed.questions.filter(q => q.question_type === 'essay').length} Essay · {csvExamParsed.questions.reduce((t, q) => t + (Number(q.marks) || 1), 0)} points
+                  {csvImportSummary(csvExamParsed.questions)}
                 </span>
               )}
             </div>
+            <CsvErrors errors={csvExamParsed?.errors}
+              heading={`${csvExamParsed?.errors?.length === 1 ? 'One row' : `${csvExamParsed?.errors?.length} rows`} cannot be used. Fix them in your CSV and upload it again:`} />
 
             <div style={{ marginTop: 14 }}>
               <button
@@ -4999,9 +4951,9 @@ const deleteResult = async (studentId, examId) => {
                     question list a screen and a half down on every visit. */}
                 <details style={{ marginBottom: 12, background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
                   <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--navy)' }}>
-                    How to format the CSV
+                    How to make the CSV — a guide for each kind of paper
                   </summary>
-                  <div style={{ marginTop: 10 }}><QuestionCsvFormat /></div>
+                  <div style={{ marginTop: 12 }}><CsvGuide /></div>
                 </details>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -5014,7 +4966,7 @@ const deleteResult = async (studentId, examId) => {
                   {csvParsed && (
                     <>
                       <span style={{ fontSize: '12px', color: 'var(--ink-3)' }}>
-                        {csvParsed.questions.filter(q => q.question_type === 'multiple_choice').length} MC · {csvParsed.questions.filter(q => q.question_type === 'multi_select').length} Multi · {csvParsed.questions.filter(q => q.question_type === 'worked_solution').length} Maths · {csvParsed.questions.filter(q => q.question_type === 'essay').length} Essay · {csvParsed.questions.reduce((t, q) => t + (Number(q.marks) || 1), 0)} points
+                        {csvImportSummary(csvParsed.questions)}
                       </span>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 600, color: csvReplaceMode ? 'var(--bad)' : 'var(--ink-2)' }}>
                         <input type="checkbox" checked={csvReplaceMode} onChange={e => setCsvReplaceMode(e.target.checked)} style={{ width: '15px', height: '15px' }} />
@@ -5023,19 +4975,12 @@ const deleteResult = async (studentId, examId) => {
                       <button className="btn sm" onClick={() => importQuestionsFromCSV(qExamId, csvParsed.questions, csvReplaceMode)} disabled={csvImporting || csvParsed.questions.length === 0} style={{ width: 'auto', opacity: csvImporting ? 0.7 : 1 }}>
                         {csvImporting ? 'Importing…' : `Import ${csvParsed.questions.length} Questions`}
                       </button>
-                      <button onClick={() => setCsvParsed(null)} style={{ background: 'none', border: 'none', color: 'var(--bad)', fontWeight: 700, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>×</button>
+                      <button onClick={() => setCsvParsed(null)} aria-label="Remove this file" style={{ width: 'auto', padding: '2px 6px', background: 'none', border: 'none', color: 'var(--bad)', fontWeight: 700, cursor: 'pointer', fontSize: '18px', lineHeight: 1 }}>×</button>
                     </>
                   )}
                 </div>
 
-                {csvParsed?.errors?.length > 0 && (
-                  <div style={{ marginTop: '12px', background: 'var(--bad-bg)', border: '1px solid var(--bad-bd)', borderRadius: 'var(--r-sm)', padding: '10px 14px' }}>
-                    <p style={{ margin: '0 0 6px', fontWeight: 700, color: 'var(--bad)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="alert" size={14} color="var(--bad)" /> Fix these errors in your CSV before importing:</p>
-                    <ul style={{ margin: 0, paddingLeft: '18px', color: 'var(--bad)', fontSize: '12px' }}>
-                      {csvParsed.errors.map((e, i) => <li key={i}>{e}</li>)}
-                    </ul>
-                  </div>
-                )}
+                <CsvErrors errors={csvParsed?.errors} heading="Fix these errors in your CSV before importing:" />
               </div>
 
               {/* Question List */}

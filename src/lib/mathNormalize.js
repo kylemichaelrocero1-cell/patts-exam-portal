@@ -15,11 +15,29 @@
 // a superscript with no base wrapped round the whole answer, and any arrow
 // (\rightarrow, \longrightarrow, an empty \overrightarrow{}) as \to.
 export function dropSpaces(p) {
-  return String(p ?? '')
+  return unstyle(p)
     .replace(/\\[,;:!> ]|\\q?quad|\\(neg)?(thin|med|thick)space|\\enspace|\\hspace\*?\{[^}]*\}|~/g, '')
     .replace(/[\^_]\{\s*\}/g, '')
     .replace(/^\s*\^\{(.*)\}\s*$/s, '$1')
     .replace(/\\(long)?rightarrow(?![a-zA-Z])|\\overrightarrow\{\s*\}/g, '\\to');
+}
+
+// math_unstyle() (119): \displaystyle and its kin change how big maths is
+// drawn, not what it says. The command goes, and a {…} it opened goes with
+// it, keeping what is inside: y'={\displaystyle8x} is y'=8x.
+const STYLE = String.raw`\\(?:display|text|script|scriptscript)style(?![a-zA-Z])`;
+const STYLE_OPEN = new RegExp(String.raw`\{\s*` + STYLE);
+export function unstyle(p) {
+  let t = String(p ?? '');
+  if (!t.includes('style')) return t;
+  for (let guard = 0; guard < 50; guard++) {
+    const m = STYLE_OPEN.exec(t);
+    if (!m) break;
+    const close = closeOf(t, m.index);
+    if (close < 0) break;
+    t = t.slice(0, m.index) + t.slice(m.index + m[0].length, close) + t.slice(close + 1);
+  }
+  return t.replace(new RegExp(STYLE, 'g'), '');
 }
 
 // math_primes() (036): every \prime as ', however many.

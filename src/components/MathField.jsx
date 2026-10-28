@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 // KaTeX renders an expression TWICE — once as MathML for screen readers and
 // once as styled HTML — and it is this stylesheet that hides the MathML copy.
 // Without it every rendered expression appears doubled ("y = 5xy = 5x") and
@@ -160,15 +160,20 @@ export default function MathField({
           e.preventDefault();
           enterAt = performance.now();
           handlers.current.onEnter?.();
-          return;
-        }
-        // Backspace on an already-empty line removes the line itself, which
-        // is how every list editor behaves.
-        if (e.key === 'Backspace' && field.value === '') {
-          e.preventDefault();
-          handlers.current.onBackspaceEmpty?.();
         }
       });
+      // Backspace on an already-empty line removes the line itself, which
+      // is how every list editor behaves. Looked at on the way IN (capture),
+      // before MathLive has handled the key: Safari deletes the character
+      // first, so by the time the key reached this field the line holding
+      // one last character already read as empty, and that one press took
+      // the character and the whole line.
+      field.addEventListener('keydown', e => {
+        if (e.key === 'Backspace' && field.value === '' && handlers.current.onBackspaceEmpty) {
+          e.preventDefault();
+          handlers.current.onBackspaceEmpty();
+        }
+      }, true);
 
       // Which field the symbol palette should insert into. Remembered on
       // focus rather than read from document.activeElement at press time,
@@ -210,12 +215,36 @@ export default function MathField({
     if (fieldRef.current) fieldRef.current.readOnly = !!readOnly;
   }, [readOnly]);
 
+  // A line keeps its field when one above it is removed, so its name moves
+  // up a number with it.
+  useEffect(() => {
+    fieldRef.current?.setAttribute('aria-label', ariaLabel);
+  }, [ariaLabel, ready]);
+
   // Focus is driven by a prop rather than an autoFocus at creation time,
   // because a line added in the middle of the working does not create a new
   // field — React reuses the one already at that position.
   useEffect(() => {
-    if (focus && ready && fieldRef.current) fieldRef.current.focus();
+    if (!focus || !ready || !fieldRef.current) return;
+    // Never worth the screen: a caret that did not move is one tap to fix,
+    // an error thrown here takes the whole paper down with it.
+    try { fieldRef.current.focus(); } catch { /* the student taps the line */ }
   }, [focus, ready]);
+
+  // A field holding the caret is let go of before React takes it off the
+  // page. Safari removes it without telling MathLive, which still counts it
+  // as the field in use; the next field to take the caret then asks that
+  // removed one to let go, and MathLive throws. That was Backspace on an
+  // empty line in Safari on a Mac: the line went, and with it the screen
+  // ("This screen stopped working"). A layout effect, because its clean-up
+  // runs before the element is removed; a plain effect's runs after.
+  useLayoutEffect(() => () => {
+    const field = fieldRef.current;
+    if (!field) return;
+    try {
+      if (field.hasFocus?.() || field.matches(':focus-within')) field.blur();
+    } catch { /* already gone */ }
+  }, []);
 
   if (failed) {
     return (

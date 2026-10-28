@@ -112,7 +112,14 @@ export default function WorkedSolution({
   };
   const removeRow = i => {
     if (rows.length <= 1) { writeRows(['']); return; }
-    setKeys(k => (k.length === rows.length ? k.filter((_, j) => j !== i) : rows.slice(1).map(() => nextKey())));
+    // A key for every line there will be: three at least, so the blank line
+    // padded back in gets a key of its own. Short by one, every line fell
+    // back to a key by position and was rebuilt, caret and all.
+    setKeys(k => {
+      const kept = k.length === rows.length ? k.filter((_, j) => j !== i) : rows.slice(1).map(() => nextKey());
+      while (kept.length < Math.max(3, rows.length - 1)) kept.push(nextKey());
+      return kept;
+    });
     writeRows(rows.filter((_, j) => j !== i)); focusLine(Math.max(0, i - 1));
   };
   const written = rows.filter(l => (withLaw ? splitLine(l).statement : l).trim()).length;

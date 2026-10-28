@@ -23,7 +23,7 @@ import { formatName, nameInitials, instructorName as displayInstructor } from '.
 import { quantityParts } from './lib/quantityAnswer.js';
 import { sittingSection, sectionOptions, filterLive, compareLive } from './lib/liveMonitor';
 import { isWaitingNow, waitedFor } from './lib/admission';
-import { normaliseSetLabel, questionsForSet, setOfAnswers, inSet, setsOf } from './lib/paperSets';
+import { normaliseSetLabel, questionsForSet, setOfAnswers, inSet, setsOf, setsLabel } from './lib/paperSets';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -3459,8 +3459,16 @@ const deleteResult = async (studentId, examId) => {
                   >
                     {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
                   </button>
-                  {/* Set A / Set B is a label only; off, students see one
-                      Start button (sql/107). */}
+                  {/* A paper whose questions are in sets (sql/116) offers one
+                      Start button per set whatever uses_sets says, so it
+                      shows its sets and is not a switch. Otherwise Set A /
+                      Set B is a label only; off, one Start button (sql/107). */}
+                  {exam.set_labels?.length > 0 ? (
+                    <span className="px-pill brand" title="Students choose their set at the Start button. The sets come from the questions."
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5 }}>
+                      <Icon name="layers" size={12} /> {setsLabel(exam.set_labels)}
+                    </span>
+                  ) : (
                   <button
                     type="button"
                     onClick={() => toggleSets(exam)}
@@ -3473,6 +3481,7 @@ const deleteResult = async (studentId, examId) => {
                     <Icon name={exam.uses_sets === false ? 'minus' : 'layers'} size={12} />
                     {exam.uses_sets === false ? 'No sets' : 'Sets A/B'}
                   </button>
+                  )}
                   {/* Check-in (sql/115): each student waits on the live
                       monitor until let in, every time they open the paper. */}
                   <button

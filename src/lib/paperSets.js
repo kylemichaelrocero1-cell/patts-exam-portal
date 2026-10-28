@@ -47,3 +47,15 @@ export function setOfAnswers(questions, answers) {
   }
   return best;
 }
+
+/**
+ * A paper's sets as a short label: "Sets A–H" for a run, "Sets A, C" when
+ * letters are skipped, "Set A" for one. Null when the paper has none.
+ */
+export function setsLabel(labels) {
+  const sets = [...new Set((labels || []).filter(Boolean))].sort();
+  if (sets.length === 0) return null;
+  if (sets.length === 1) return `Set ${sets[0]}`;
+  const run = sets.every((s, i) => i === 0 || s.charCodeAt(0) === sets[i - 1].charCodeAt(0) + 1);
+  return run && sets.length > 2 ? `Sets ${sets[0]}–${sets[sets.length - 1]}` : `Sets ${sets.join(', ')}`;
+}

@@ -1,7 +1,7 @@
 // Papers in sets (sql/116): labels, which items a set has, and reading a
 // filed paper's set from its answers.
 //   npm run test:paper-sets
-import { normaliseSetLabel, inSet, questionsForSet, setsOf, setOfAnswers } from '../paperSets.js';
+import { normaliseSetLabel, inSet, questionsForSet, setsOf, setOfAnswers, setsLabel } from '../paperSets.js';
 let pass = 0, fail = 0;
 const ck = (n, ok, d = '') => { ok ? (pass++, console.log(`  PASS  ${n}`)) : (fail++, console.log(`  FAIL  ${n}${d ? ' — ' + d : ''}`)); };
 const J = JSON.stringify;
@@ -28,6 +28,13 @@ ck('read from its answers', setOfAnswers(Q, { c1: {}, b1: {}, b2: {} }) === 'B')
 ck('the set with the most of its items wins', setOfAnswers(Q, { a1: {}, b1: {}, b2: {} }) === 'B');
 ck('only shared items answered: unknown', setOfAnswers(Q, { c1: {} }) === null);
 ck('no answers, or no sets: null', setOfAnswers(Q, null) === null && setOfAnswers([{ id: 'x' }], { x: {} }) === null);
+
+ck('label: a run of sets', setsLabel(['A','B','C','D','E','F','G','H']) === 'Sets A–H');
+ck('label: unsorted input is sorted', setsLabel(['C','A','B']) === 'Sets A–C');
+ck('label: two sets are listed', setsLabel(['A','B']) === 'Sets A, B');
+ck('label: a gap is listed', setsLabel(['A','C','D']) === 'Sets A, C, D');
+ck('label: one set', setsLabel(['B']) === 'Set B');
+ck('label: none', setsLabel([]) === null && setsLabel(null) === null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

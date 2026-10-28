@@ -1630,3 +1630,18 @@ button.card { color: var(--ink-1); background: var(--surface); }
 .ws-qty-key { font-weight: 700; color: var(--navy); margin-right: 2px; }
 .ws-qty .ws-text-answer { font-size: 16px; }
 
+/* ── Section switch (StudentShell) ── */
+.section-switch {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 24px; background: var(--navy-50, #F0F4FA); border-bottom: 1px solid var(--line);
+}
+.section-switch label {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+}
+.section-switch select { width: auto; min-width: 0; max-width: 100%; flex: 0 1 320px; padding: 7px 10px; font-size: 14px; font-weight: 600; }
+@media (max-width: 480px) {
+  .section-switch { padding: 8px 16px; }
+  .section-switch select { flex: 1 1 auto; font-size: 16px; }
+}
+

@@ -2253,6 +2253,22 @@ const deleteResult = async (studentId, examId) => {
     await fetchDashboardData();
   };
 
+  // Sets on or off (sql/107). Nothing marks by set, so this is safe while a
+  // paper is open; a sitting already started keeps the set it began with.
+  const toggleSets = async (exam) => {
+    const next = exam.uses_sets === false;
+    try {
+      await updateAssessment(exam.id, { uses_sets: next });
+    } catch (e) {
+      console.error('Could not switch sets:', e);
+      alert(/uses_sets/.test(e?.message || '')
+        ? 'Switching sets needs a database update (sql/107) that has not been run yet. Nothing was changed.'
+        : 'Could not switch sets. Nothing was changed — please try again.');
+      return;
+    }
+    setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, uses_sets: next } : e));
+  };
+
   // --- NEW: Toggle Exam Open/Close ---
   const toggleExamStatus = async (examId, currentStatus) => {
     const newStatus = !currentStatus;
@@ -3361,6 +3377,20 @@ const deleteResult = async (studentId, examId) => {
                     style={{ border: 'none', cursor: 'pointer' }}
                   >
                     {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
+                  </button>
+                  {/* Set A / Set B is a label only; off, students see one
+                      Start button (sql/107). */}
+                  <button
+                    type="button"
+                    onClick={() => toggleSets(exam)}
+                    className="btn ghost sm"
+                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5 }}
+                    title={exam.uses_sets === false
+                      ? 'Students see one Start button. Click to offer Set A and Set B.'
+                      : 'Students choose Set A or Set B. Click for one Start button instead.'}
+                  >
+                    <Icon name={exam.uses_sets === false ? 'minus' : 'layers'} size={12} />
+                    {exam.uses_sets === false ? 'No sets' : 'Sets A/B'}
                   </button>
                 </td>
 

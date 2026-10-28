@@ -534,7 +534,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               // Use server-side live session — works across devices, not just same browser
               const serverSession = activeSessions[exam.id];
               const isResumable = !isAlreadyDone && !!serverSession;
-              const resumeSet = serverSession?.exam_set || 'A';
+              // A paper without sets (sql/107) starts with none: one button,
+              // and nothing on the exam header to ask a proctor about.
+              const usesSets = exam.uses_sets !== false;
+              const resumeSet = serverSession?.exam_set || (usesSets ? 'A' : null);
               const answeredCount = serverSession?.answers_count || 0;
               const minutesLeft = serverSession?.created_at
                 ? Math.max(0, Math.floor((new Date(serverSession.created_at).getTime() + exam.duration_minutes * 60000 - Date.now()) / 60000))
@@ -605,7 +608,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                       )}
                       {isResumable && (
                         <span style={{ background: '#FFF8E1', color: '#A56B0A', border: '1px solid #F0CA80', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
-                          Set {resumeSet} · {answeredCount} answered{minutesLeft !== null ? ` · ${minutesLeft}m left` : ''}
+                          {resumeSet ? `Set ${resumeSet} · ` : ''}{answeredCount} answered{minutesLeft !== null ? ` · ${minutesLeft}m left` : ''}
                         </span>
                       )}
                     </div>
@@ -685,6 +688,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
                         {isCheckingSession ? 'Checking…' : <><Icon name="undo" size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Resume {paperNoun(exam)}</>}
                       </button>
+                    ) : !usesSets ? (
+                      <div className="exam-card-btns">
+                        <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, null)}
+                          data-retake={lastAttempt ? 'true' : undefined}
+                          style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                          {isCheckingSession ? 'Checking…' : `${lastAttempt ? 'Retake' : 'Start'} ${paperNoun(exam)}`}
+                        </button>
+                      </div>
                     ) : (
                       <div className="exam-card-btns">
                         <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, 'A')}

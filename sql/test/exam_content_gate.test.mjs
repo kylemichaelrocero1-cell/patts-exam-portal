@@ -59,7 +59,7 @@ for (const f of ['001_assessments_and_lessons', '002_review_mode_and_server_scor
                  '003_lock_answer_key', '012_five_option_items',
                  '002b_grant_new_columns', '015_archive_assessments',
                  '016_unlimited_choices', '017_shuffle_questions_switch',
-                 '018_multi_select_items']) {
+                 '018_multi_select_items', '107_papers_without_sets']) {
   await x(fs.readFileSync(`${P}/sql/${f}.sql`, 'utf8'));
 }
 

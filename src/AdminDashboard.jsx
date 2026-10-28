@@ -1765,14 +1765,23 @@ const [targetSection, setTargetSection] = useState('');
     if (!dupSection.trim()) return alert('Target section is required — students find the exam by section.');
     setIsDuplicating(true);
     const targetId = dupAssignTo === 'self' ? instructorId : dupAssignTo;
-    const { error } = await supabase.rpc('duplicate_exam', {
-      p_source_exam_id: dupModal.id,
+    // duplicate_paper() (sql/110) reads the paper from assessments and copies
+    // every item as it is. The old duplicate_exam() looked only in the legacy
+    // exams table, so a paper loaded from the SQL editor could not be copied,
+    // and it dropped points, typed-answer keys and settings.
+    const { error } = await supabase.rpc('duplicate_paper', {
+      p_source_id: dupModal.id,
       p_new_title: dupTitle.trim(),
       p_target_section: dupSection.trim(),
       p_target_instructor_id: targetId,
     });
     if (error) {
-      alert('Duplicate failed: ' + error.message);
+      console.error('Duplicate failed:', error);
+      alert(isMissingFunctionError(error)
+        ? 'Duplicating needs a database update (sql/110) that has not been run yet. Nothing was copied.'
+        : error.code === '42501' || error.code === '22023'
+          ? `Duplicate failed: ${error.message}`
+          : 'Could not duplicate this paper. Nothing was copied — please try again.');
     } else {
       const dest = dupAssignTo === 'self'
         ? 'your account'

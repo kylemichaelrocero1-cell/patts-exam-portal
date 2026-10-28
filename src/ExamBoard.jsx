@@ -1836,9 +1836,8 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
                 Essay
               </span>
             )}
-            {/* What the item is worth, and that it counts. "Show your working"
-                was left over from the step-by-step pad and is no longer what
-                the screen asks for — there is one answer field. */}
+            {/* What the item is worth. Every item counts, so saying so on
+                each one only added words. */}
             {(worked || Number(currentQ?.marks) > 1) && (
               <span style={{
                 background: worked ? '#EBF4FF' : 'var(--gold-100)',
@@ -1846,7 +1845,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
                 padding: '3px 10px', borderRadius: 'var(--r-full)',
                 fontSize: 11.5, fontWeight: 700, flexShrink: 0,
               }}>
-                {currentQ.marks || 1} point{(currentQ.marks || 1) === 1 ? '' : 's'} · counts toward your score
+                {currentQ.marks || 1} point{(currentQ.marks || 1) === 1 ? '' : 's'}
               </span>
             )}
             {multiSelect && (

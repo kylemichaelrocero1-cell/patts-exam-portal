@@ -24,6 +24,9 @@ export default function App() {
   const [student, setStudent] = useState(null);
   const [selectedExam, setSelectedExam] = useState(null);
   const [examSet, setExamSet] = useState(null);
+  // The entry the instructor let in, for a paper that waits for that (sql/115).
+  // Only this page holds it; get_exam_questions() hands the paper to it alone.
+  const [examEntry, setExamEntry] = useState(null);
   const [selectedSection, setSelectedSection] = useState(null);
   const [isRestoring, setIsRestoring] = useState(true);
 
@@ -53,6 +56,9 @@ export default function App() {
         const exam = await fetchAssessmentById(open.examId);
         // Closed or out of its window since: the home tabs say so.
         if (!exam || !isAvailableNow(exam) || cancelled) return;
+        // A paper the instructor lets each entry into: a reload is a new
+        // entry, so it goes back through the waiting screen via Resume.
+        if (exam.requires_admission) return;
         setSelectedExam(exam);
         setExamSet(open.set);
       } catch {
@@ -173,7 +179,7 @@ export default function App() {
       <StudentShell
         student={student}
         selectedSection={selectedSection}
-        onStartExam={(exam, set) => { rememberPaper(student.id, exam, set); setSelectedExam(exam); setExamSet(set || null); }}
+        onStartExam={(exam, set, entry) => { rememberPaper(student.id, exam, set); setSelectedExam(exam); setExamSet(set || null); setExamEntry(entry || null); }}
         onLogout={handleLogout}
         onSwitchSection={setSelectedSection}
       />
@@ -184,11 +190,12 @@ export default function App() {
     <ExamBoard
       exam={selectedExam}
       examSet={examSet}
+      entry={examEntry}
       student={student}
       onLogout={handleLogout}
       // What was just sat has to show on the home tabs, so their shared copy
       // goes — see src/lib/studentHome.js.
-      onFinish={() => { forgetPaper(); forgetStudentHome(); setSelectedExam(null); setExamSet(null); }}
+      onFinish={() => { forgetPaper(); forgetStudentHome(); setSelectedExam(null); setExamSet(null); setExamEntry(null); }}
     />
   );
 }

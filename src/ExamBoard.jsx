@@ -133,7 +133,7 @@ function FinishButtons({ onLogout, signOutFirst }) {
   );
 }
 
-export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }) {
+export default function ExamBoard({ student, exam, examSet, entry, onFinish, onLogout }) {
   // Practice papers (unlimited retakes) still COUNT suspicious activity — the
   // instructor wants that signal — but are never locked for it. Locking a
   // revision paper the student can simply restart is pure friction, and it
@@ -1261,10 +1261,13 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
       // is asking, that the paper is theirs and open, and that they are through
       // the password, before it hands over a single item.
       // The only way in: since sql/021 anon cannot read `questions` at all.
+      // Where the instructor lets each student in (sql/115), the paper goes
+      // only to the entry they allowed — the one the waiting screen made.
       const { data, error } = await supabase.rpc('get_exam_questions', {
         p_assessment_id: exam.id,
         p_student_id: student?.id,
         p_session_token: localStorage.getItem('local_session_token'),
+        ...(entry ? { p_entry: entry } : {}),
       });
 
       if (error || !data || data.length === 0) {
@@ -1276,7 +1279,7 @@ export default function ExamBoard({ student, exam, examSet, onFinish, onLogout }
           // server is fine. There is one session_token per student, so logging
           // in anywhere else invalidated this device.
           ? `${gateErrorMessage(error)}`
-          : error?.message && /password|section|not open|exists/i.test(error.message)
+          : error?.message && /password|section|not open|exists|let you in/i.test(error.message)
             ? `${error.message}`
             : "Could not load exam questions. Please refresh the page or contact your instructor.");
 

@@ -62,6 +62,16 @@ for (const f of ['001_assessments_and_lessons', '002_review_mode_and_server_scor
                  '018_multi_select_items', '107_papers_without_sets']) {
   await x(fs.readFileSync(`${P}/sql/${f}.sql`, 'utf8'));
 }
+// 115's switch and its grant, from the file itself: the student screens
+// select requires_admission. The rest of 115 (the admission gate) is tested
+// in admission.test.mjs, on the chain it needs.
+{
+  const s115 = fs.readFileSync(`${P}/sql/115_admit_students_from_the_live_monitor.sql`, 'utf8');
+  const from = s115.indexOf('ALTER TABLE public.assessments\n  ADD COLUMN IF NOT EXISTS requires_admission');
+  const to = s115.indexOf('-- 2. One row per entry');
+  if (from < 0 || to < 0) throw new Error('115 no longer has its switch section');
+  await x(s115.slice(from, s115.lastIndexOf('\n-- -----', to)));
+}
 
 // A locked paper, open now, created the way the app creates one today.
 const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b33';

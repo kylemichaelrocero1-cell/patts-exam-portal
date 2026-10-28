@@ -19,7 +19,7 @@
 export const ASSESSMENT_COLUMNS =
   'id, kind, title, description, target_section, instructor_id, is_open, ' +
   'opens_at, closes_at, duration_minutes, has_password, created_at, archived_at, ' +
-  'shuffle_questions, shuffle_choices, uses_sets, ' +
+  'shuffle_questions, shuffle_choices, uses_sets, requires_admission, ' +
   // score_policy is deliberately absent: it governs what the instructor sees
   // and anon is not granted it (see sql/002b).
   'allow_retakes, show_answers';
@@ -64,6 +64,7 @@ export function normaliseExamRow(row) {
     shuffle_questions: true,  // the old table has no switches; both default on
     shuffle_choices: true,
     uses_sets: true,       // and every paper offered Set A and Set B
+    requires_admission: false, // nor did anyone wait to be let in
   };
 }
 

@@ -12,6 +12,7 @@ import {
   readinessKey as gateReadinessKey,
 } from './lib/examGateKeys';
 import ExamReadinessModal from './components/ExamReadinessModal';
+import AdmissionWait from './components/AdmissionWait';
 import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import Icon from './components/Icon';
 import { homeReads } from './lib/studentHome';
@@ -53,6 +54,8 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   // session, and only for a new sitting — a student resuming after a dropout has
   // already read it and should get back to their paper.
   const [readinessGate, setReadinessGate] = useState(null);
+  // A paper that waits for the instructor to let each entry in (sql/115).
+  const [admissionGate, setAdmissionGate] = useState(null);
 
   const [recoveryMsg, setRecoveryMsg] = useState('');
 
@@ -265,6 +268,15 @@ export default function ExamList({ embedded = false, kind = null, student, selec
   const passwordKey  = (examId) => gatePasswordKey(student.id, examId);
   const readinessKey = (examId) => gateReadinessKey(student.id, examId);
 
+  // The last step before the paper. Where the instructor lets each student
+  // in (sql/115), every way in — a fresh start, a resume, a tab already
+  // through the password — waits on the monitor first; the server hands the
+  // paper only to the entry the instructor allowed.
+  const enter = (examData, setChoice) => {
+    if (examData.requires_admission) setAdmissionGate({ exam: examData, setChoice });
+    else onStartExam(examData, setChoice);
+  };
+
   // Everything that decides whether a student may start is here, so the
   // readiness gate in front of it stays a pure "have they read this yet".
   const beginStart = async (exam, setChoice) => {
@@ -287,7 +299,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       const examData = freshExam || exam;
 
       if (sessions?.length > 0) {
-        onStartExam(examData, setChoice);
+        enter(examData, setChoice);
         return;
       }
 
@@ -298,7 +310,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       let unlocked = false;
       try { unlocked = !!sessionStorage.getItem(passwordKey(exam.id)); } catch { /* private mode */ }
       if (unlocked) {
-        onStartExam(examData, setChoice);
+        enter(examData, setChoice);
         return;
       }
 
@@ -307,7 +319,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         setEnteredPassword('');
         setPasswordError('');
       } else {
-        onStartExam(examData, setChoice);
+        enter(examData, setChoice);
       }
     } catch (err) {
       console.error('Session check failed:', err);
@@ -317,7 +329,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         setEnteredPassword('');
         setPasswordError('');
       } else {
-        onStartExam(exam, setChoice);
+        enter(exam, setChoice);
       }
     } finally {
       setIsCheckingSession(false);
@@ -365,7 +377,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
       if (isValid) {
         try { sessionStorage.setItem(passwordKey(pendingExam.id), '1'); } catch { /* private mode */ }
-        onStartExam(pendingExam, pendingExam._chosenSet);
+        enter(pendingExam, pendingExam._chosenSet);
         setPendingExam(null);
       } else {
         setPasswordError('Incorrect password. Please try again.');
@@ -420,6 +432,20 @@ export default function ExamList({ embedded = false, kind = null, student, selec
           exam={readinessGate.exam}
           onAcknowledge={acknowledgeReadiness}
           onCancel={() => setReadinessGate(null)}
+        />
+      )}
+
+      {/* WAITING TO BE LET IN — after the password, before the paper */}
+      {admissionGate && (
+        <AdmissionWait
+          exam={admissionGate.exam}
+          student={student}
+          onEnter={(entry) => {
+            const gate = admissionGate;
+            setAdmissionGate(null);
+            onStartExam(gate.exam, gate.setChoice, entry);
+          }}
+          onCancel={() => setAdmissionGate(null)}
         />
       )}
 

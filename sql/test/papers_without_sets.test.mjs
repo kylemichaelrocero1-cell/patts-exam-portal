@@ -73,6 +73,15 @@ ck('107 applies, twice', true);
 }
 ck('every existing paper keeps its sets',
    (await q(`SELECT bool_and(uses_sets) ok FROM public.assessments`))[0].ok === true);
+// The screens now also select 115's requires_admission. Its switch and grant,
+// from the file itself (the rest of 115 is tested in admission.test.mjs).
+{
+  const s115 = fs.readFileSync(P + '/sql/115_admit_students_from_the_live_monitor.sql', 'utf8');
+  const from = s115.indexOf('ALTER TABLE public.assessments\n  ADD COLUMN IF NOT EXISTS requires_admission');
+  const to = s115.indexOf('-- 2. One row per entry');
+  if (from < 0 || to < 0) throw new Error('115 no longer has its switch section');
+  await x(s115.slice(from, s115.lastIndexOf('\n-- -----', to)));
+}
 
 console.log('\n=== who reads and who switches ===');
 {

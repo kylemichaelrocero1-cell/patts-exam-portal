@@ -21,6 +21,8 @@ import { firstAttempts } from './lib/retakes';
 import { paperOptions, resultInView } from './lib/paperFilter';
 import { formatName, nameInitials, instructorName as displayInstructor } from './lib/personName';
 import { quantityParts } from './lib/quantityAnswer.js';
+import { sittingSection, sectionOptions, filterLive, compareLive } from './lib/liveMonitor';
+import { isWaitingNow, waitedFor } from './lib/admission';
 // Extracted from this file so it can be tested against the format's own
 // regression cases; the behaviour of a positional file is unchanged.
 import { parseQuestionCSV } from './lib/questionCsv';
@@ -185,6 +187,11 @@ const [editingStudentSections, setEditingStudentSections] = useState({});
   const [batchSection, setBatchSection] = useState('');
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [liveSort, setLiveSort] = useState('name');
+  // Students waiting to be let in to a paper (sql/115), and the monitor's filters.
+  const [admissions, setAdmissions] = useState([]);
+  const [deciding, setDeciding] = useState({});
+  const [admissionClock, setAdmissionClock] = useState(() => Date.now());
+  const [liveFilter, setLiveFilter] = useState({ section: '', paper: '', status: '', query: '' });
   const [liveViolationTooltip, setLiveViolationTooltip] = useState(null); // { session, rect }
   const [resultSort, setResultSort] = useState('section');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -449,7 +456,7 @@ const [targetSection, setTargetSection] = useState('');
 
   useEffect(() => {
     // fetchDashboardData first — it populates instructorExamIdsRef which fetchLiveSessions depends on
-    fetchDashboardData().then(() => fetchLiveSessions());
+    fetchDashboardData().then(() => { fetchLiveSessions(); fetchAdmissions(); });
     fetchInstructors();
 
     const channel = supabase.channel('admin-realtime')
@@ -484,6 +491,17 @@ const [targetSection, setTargetSection] = useState('');
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'live_sessions' }, payload => {
         setLiveSessions(prev => prev.filter(s => s.id !== payload.old.id));
       })
+      // Students asking to be let in (sql/115). Only waiting requests are
+      // kept; one decided or withdrawn leaves the list.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exam_admissions' }, payload => {
+        const row = payload.new && payload.new.id ? payload.new : null;
+        if (!row) { setAdmissions(prev => prev.filter(r => r.id !== payload.old?.id)); return; }
+        if (!instructorExamIdsRef.current.has(row.assessment_id)) return;
+        setAdmissions(prev => {
+          const rest = prev.filter(r => r.id !== row.id);
+          return row.status === 'waiting' ? [...rest, row] : rest;
+        });
+      })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'results' }, payload => {
         if (!instructorExamIdsRef.current.has(payload.new.exam_id)) return;
         setResults(prev => [...prev, payload.new]);
@@ -506,6 +524,50 @@ const [targetSection, setTargetSection] = useState('');
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Students waiting to be let in: the realtime feed above carries each
+  // change; this catches a dropped connection while any paper has check-in
+  // on, and the clock ages out a tab that was closed (lib/admission.js).
+  const anyCheckIn = examsList.some(e => e.requires_admission);
+  useEffect(() => {
+    if (!anyCheckIn) return undefined;
+    const t = setInterval(() => { fetchAdmissions(); setAdmissionClock(Date.now()); }, 15000);
+    return () => clearInterval(t);
+    // fetchAdmissions reads a ref, so the latest papers are always used.
+  }, [anyCheckIn]);
+  useEffect(() => {
+    if (admissions.length === 0) return undefined;
+    const t = setInterval(() => setAdmissionClock(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, [admissions.length]);
+
+  // Who is waiting to be let in (sql/115). A table that is not there yet
+  // (115 not run) is simply nobody waiting.
+  const fetchAdmissions = async () => {
+    const examIds = [...instructorExamIdsRef.current];
+    if (examIds.length === 0) { setAdmissions([]); return; }
+    const { data, error } = await supabase.from('exam_admissions')
+      .select('id, assessment_id, student_id, student_name, status, requested_at, seen_at')
+      .eq('status', 'waiting').in('assessment_id', examIds);
+    if (error) {
+      if (!isMissingTableError(error)) console.error('Failed to load students waiting to enter:', error);
+      return;
+    }
+    setAdmissions(data || []);
+  };
+
+  const decideAdmission = async (request, allow) => {
+    setDeciding(d => ({ ...d, [request.id]: true }));
+    const { error } = await supabase.rpc('decide_admission', { p_request_id: request.id, p_allow: allow });
+    setDeciding(d => { const next = { ...d }; delete next[request.id]; return next; });
+    if (error) {
+      console.error('Could not decide admission:', error);
+      alert(`Could not ${allow ? 'let in' : 'turn away'} ${formatName(request.student_name) || 'this student'}. Please try again.`);
+      return;
+    }
+    // Decided, or already decided elsewhere: either way it leaves the list.
+    setAdmissions(prev => prev.filter(r => r.id !== request.id));
+  };
 
   const fetchLiveSessions = async () => {
     const examIds = [...instructorExamIdsRef.current];
@@ -550,17 +612,16 @@ const [targetSection, setTargetSection] = useState('');
     }
   };
 
+  // The section a student is sitting a paper under: their sections the
+  // paper is for — never a colleague's (see lib/liveMonitor.js).
+  const sittingSectionOf = (studentId, paperId) =>
+    sittingSection(students[studentId]?.section, examsList.find(e => e.id === paperId)?.target_section);
+
   const applyLiveSort = (sortBy) => {
     setLiveSort(sortBy);
-    setLiveSessions(prev => [...prev].sort((a, b) => {
-      if (sortBy === 'section') {
-        const secA = students[a.student_id]?.section || '';
-        const secB = students[b.student_id]?.section || '';
-        const cmp = secA.localeCompare(secB);
-        if (cmp !== 0) return cmp;
-      }
-      return (a.student_name || '').localeCompare(b.student_name || '');
-    }));
+    const keyOf = s => ({ name: s.student_name, section: sittingSectionOf(s.student_id, s.exam_id) });
+    const cmp = compareLive(sortBy);
+    setLiveSessions(prev => [...prev].sort((a, b) => cmp(keyOf(a), keyOf(b))));
   };
 
   const printAnalysis = () => {
@@ -2278,6 +2339,23 @@ const deleteResult = async (studentId, examId) => {
     setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, uses_sets: next } : e));
   };
 
+  // Check-in on or off (sql/115): on, each student waits on the live monitor
+  // until let in, every time they open the paper. A student already sitting
+  // keeps their paper on screen and can still hand it in.
+  const toggleAdmission = async (exam) => {
+    const next = !exam.requires_admission;
+    try {
+      await updateAssessment(exam.id, { requires_admission: next });
+    } catch (e) {
+      console.error('Could not switch check-in:', e);
+      alert(/requires_admission/.test(e?.message || '')
+        ? 'Check-in needs a database update (sql/115) that has not been run yet. Nothing was changed.'
+        : 'Could not switch check-in. Nothing was changed — please try again.');
+      return;
+    }
+    setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, requires_admission: next } : e));
+  };
+
   // --- NEW: Toggle Exam Open/Close ---
   const toggleExamStatus = async (examId, currentStatus) => {
     const newStatus = !currentStatus;
@@ -3401,6 +3479,22 @@ const deleteResult = async (studentId, examId) => {
                     <Icon name={exam.uses_sets === false ? 'minus' : 'layers'} size={12} />
                     {exam.uses_sets === false ? 'No sets' : 'Sets A/B'}
                   </button>
+                  {/* Check-in (sql/115): each student waits on the live
+                      monitor until let in, every time they open the paper. */}
+                  <button
+                    type="button"
+                    onClick={() => toggleAdmission(exam)}
+                    className="btn ghost sm"
+                    aria-pressed={!!exam.requires_admission}
+                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5,
+                      ...(exam.requires_admission ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}) }}
+                    title={exam.requires_admission
+                      ? 'Check-in on: after the password, each student waits on the Live Monitor until you let them in — every time they open the paper. Click to turn off.'
+                      : 'Check-in off: the password is enough. Click so that each student waits on the Live Monitor until you let them in.'}
+                  >
+                    <Icon name={exam.requires_admission ? 'shield-check' : 'shield'} size={12} color={exam.requires_admission ? 'white' : undefined} />
+                    {exam.requires_admission ? 'Check-in on' : 'Check-in off'}
+                  </button>
                 </td>
 
                 {/* Time */}
@@ -4055,8 +4149,80 @@ const deleteResult = async (studentId, examId) => {
           const recentViolations = violationFeed(activeSessions, { limit: 8 });
           const flaggedStudents = new Set(recentViolations.map(v => v.studentId)).size;
 
+          // Sections, filters and the waiting list (lib/liveMonitor.js). Each
+          // row carries the section the student sits THIS paper under.
+          const statusOfSitting = s => s.status === 'locked' ? 'locked' : isSessionForceSubmittable(s) ? 'timed_out' : 'active';
+          const sittingRows = activeSessions.map(s => ({
+            s, name: formatName(s.student_name), section: sittingSectionOf(s.student_id, s.exam_id),
+            paperId: s.exam_id, status: statusOfSitting(s),
+          }));
+          const waitingRows = admissions.filter(r => isWaitingNow(r, admissionClock)).map(r => ({
+            r, name: formatName(r.student_name), section: sittingSectionOf(r.student_id, r.assessment_id),
+            paperId: r.assessment_id, status: 'waiting',
+          }));
+          const placeFilter = { ...liveFilter, status: '' };
+          const shownSittings = filterLive(sittingRows, liveFilter);
+          // The status filter is for sittings; whoever is waiting is shown
+          // unless the section, paper or name filters rule them out.
+          const shownWaiting = filterLive(waitingRows, placeFilter)
+            .sort((a, b) => compareLive(liveSort)(a, b) || new Date(a.r.requested_at) - new Date(b.r.requested_at));
+          const liveSectionChoices = sectionOptions([...sittingRows, ...waitingRows]);
+          const livePaperChoices = [...new Set([...sittingRows, ...waitingRows].map(r => r.paperId))]
+            .map(id => ({ id, title: examsDict[id] || 'Paper' }))
+            .sort((a, b) => a.title.localeCompare(b.title));
+          const filtering = Object.values(liveFilter).some(v => v.trim && v.trim());
+          const setFilter = (k, v) => setLiveFilter(f => ({ ...f, [k]: v }));
+
           return (
             <div>
+              {/* WAITING TO ENTER — check-in papers (sql/115). First on the
+                  page: a student is standing there holding their phone. */}
+              {(waitingRows.length > 0 || anyCheckIn) && (
+                <div className="card live-waiting" style={{ border: `1.5px solid ${waitingRows.length ? 'var(--navy)' : 'var(--line)'}`, borderRadius: 'var(--r-lg)', padding: '12px 14px', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: shownWaiting.length ? 10 : 0 }}>
+                    <Icon name="shield-check" size={15} color="var(--navy)" />
+                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--navy)' }}>
+                      Waiting to enter
+                    </span>
+                    <span className={`px-pill${waitingRows.length ? ' live' : ''}`} style={{ fontSize: 11 }}>{waitingRows.length}</span>
+                    <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
+                      {waitingRows.length
+                        ? 'Check each student, then let them in. Every time they open the paper, they ask again.'
+                        : 'Nobody is waiting. Students on a paper with check-in on appear here after the password.'}
+                      {waitingRows.length > shownWaiting.length && ` ${waitingRows.length - shownWaiting.length} hidden by the filters below.`}
+                    </span>
+                  </div>
+                  {shownWaiting.length > 0 && (
+                    <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+                      {shownWaiting.map(({ r, name, section }) => (
+                        <li key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '9px 10px', background: 'var(--bg)', borderRadius: 'var(--r-md, 10px)' }}>
+                          <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, color: 'var(--ink-1)', fontSize: 15, overflowWrap: 'anywhere' }}>{name || 'Student'}</div>
+                            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>
+                              {[section || 'No section on this paper', examsDict[r.assessment_id] || 'Paper', `waiting ${waitedFor(r.requested_at, admissionClock)}`].join(' · ')}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, flex: '0 1 auto', flexWrap: 'wrap' }}>
+                            <button type="button" className="btn sm" disabled={!!deciding[r.id]}
+                              onClick={() => decideAdmission(r, true)}
+                              style={{ width: 'auto', minHeight: 38, fontWeight: 700 }}
+                              aria-label={`Let ${name || 'this student'} in`}>
+                              <Icon name="check" size={14} /> Let in
+                            </button>
+                            <button type="button" className="btn ghost sm" disabled={!!deciding[r.id]}
+                              onClick={() => decideAdmission(r, false)}
+                              style={{ width: 'auto', minHeight: 38 }}
+                              aria-label={`Do not let ${name || 'this student'} in`}>
+                              <Icon name="x" size={14} /> Not allowed
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
               {/* RECENT VIOLATIONS — the last few incidents, newest first */}
               {recentViolations.length > 0 && (
                 <div style={{ background: 'var(--bad-bg)', border: '1.5px solid var(--bad-bd)', borderRadius: 'var(--r-lg)', padding: '12px 14px', marginBottom: 14 }}>
@@ -4149,12 +4315,58 @@ const deleteResult = async (studentId, examId) => {
                 {openSittings.length > 0 && ' “Submit All Now” ends every open sitting on the spot, even one with time left — it asks first.'}
               </p>
 
+              {/* FILTERS — section, paper, status, name */}
+              {(sittingRows.length > 0 || waitingRows.length > 0) && (
+                <div className="card live-filters" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div className="dash-filter-field">
+                    <label className="label" htmlFor="live-f-section">Section</label>
+                    <select id="live-f-section" className="input" style={{ width: 'auto', minWidth: 140 }} value={liveFilter.section} onChange={e => setFilter('section', e.target.value)}>
+                      <option value="">All sections</option>
+                      {liveSectionChoices.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                    </select>
+                  </div>
+                  <div className="dash-filter-field" style={{ minWidth: 0, flex: '1 1 200px', maxWidth: 360 }}>
+                    <label className="label" htmlFor="live-f-paper">Paper</label>
+                    <select id="live-f-paper" className="input" style={{ width: '100%' }} value={liveFilter.paper} onChange={e => setFilter('paper', e.target.value)}>
+                      <option value="">All papers</option>
+                      {livePaperChoices.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                    </select>
+                  </div>
+                  <div className="dash-filter-field">
+                    <label className="label" htmlFor="live-f-status">Status</label>
+                    <select id="live-f-status" className="input" style={{ width: 'auto', minWidth: 120 }} value={liveFilter.status} onChange={e => setFilter('status', e.target.value)}>
+                      <option value="">Any status</option>
+                      <option value="active">Active</option>
+                      <option value="locked">Locked</option>
+                      <option value="timed_out">Timed out</option>
+                    </select>
+                  </div>
+                  <div className="dash-filter-field" style={{ flex: '1 1 160px', maxWidth: 260 }}>
+                    <label className="label" htmlFor="live-f-name">Name</label>
+                    <input id="live-f-name" className="input" type="search" placeholder="Search a name" value={liveFilter.query}
+                      onChange={e => setFilter('query', e.target.value)} style={{ width: '100%', height: 42, boxSizing: 'border-box' }} />
+                  </div>
+                  {filtering && (
+                    <button type="button" className="btn ghost sm" style={{ width: 'auto', minHeight: 38 }}
+                      onClick={() => setLiveFilter({ section: '', paper: '', status: '', query: '' })}>
+                      <Icon name="x" size={13} /> Clear filters
+                    </button>
+                  )}
+                  {filtering && (
+                    <span style={{ fontSize: 12.5, color: 'var(--ink-3)', alignSelf: 'center' }}>
+                      Showing {shownSittings.length} of {sittingRows.length} sitting{sittingRows.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
+
               <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
               <table className="tbl tbl-stack">
                 <thead>
                   <tr>
                     <th>Student Name</th>
+                    <th>Section</th>
                     <th>Exam Taking</th>
                     <th>Status</th>
                     <th>Answered</th>
@@ -4164,15 +4376,18 @@ const deleteResult = async (studentId, examId) => {
                 </thead>
                 <tbody>
                   {activeSessions.length === 0 ? (
-                    <tr><td colSpan="6" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students are sitting a paper right now. Open one in Manage Exams — students appear here as they start.</td></tr>
+                    <tr><td colSpan="7" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students are sitting a paper right now. Open one in Manage Exams — students appear here as they start.</td></tr>
+                  ) : shownSittings.length === 0 ? (
+                    <tr><td colSpan="7" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No sitting matches these filters. <button type="button" className="btn ghost sm" style={{ width: 'auto', marginLeft: 6 }} onClick={() => setLiveFilter({ section: '', paper: '', status: '', query: '' })}>Clear filters</button></td></tr>
                   ) : (
-                    activeSessions.map(session => (
+                    shownSittings.map(({ s: session, section }) => (
                       <tr key={session.id} style={
                         session.status === 'locked' ? { background: 'var(--bad-bg)' }
                         : isSessionForceSubmittable(session) ? { background: 'var(--warn-bg, #FFFDE7)' }
                         : {}
                       }>
                         <td className="tbl-stack-title" style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{formatName(session.student_name)}</td>
+                        <td data-label="Section" style={{ color: 'var(--ink-2)' }}>{section || '—'}</td>
                         <td data-label="Paper" style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
                         <td data-label="Status">
                           {session.status === 'locked'

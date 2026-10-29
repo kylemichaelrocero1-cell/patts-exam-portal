@@ -4813,7 +4813,7 @@ const deleteResult = async (studentId, examId) => {
                       Choices <span style={{ color: 'var(--ink-4)', fontWeight: 400 }}>
                         {qForm.question_type === 'multi_select'
                           ? '— tick every correct one'
-                          : '— tick the correct one'}
+                          : '— tick the correct one (tick more if another choice also counts)'}
                       </span>
                     </label>
                     {qForm.question_type === 'multi_select' && (
@@ -4837,16 +4837,26 @@ const deleteResult = async (studentId, examId) => {
                         return (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <label title={`Mark ${letterFor(i)} correct`} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexShrink: 0 }}>
+                            {/* A one-answer item ticks too: the first ticked is its
+                                key, any other ticked choice also counts (sql/130).
+                                The last tick cannot be taken off — an item needs one. */}
                             <input
-                              type={isMulti ? 'checkbox' : 'radio'}
-                              name={isMulti ? `correct_answers_${i}` : 'correct_answer'}
-                              checked={keyed}
-                              onChange={() => setQForm(f => isMulti
-                                ? { ...f, correct_answers: toggleIndex(f.correct_answers, i) }
-                                : { ...f, correct_answer: i })}
+                              type="checkbox"
+                              name={isMulti ? `correct_answers_${i}` : `counts_${i}`}
+                              checked={isMulti ? keyed : counts}
+                              onChange={() => setQForm(f => {
+                                if (isMulti) return { ...f, correct_answers: toggleIndex(f.correct_answers, i) };
+                                const key = Number(f.correct_answer), also = indexSet(f.also_correct) || [];
+                                if (i === key) {
+                                  if (!also.length) return f;
+                                  const [next, ...rest] = also;
+                                  return { ...f, correct_answer: next, also_correct: rest };
+                                }
+                                return { ...f, also_correct: also.includes(i) ? also.filter(k => k !== i) : indexSet([...also, i]) };
+                              })}
                               style={{ width: 16, height: 16 }}
                             />
-                            <span style={{ fontWeight: 700, fontSize: 13, width: 20, color: keyed ? 'var(--ok)' : 'var(--ink-3)' }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, width: 20, color: counts ? 'var(--ok)' : 'var(--ink-3)' }}>
                               {letterFor(i)}
                             </span>
                           </label>
@@ -4885,25 +4895,11 @@ const deleteResult = async (studentId, examId) => {
                         );
                       })}
                     </div>
-                    {qForm.question_type === 'multiple_choice' && (
-                      <div style={{ margin: '-4px 0 12px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 12.5, color: 'var(--ink-3)', marginRight: 2 }}>
-                          Also counts as right <span style={{ color: 'var(--ink-4)' }}>(optional — any one of them earns the point)</span>:
-                        </span>
-                        {qForm.choice_list.map((_, i) => {
-                          if (i === Number(qForm.correct_answer)) return null;
-                          const on = isSelected(qForm.also_correct, i);
-                          return (
-                            <button key={i} type="button" aria-pressed={on}
-                              onClick={() => setQForm(f => ({ ...f, also_correct: toggleIndex(f.also_correct, i) }))}
-                              className="btn ghost sm"
-                              style={{ width: 'auto', padding: '2px 10px', fontSize: 12, fontWeight: 700,
-                                ...(on ? { background: 'var(--ok-bg)', color: 'var(--ok)', borderColor: 'var(--ok-bd)' } : {}) }}>
-                              {letterFor(i)}
-                            </button>
-                          );
-                        })}
-                      </div>
+                    {qForm.question_type === 'multiple_choice' && (indexSet(qForm.also_correct) || []).length > 0 && (
+                      <p style={{ margin: '-4px 0 12px', fontSize: 12.5, color: 'var(--ok)', fontWeight: 600 }}>
+                        Any one of {indexSet([Number(qForm.correct_answer), ...(indexSet(qForm.also_correct) || [])]).map(letterFor).join(' or ')} earns
+                        the point. The student still picks one. After saving, press Re-score on Manage Exams to update papers already taken.
+                      </p>
                     )}
                     <button
                       type="button"

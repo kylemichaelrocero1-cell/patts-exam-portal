@@ -256,5 +256,25 @@ console.log('\n=== LINE BREAKS IN A QUESTION ===');
   check('a choice keeps its text as written', questions[0].choices[0] === 'Drag');
 }
 
+console.log('\n=== EITHER ANSWER COUNTS (sql/130) ===');
+{
+  const { questions, errors } = parseQuestionCSV([
+    'question_text,choice_a,choice_b,choice_c,correct_answer',
+    '"Q one","a","b","c",A or C',
+    '"Q two","a","b","c",c OR b or a',
+    '"Q three","a","b","c",B',
+    '"Q four","a","b","c",A or D',
+    '"Q five","a","b","c",A or A',
+  ].join('\n'));
+  check('"A or C": one-answer, key A, C also counts', questions[0]?.question_type === 'multiple_choice' && questions[0].correct_answer === 0 && JSON.stringify(questions[0].accepted_answers) === '[2]', JSON.stringify(questions[0]));
+  check('any case, any order, three choices', questions[1]?.correct_answer === 0 && JSON.stringify(questions[1].accepted_answers) === '[1,2]');
+  check('a plain row carries no accepted_answers (so the column is never sent for it)', !('accepted_answers' in questions[2]));
+  check('a choice the row does not have, or the same one twice: errors', errors.length === 2 && /Row 5:/.test(errors[0]) && /Row 6:/.test(errors[1]), JSON.stringify(errors));
+  const named = parseQuestionCSV('question_text,type,points,answer,choice_a,choice_b\n"N one",mc,3,B or A,"x","y"\n"N two",multi,2,A or B,"x","y"\n"N three",,2,A;B,"x","y"');
+  check('named columns: "B or A" with points', named.questions[0]?.correct_answer === 0 && JSON.stringify(named.questions[0].accepted_answers) === '[1]' && named.questions[0].marks === 3);
+  check('"or" on a several-answer row is refused, pointing to A;B', named.errors.length === 1 && /A;B/.test(named.errors[0]), JSON.stringify(named.errors));
+  check('A;B is still a several-answer item', named.questions.some(q => q.question_type === 'multi_select'));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

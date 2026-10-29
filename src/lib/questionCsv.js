@@ -180,6 +180,39 @@ function readPickedKey(raw, choices, rowNo, errors) {
 }
 
 /**
+ * "A or B": a one-answer item that more than one choice earns (sql/130).
+ * The word "or" is what says so — a separator (A;B) still makes a
+ * multi-answer item, where every one must be ticked. Returns null when the
+ * cell has no "or"; otherwise the sorted choices, or false after an error.
+ */
+export function readEitherKey(raw, choices, rowNo, errors) {
+  const text = String(raw ?? '').trim();
+  if (!/\bor\b/i.test(text)) return null;
+  const parts = text.split(/\s*\bor\b\s*/i).map(p => p.trim().toUpperCase()).filter(Boolean);
+  const keys = parts.map(p => (/^\d+$/.test(p) ? Number(p) : indexForLetter(p)));
+  if (keys.length < 2 || keys.some(k => k === null || k === undefined || Number.isNaN(k))) {
+    errors.push(`Row ${rowNo}: "${text}" — write the choices that count as letters joined by "or", e.g. A or C`);
+    return false;
+  }
+  const bad = keys.filter(k => !keyIsValid(k, choices.length));
+  if (bad.length) {
+    errors.push(`Row ${rowNo}: the answer names ${bad.map(letterFor).join(', ')} but the row only has ${choices.length} choices (A–${letterFor(choices.length - 1)})`);
+    return false;
+  }
+  const set = indexSet(keys);
+  if (set.length !== keys.length) {
+    errors.push(`Row ${rowNo}: "${text}" names the same choice twice`);
+    return false;
+  }
+  return set;
+}
+
+/** One picked item from its key: either-answer when given one, else plain. */
+function eitherItem(base, either) {
+  return { ...base, question_type: 'multiple_choice', correct_answer: either[0], accepted_answers: either.slice(1) };
+}
+
+/**
  * Other answers this item will take.
  *
  * Split on a semicolon that is NOT preceded by a backslash, because `\;` is a
@@ -337,6 +370,16 @@ export function parseQuestionCSV(text) {
         errors.push(`Row ${rowNo}: "accept" only applies to a maths question — a multiple-choice answer is a letter, so there is nothing to spell another way`);
         return;
       }
+      const either = readEitherKey(answer, choices, rowNo, errors);
+      if (either === false) return;
+      if (either) {
+        if (type === 'multi_select') {
+          errors.push(`Row ${rowNo}: "or" means any one of them is right, which is not a several-answer question — use A;B to make the student tick both`);
+          return;
+        }
+        add(eitherItem({ question_text: qText, choices, correct_answers: null, marks: points }, either));
+        return;
+      }
       const set = readPickedKey(answer, choices, rowNo, errors);
       if (!set) return;
       const wantsMulti = type === 'multi_select';
@@ -369,6 +412,12 @@ export function parseQuestionCSV(text) {
     const choices = trimmed.slice(1, trimmed.length - 1).map(v => (v ?? '').trim()).filter(Boolean);
     if (choices.length < 2) { errors.push(`Row ${rowNo}: needs at least two choices`); return; }
 
+    const either = readEitherKey(raw, choices, rowNo, errors);
+    if (either === false) return;
+    if (either) {
+      questions.push(eitherItem({ question_text: qText, choices, correct_answers: null, marks: 1 }, either));
+      return;
+    }
     const set = readPickedKey(raw, choices, rowNo, errors);
     if (!set) return;
     questions.push(set.length > 1

@@ -181,7 +181,8 @@ export default function AnswerReview({ rows }) {
           );
         }
 
-        const keySet = indexSet(r.correct_set) ?? indexSet(r.correct) ?? [];
+        // A one-answer item may have other choices that also count (sql/130).
+        const keySet = indexSet(r.correct_set) ?? indexSet([...(indexSet(r.correct) || []), ...(indexSet(r.also_correct) || [])]) ?? [];
         const mineSet = indexSet(r.chosen) ?? [];
         // question_type is authoritative; the array checks are the fallback
         // for a row fetched before sql/018 taught the function to send it.

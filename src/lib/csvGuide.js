@@ -24,11 +24,13 @@ export const CSV_GUIDES = [
       '"Which instrument shows altitude?","Airspeed indicator","Altimeter","Tachometer","Compass",,B',
       '"Which of these is a primary flight control?","Flap","Slat","Spoiler","Trim tab","Aileron",E',
       '"An aerofoil produces lift by speeding up the air over its upper surface.","True","False",,,,A',
+      '"Which of these is a unit of pressure?","Pascal","Newton","Pound per square foot","Joule",,A or C',
     ],
     tips: [
       'One row per question. The question goes first and the answer goes in the last column.',
       'Give each question as many choices as it needs: 2 for True/False, 4, 5 or more. Leave unused choice cells empty.',
       'Write the answer as the letter of the right choice: `A`, `B`, `C`…',
+      'If more than one choice should count (two are defensible, or the key turned out wrong), join them with "or": `A or C`. The student still picks one, and either earns the point.',
       'Each student gets the questions and the choices in a different order, so avoid "All of the above", "Both A and B", or a question that refers to the one before it.',
     ],
   },

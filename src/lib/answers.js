@@ -61,6 +61,18 @@ export function correctSetOf(q) {
   return indexSet(q?.correct_answer);
 }
 
+/**
+ * Every choice that earns the item. A multi-answer item: its key. A
+ * one-answer item: its key and any choice that also counts
+ * (accepted_answers, sql/130). Null when there is no key.
+ */
+export function acceptedSetOf(q) {
+  if (isMultiSelect(q)) return indexSet(q?.correct_answers);
+  const key = indexSet(q?.correct_answer);
+  if (key === null) return null;
+  return indexSet([...key, ...(indexSet(q?.accepted_answers) || [])]);
+}
+
 /** Exact set equality. Both sides come from indexSet(), so both are sorted. */
 export function sameSet(a, b) {
   if (!a || !b || a.length !== b.length) return false;
@@ -74,7 +86,10 @@ export function sameSet(a, b) {
 export function isAnswerCorrect(q, value) {
   const chosen = indexSet(value);
   if (chosen === null) return null;
-  return sameSet(chosen, correctSetOf(q));
+  if (isMultiSelect(q)) return sameSet(chosen, correctSetOf(q));
+  // One choice picked, and it is the key or one that also counts (sql/130) —
+  // score_answers() in Postgres applies the same rule.
+  return chosen.length === 1 && (acceptedSetOf(q) || []).includes(chosen[0]);
 }
 
 /** Ticking a box on, or off again. Always an array, so the shape says "multi". */

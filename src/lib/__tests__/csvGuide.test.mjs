@@ -41,6 +41,8 @@ check('mc: positional, single answers only, 2 to 5 choices',
   && parsed.mc.questions.some(q => q.choices.length === 2)
   && parsed.mc.questions.some(q => q.choices.length === 5));
 check('mc: a letter as far as E is read', parsed.mc.questions.some(q => q.correct_answer === 4));
+check('mc: "A or C" is a one-answer item that either choice earns', parsed.mc.questions.some(q =>
+  q.question_type === 'multiple_choice' && q.correct_answer === 0 && JSON.stringify(q.accepted_answers) === '[2]'));
 check('multi: tick-box items, alongside a single-answer one',
   types('multi').filter(t => t === 'multi_select').length === 2 && types('multi').includes('multiple_choice'));
 check('multi: A;B;C is three answers', parsed.multi.questions[0].correct_answers?.length === 3);

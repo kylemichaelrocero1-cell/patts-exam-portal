@@ -5,7 +5,7 @@ import { supabase } from './supabase';
 import { splitSections, mySectionsOf as sliceMine, mergeSections } from './lib/sectionScope';
 import { makeRosterIndex, resolveStudent } from './lib/studentIdentity';
 import { choicesOf, letterFor, choicesPatch, keyIsValid } from './lib/choices';
-import { QUESTION_TYPES, isMultiSelect, indexSet, correctSetOf, toggleIndex,
+import { QUESTION_TYPES, isMultiSelect, indexSet, acceptedSetOf, toggleIndex,
          isSelected, keySetIsValid, isAnswerCorrect, answersPayload } from './lib/answers';
 import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          updateAssessment, setAssessmentArchived,
@@ -225,6 +225,8 @@ const [targetSection, setTargetSection] = useState('');
   const emptyQ = {
     question_text: '', choice_list: ['', '', '', ''], correct_answer: 0,
     correct_answers: [], question_type: 'multiple_choice', image_url: null,
+    // Other choices that also earn a one-answer item (sql/130).
+    also_correct: [],
     // What the item is worth (sql/025). One unless the instructor says
     // otherwise, which is what every item was worth before points existed.
     marks: 1,
@@ -1425,6 +1427,14 @@ const [targetSection, setTargetSection] = useState('');
       // item keys on neither (sql/024).
       correct_answer: (isEssay || isMulti || isWorked) ? null : Number(qForm.correct_answer),
       correct_answers: isMulti ? keySet : null,
+      // Other choices that also count (sql/130), on a one-answer item only.
+      // Sent only when there are some, or to clear ones the item had, so a
+      // save does not name the column on a database without sql/130.
+      ...(() => {
+        const also = (isEssay || isMulti || isWorked) ? []
+          : (indexSet(qForm.also_correct) || []).filter(i => i !== Number(qForm.correct_answer) && i < choicesPatch(qForm.choice_list).choices.length);
+        return also.length || editingQ?.accepted_answers ? { accepted_answers: also.length ? also : null } : {};
+      })(),
       image_url: imageUrl || null,
       // Which set it is in (sql/116); null is every set.
       set_label: normaliseSetLabel(qForm.set_label) || null,
@@ -1520,6 +1530,7 @@ const [targetSection, setTargetSection] = useState('');
       choice_list: (() => { const c = choicesOf(q); return c.length ? c : ['', '', '', '']; })(),
       correct_answer: Number(q.correct_answer || 0),
       correct_answers: indexSet(q.correct_answers) || [],
+      also_correct: indexSet(q.accepted_answers) || [],
       question_type: q.work_rubric?.mode === 'text' ? 'text_answer' : (q.question_type || 'multiple_choice'),
       image_url: q.image_url || null,
       marks: Number(q.marks) || 1,
@@ -4815,6 +4826,8 @@ const deleteResult = async (studentId, examId) => {
                         const keyed = isMulti
                           ? isSelected(qForm.correct_answers, i)
                           : Number(qForm.correct_answer) === i;
+                        // An "also counts" choice (sql/130) is shown as right too.
+                        const counts = keyed || (!isMulti && isSelected(qForm.also_correct, i));
                         return (
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <label title={`Mark ${letterFor(i)} correct`} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flexShrink: 0 }}>
@@ -4840,7 +4853,7 @@ const deleteResult = async (studentId, examId) => {
                               return { ...f, choice_list: next };
                             })}
                             placeholder={`Choice ${letterFor(i)}...`}
-                            style={{ flex: 1, ...(keyed ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}) }}
+                            style={{ flex: 1, ...(counts ? { borderColor: 'var(--ok)', boxShadow: '0 0 0 3px var(--ok-bg)' } : {}) }}
                           />
                           <button
                             type="button"
@@ -4852,10 +4865,8 @@ const deleteResult = async (studentId, examId) => {
                               let key = Number(f.correct_answer);
                               if (key === i) key = 0;
                               else if (key > i) key -= 1;
-                              const set = (indexSet(f.correct_answers) || [])
-                                .filter(k => k !== i)
-                                .map(k => (k > i ? k - 1 : k));
-                              return { ...f, choice_list: next, correct_answer: key, correct_answers: set };
+                              const shift = list => (indexSet(list) || []).filter(k => k !== i).map(k => (k > i ? k - 1 : k));
+                              return { ...f, choice_list: next, correct_answer: key, correct_answers: shift(f.correct_answers), also_correct: shift(f.also_correct) };
                             })}
                             disabled={qForm.choice_list.length <= 2}
                             title={qForm.choice_list.length <= 2 ? 'A question needs at least two choices' : `Remove choice ${letterFor(i)}`}
@@ -4868,6 +4879,26 @@ const deleteResult = async (studentId, examId) => {
                         );
                       })}
                     </div>
+                    {qForm.question_type === 'multiple_choice' && (
+                      <div style={{ margin: '-4px 0 12px', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12.5, color: 'var(--ink-3)', marginRight: 2 }}>
+                          Also counts as right <span style={{ color: 'var(--ink-4)' }}>(optional — any one of them earns the point)</span>:
+                        </span>
+                        {qForm.choice_list.map((_, i) => {
+                          if (i === Number(qForm.correct_answer)) return null;
+                          const on = isSelected(qForm.also_correct, i);
+                          return (
+                            <button key={i} type="button" aria-pressed={on}
+                              onClick={() => setQForm(f => ({ ...f, also_correct: toggleIndex(f.also_correct, i) }))}
+                              className="btn ghost sm"
+                              style={{ width: 'auto', padding: '2px 10px', fontSize: 12, fontWeight: 700,
+                                ...(on ? { background: 'var(--ok-bg)', color: 'var(--ok)', borderColor: 'var(--ok-bd)' } : {}) }}>
+                              {letterFor(i)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => setQForm(f => ({ ...f, choice_list: [...f.choice_list, ''] }))}
@@ -5115,7 +5146,7 @@ const deleteResult = async (studentId, examId) => {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
                             {/* A multi-answer item highlights every keyed
                                 choice, not just one (sql/018). */}
-                            {(() => { const keySet = correctSetOf(q) || []; return choicesOf(q).map((choiceText, i) => {
+                            {(() => { const keySet = acceptedSetOf(q) || []; return choicesOf(q).map((choiceText, i) => {
                               const letter = letterFor(i);
                               const keyed = keySet.includes(i);
                               return (
@@ -5665,7 +5696,7 @@ const deleteResult = async (studentId, examId) => {
                   // is the authority; the comparison is the fallback for a row
                   // written before it recorded one.
                   const studentSet = indexSet(sAnswer?.chosen) || [];
-                  const keySet = correctSetOf(q) || [];
+                  const keySet = acceptedSetOf(q) || [];
                   const gotIt = typeof sAnswer?.is_correct === 'boolean'
                     ? sAnswer.is_correct
                     : isAnswerCorrect(q, sAnswer?.chosen) === true;
@@ -5907,7 +5938,7 @@ const deleteResult = async (studentId, examId) => {
                   (indexSet(sAnswer.chosen) || []).forEach(i => { counts[i] = (counts[i] || 0) + 1; });
                   if (sAnswer.is_correct === true) fullyRight++;
                 });
-                const keySet = correctSetOf(q) || [];
+                const keySet = acceptedSetOf(q) || [];
                 const multi = isMultiSelect(q);
 
                 return (

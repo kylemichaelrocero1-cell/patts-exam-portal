@@ -14,7 +14,7 @@ import { hasSavedWork } from './lib/proctoring';
 import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
-import { createFocusLossWatcher, isTypingTarget, COVER_MS, COVER_GRACE_MS } from './lib/focusLoss.js';
+import { createFocusLossWatcher, isTypingTarget, keyboardHidesFocus, COVER_MS, COVER_GRACE_MS } from './lib/focusLoss.js';
 import { isUpdateReload } from './lib/staleBuild.js';
 import { deviceOf, leaveText, pushViolationsNow, withAway, awayUntilCheckIn, PAUSE_MS } from './lib/leaveReport.js';
 import { paperNoun } from './lib/paperNoun.js';
@@ -1109,11 +1109,16 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
     // COVER_GRACE_MS just after an answer box was used, since a phone's
     // keyboard takes the focus for a moment as it slides up (lib/focusLoss.js).
     // No page can see another app's window; it can only see that it no
-    // longer has the focus.
+    // longer has the focus. An iPad's keyboard takes the focus for as long
+    // as it is up, with no blur: that is not a loss (lib/focusLoss.js).
+    const keyboardUp = keyboardHidesFocus(device)
+      ? () => isTypingTarget(document.activeElement)
+      : () => false;
     const cover = createFocusLossWatcher({
       onLoss: () => startAbsence('blur', blurAt ?? Date.now()),
       hasFocus: () => document.hasFocus(),
       isHidden: () => false,
+      keyboardUp,
       lossMs: COVER_MS,
       graceMs: COVER_GRACE_MS,
     });
@@ -1198,6 +1203,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
       if (alertActiveRef.current || document.hidden) return;
       if (gap > PAUSE_MS) startAbsence('paused', now - gap);
       if (document.hasFocus()) { if (away) back(); return; }
+      if (!away && keyboardUp()) return;
       if (!away) blurAt = now;
       away = true;
       cover.check();

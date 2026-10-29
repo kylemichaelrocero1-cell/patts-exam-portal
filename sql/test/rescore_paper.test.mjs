@@ -173,5 +173,22 @@ await x(`UPDATE public.questions SET correct_answer = 3 WHERE id = '${Q1}'`);
   ck('the pages together find Arturo (D is now right)', all.includes('Absent, Arturo'), JSON.stringify(all));
 }
 
+console.log('\n=== ANSWER REVIEW SHOWS EACH PART (132) ===');
+{
+  const S132 = fs.readFileSync(`${P}/sql/132_review_shows_each_part.sql`, 'utf8');
+  await x(S132); await x(S132);
+  const [v] = await q(S132.slice(S132.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck('132 applies twice; VERIFY true', v.review_sends_parts === true);
+  await x(`UPDATE public.assessments SET show_answers = true, review_shows_key = false WHERE id = '${PAPER}'`);
+  const r = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3) r`, [STU, PAPER, TOK]);
+  const rows = r.rows?.[0]?.r || [];
+  const typed = rows.find(x => x.question_id === Q3);
+  const part = typed?.parts?.[0];
+  ck('the typed item comes with its parts: a, 4 of 4, value and unit right', r.ok && part?.key === 'a' && Number(part.marks) === 4 && Number(part.of) === 4 && part.value_ok === true && part.unit_ok === true, r.message || JSON.stringify(typed));
+  ck('…and nothing of the key: no value, units or rubric in the part', part && !('value' in part) && !('units' in part) && !JSON.stringify(typed).includes('2.67"'), JSON.stringify(part));
+  const picked = rows.find(x => x.question_id === Q1);
+  ck('a picked item has no parts', picked && (picked.parts === undefined || picked.parts === null));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

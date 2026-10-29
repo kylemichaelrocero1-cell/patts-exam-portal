@@ -97,9 +97,25 @@ export default function AnswerReview({ rows }) {
                   <ol className="ws-qty-parts" style={{ margin: '0 0 8px' }}>
                     {quantityParts(r.work_given).map(p => {
                       const typed = (r.lines || []).map(splitPartLine).filter(x => x?.key === p.key).pop()?.text || '';
+                      // The part as it was marked (sql/132): its points, and
+                      // whether the value and the unit were right. No key.
+                      const res = Array.isArray(r.parts) ? r.parts.find(x => x?.key === p.key) : null;
+                      const full = res && Number(res.marks) >= Number(res.of);
+                      const notes = !res || full || res.blank ? [] : [
+                        res.value_ok ? 'value ✓' : 'value ✗',
+                        ...(res.unit_ok ? ['unit ✓'] : res.value_ok ? ['unit ✗ or missing'] : []),
+                      ];
                       return (
                         <li key={p.key} className="ws-qty-part">
-                          <span className="ws-qty-label"><span className="ws-qty-key">{p.key})</span> {p.label}</span>
+                          <span className="ws-qty-label" style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                            <span><span className="ws-qty-key">{p.key})</span> {p.label}</span>
+                            {res && (
+                              <span className={`px-pill ${full ? 'ok' : Number(res.marks) > 0 ? 'warn' : 'bad'}`} style={{ fontSize: 11.5 }}>
+                                {Number(res.marks)}/{Number(res.of)}{res.blank ? ' · left blank' : ''}
+                              </span>
+                            )}
+                            {notes.length > 0 && <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>{notes.join(' · ')}</span>}
+                          </span>
                           <div className="ws-answer-shown" style={{ marginBottom: 0 }}>
                             {typed ? <span className="ws-text-shown">{typed}</span>
                               : <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>nothing</em>}

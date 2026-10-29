@@ -25,6 +25,9 @@ const MathStatic = lazy(() => import('./MathField.jsx')
 // this under its navy hero band, and the first version inherited the band's
 // white-on-navy and came out white on white.
 
+// A unit as a reader writes it: m^3 as m³, php as ₱.
+const prettyUnit = u => String(u).replace(/\^2\b/g, '²').replace(/\^3\b/g, '³').replace(/^php\b/i, '₱');
+
 export default function AnswerReview({ rows }) {
   const right = rows.filter(r => r.is_correct).length;
   // A worked item's answer is a string of maths, not a set of indices, so
@@ -100,6 +103,8 @@ export default function AnswerReview({ rows }) {
                       // The part as it was marked (sql/132): its points, and
                       // whether the value and the unit were right. No key.
                       const res = Array.isArray(r.parts) ? r.parts.find(x => x?.key === p.key) : null;
+                      // The right value and unit, when the paper shows the key.
+                      const answer = Array.isArray(r.key_parts) ? r.key_parts.find(x => x?.key === p.key) : null;
                       const full = res && Number(res.marks) >= Number(res.of);
                       const notes = !res || full || res.blank ? [] : [
                         res.value_ok ? 'value ✓' : 'value ✗',
@@ -120,6 +125,11 @@ export default function AnswerReview({ rows }) {
                             {typed ? <span className="ws-text-shown">{typed}</span>
                               : <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>nothing</em>}
                           </div>
+                          {answer && !full && (
+                            <div style={{ marginTop: 4, fontSize: 13, color: 'var(--ok)', fontWeight: 600 }}>
+                              Answer: {answer.value}{answer.unit ? ` ${prettyUnit(answer.unit)}` : ''}
+                            </div>
+                          )}
                         </li>
                       );
                     })}

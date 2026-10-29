@@ -178,7 +178,7 @@ console.log('\n=== ANSWER REVIEW SHOWS EACH PART (132) ===');
   const S132 = fs.readFileSync(`${P}/sql/132_review_shows_each_part.sql`, 'utf8');
   await x(S132); await x(S132);
   const [v] = await q(S132.slice(S132.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
-  ck('132 applies twice; VERIFY true', v.review_sends_parts === true);
+  ck('132 applies twice; VERIFY true', v.review_sends_parts === true && v.review_sends_key_when_shown === true, JSON.stringify(v));
   await x(`UPDATE public.assessments SET show_answers = true, review_shows_key = false WHERE id = '${PAPER}'`);
   const r = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3) r`, [STU, PAPER, TOK]);
   const rows = r.rows?.[0]?.r || [];
@@ -188,6 +188,11 @@ console.log('\n=== ANSWER REVIEW SHOWS EACH PART (132) ===');
   ck('…and nothing of the key: no value, units or rubric in the part', part && !('value' in part) && !('units' in part) && !JSON.stringify(typed).includes('2.67"'), JSON.stringify(part));
   const picked = rows.find(x => x.question_id === Q1);
   ck('a picked item has no parts', picked && (picked.parts === undefined || picked.parts === null));
+  ck('the key is not sent while the paper hides it', !typed?.key_parts);
+  await x(`UPDATE public.assessments SET review_shows_key = true WHERE id = '${PAPER}'`);
+  const r2 = await asAnon(`SELECT public.get_answer_review($1,$2,NULL,$3) r`, [STU, PAPER, TOK]);
+  const t2 = (r2.rows?.[0]?.r || []).find(x => x.question_id === Q3);
+  ck('when the paper shows the key: each part\'s right value and unit (2.67 m/s)', JSON.stringify(t2?.key_parts) === JSON.stringify([{ key: 'a', unit: 'm/s', value: '2.67' }]), JSON.stringify(t2?.key_parts));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -7,8 +7,9 @@
 -- value right?, unit right?, its marks out of its points — but answer
 -- review sent only the item's total and a sentence ("Value wrong: c, d").
 -- get_answer_review() now sends the parts too, so the review can show a
--- student each part's score. Nothing of the key goes with them. Otherwise
--- this is 130's function unchanged.
+-- student each part's score; and, only when the paper shows the key
+-- (review_shows_key, the "Show the correct answer" switch), each part's
+-- right value and unit as key_parts. Otherwise 130's function unchanged.
 -- =====================================================================
 
 BEGIN;
@@ -119,6 +120,12 @@ BEGIN
         'parts', CASE WHEN q.work_rubric ->> 'mode' = 'quantity'
                          AND jsonb_typeof(ans -> q.id::text -> 'parts') = 'array'
                       THEN ans -> q.id::text -> 'parts' END,
+        -- …and, when the paper shows the key, each part's right value and unit.
+        'key_parts', CASE WHEN show_key AND q.work_rubric ->> 'mode' = 'quantity'
+                               AND jsonb_typeof(q.work_rubric -> 'parts') = 'array'
+                          THEN (SELECT jsonb_agg(jsonb_build_object('key', kp ->> 'key', 'value', kp ->> 'value',
+                                                                    'unit', kp -> 'units' ->> 0))
+                                  FROM jsonb_array_elements(q.work_rubric -> 'parts') kp) END,
         'correct_latex', CASE WHEN show_key OR ok THEN q.work_rubric -> 'steps' -> -1 ->> 'latex' END,
         -- The worked solution, step by step, for a line-by-line item — only
         -- on a paper that shows its key.
@@ -140,6 +147,7 @@ END $$;
 COMMIT;
 
 -- =====================================================================
--- VERIFY — one row, true.
+-- VERIFY — one row, both true.
 -- =====================================================================
-SELECT position('''parts''' in pg_get_functiondef('public.get_answer_review(uuid, uuid, integer, text)'::regprocedure)) > 0 AS review_sends_parts;
+SELECT position('''parts''' in pg_get_functiondef('public.get_answer_review(uuid, uuid, integer, text)'::regprocedure)) > 0 AS review_sends_parts,
+       position('''key_parts''' in pg_get_functiondef('public.get_answer_review(uuid, uuid, integer, text)'::regprocedure)) > 0 AS review_sends_key_when_shown;

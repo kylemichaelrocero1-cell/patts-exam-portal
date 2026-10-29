@@ -234,5 +234,27 @@ console.log('\n=== NUMBER AND UNIT (quantity, sql/105) ===');
   check('no number first, or other units with none: errors', bad.questions.length === 0 && bad.errors.length === 2, bad.errors.join(' | '));
 }
 
+console.log('\n=== LINE BREAKS IN A QUESTION ===');
+{
+  const csv = [
+    'question_text,choice_a,choice_b,correct_answer',
+    '"A case.<br>Which force opposes thrust?","Drag","Lift",A',
+    '"Upper case <BR/> and spaced <br /> both work","x","y",B',
+    '"Typed in the cell with Alt+Enter,\r\nso the cell has a line break","p","q",A',
+    '"A row after it is still its own row","m","n",B',
+  ].join('\r\n');
+  const { questions, errors } = parseQuestionCSV(csv);
+  check('four questions, no errors', questions.length === 4 && errors.length === 0, JSON.stringify(errors));
+  check('<br> becomes a line break', questions[0].question_text === 'A case.\nWhich force opposes thrust?', JSON.stringify(questions[0].question_text));
+  check('<BR/> and <br /> too', questions[1].question_text === 'Upper case\nand spaced\nboth work', JSON.stringify(questions[1].question_text));
+  check('a line break inside a quoted cell stays in the question', questions[2].question_text === 'Typed in the cell with Alt+Enter,\nso the cell has a line break' && questions[2].correct_answer === 0, JSON.stringify(questions[2]));
+  check('the row after a multi-line cell is read whole', questions[3].question_text === 'A row after it is still its own row' && questions[3].correct_answer === 1);
+  const named = parseQuestionCSV('question_text,type,points,answer,choice_a,choice_b\n"Line one<br>line two",mc,2,A,"a","b"');
+  check('named columns read <br> the same way', named.questions[0]?.question_text === 'Line one\nline two' && named.questions[0]?.marks === 2);
+  const bad = parseQuestionCSV('question_text,choice_a,choice_b,correct_answer\n"Fine","a","b",A\n"Multi\nline","a","b",Z\n"Third","a","b",B');
+  check('a row number in an error is the spreadsheet row, counting a multi-line cell once', bad.errors.length === 1 && /^Row 3:/.test(bad.errors[0]), JSON.stringify(bad.errors));
+  check('a choice keeps its text as written', questions[0].choices[0] === 'Drag');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

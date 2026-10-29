@@ -149,6 +149,7 @@ export const CSV_GENERAL_TIPS = [
   'Keep the header row as the first line. It tells the portal what each column is.',
   'In Excel use File → Save As → CSV UTF-8. In Google Sheets use File → Download → Comma-separated values.',
   'A cell with a comma in it needs quotes around it. Excel and Google Sheets add them for you.',
+  'To start a new line inside a question, type `<br>` where the line should break, or press Alt+Enter in an Excel cell (Option+Enter on a Mac, Ctrl+Enter in Google Sheets).',
   'After you choose the file, the portal says how many questions it read and lists any problem by row number. Nothing is saved until you confirm.',
 ];
 

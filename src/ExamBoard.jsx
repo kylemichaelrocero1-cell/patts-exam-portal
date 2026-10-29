@@ -19,6 +19,7 @@ import { isUpdateReload } from './lib/staleBuild.js';
 import { deviceOf, leaveText, pushViolationsNow, withAway, awayUntilCheckIn, PAUSE_MS } from './lib/leaveReport.js';
 import { paperNoun } from './lib/paperNoun.js';
 import { formatName } from './lib/personName.js';
+import { withLineBreaks } from './lib/questionCsv.js';
 
 // The maths editor and the step checker are megabytes between them, and most
 // papers have no maths item at all. Split hard, so a student sitting a paper of
@@ -1958,7 +1959,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
           </div>
 
           <p className="q-text" ref={questionTextRef} tabIndex={-1}>
-            {currentQ?.question_text}
+            {/* <br> typed in a question is a line break; the text is never read as HTML. */}
+            {withLineBreaks(currentQ?.question_text)}
           </p>
 
           {currentQ?.image_url && (

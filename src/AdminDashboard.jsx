@@ -5043,7 +5043,7 @@ const deleteResult = async (studentId, examId) => {
                           <div style={{ flex: 1 }}>
                             <p style={{ margin: '0 0 8px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14px' }}>
                               <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
-                              {q.question_text}
+                              <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span>
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
                               {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>{q.work_rubric?.mode === 'text' ? 'Text' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Maths'}</span>}
                               <InlinePoints
@@ -5646,7 +5646,7 @@ const deleteResult = async (studentId, examId) => {
                     return (
                       <div key={q.id} className="card" style={{ padding: '20px', borderLeft: '4px solid var(--info)' }}>
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '12px' }}>
-                          <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                          <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span></p>
                           <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                         </div>
                         {q.image_url && (
@@ -5674,7 +5674,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px', borderLeft: gotIt ? '4px solid var(--ok)' : '4px solid var(--bad)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)' }}>
-                        {idx + 1}. {q.question_text}
+                        {idx + 1}. <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span>
                         {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
                       </p>
                       {q.image_url && (
@@ -5770,7 +5770,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px', borderLeft: '4px solid var(--info)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. {q.question_text}</p>
+                        <p style={{ margin: 0, fontWeight: 600, flex: 1, color: 'var(--ink-1)' }}>{idx + 1}. <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span></p>
                         <span className="px-pill info" style={{ flexShrink: 0 }}>Essay</span>
                       </div>
                       {q.image_url && (
@@ -5799,7 +5799,7 @@ const deleteResult = async (studentId, examId) => {
                   return (
                     <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                       <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                        {idx + 1}. {q.question_text}
+                        {idx + 1}. <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span>
                         <span className="px-pill info" style={{ marginLeft: 8 }}>{q.work_rubric?.mode === 'text' ? 'Type a word' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Type your answer'}</span>
                         <span className="px-pill muted" style={{ marginLeft: 6 }}>
                           {Number(q.marks) || 1} pt{(Number(q.marks) || 1) === 1 ? '' : 's'}
@@ -5913,7 +5913,7 @@ const deleteResult = async (studentId, examId) => {
                 return (
                   <div key={q.id} className="card" style={{ padding: '20px 24px', borderLeft: '4px solid var(--navy)' }}>
                     <p style={{ margin: '0 0 10px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14.5px' }}>
-                      {idx + 1}. {q.question_text}
+                      {idx + 1}. <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span>
                       {multi && <span className="px-pill ok" style={{ marginLeft: 8 }}>Multiple answers</span>}
                     </p>
                     {multi && (

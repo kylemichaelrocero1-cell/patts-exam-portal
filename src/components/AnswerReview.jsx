@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { letterFor } from '../lib/choices';
 import { indexSet } from '../lib/answers';
 import { quantityParts, splitPartLine } from '../lib/quantityAnswer.js';
+import { withLineBreaks } from '../lib/questionCsv.js';
 
 // Rendering LaTeX pulls in KaTeX, which a paper of plain multiple choice has
 // no use for. Split, so only a review containing maths fetches it.
@@ -75,7 +76,7 @@ export default function AnswerReview({ rows }) {
             }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
                 <span className="ar-question-text" style={{ color: 'var(--ink-1)', fontSize: 14, lineHeight: 1.55, fontWeight: 500, flex: '1 1 0', minWidth: 0 }}>
-                  <strong>{r.question_number}.</strong> {r.question_text}
+                  <strong>{r.question_number}.</strong> {withLineBreaks(r.question_text)}
                 </span>
                 <span style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 700,
                                color: r.is_correct ? 'var(--ok)' : Number(r.earned) > 0 ? 'var(--warn)' : 'var(--bad)' }}>
@@ -203,7 +204,7 @@ export default function AnswerReview({ rows }) {
               </span>
               <span className="ar-question-text" style={{ color: 'var(--ink-1)', fontSize: 14.5, lineHeight: 1.6, fontWeight: 500 }}>
                 <strong style={{ marginRight: 6 }}>{r.question_number ?? i + 1}.</strong>
-                {r.question_text}
+                {withLineBreaks(r.question_text)}
               </span>
             </div>
 

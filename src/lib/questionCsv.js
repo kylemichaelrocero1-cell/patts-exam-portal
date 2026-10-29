@@ -38,6 +38,35 @@ import { indexForLetter, letterFor, keyIsValid } from './choices.js';
 import { indexSet } from './answers.js';
 import { normaliseSetLabel } from './paperSets.js';
 
+/**
+ * Split a file into rows. A line break inside double quotes belongs to the
+ * cell — Excel writes one when Alt+Enter starts a new line in a cell — so
+ * only a break outside quotes ends a row. Splitting on every break first cut
+ * such a row in two and imported its halves as broken questions.
+ */
+export function splitRecords(text) {
+  const src = String(text ?? '').replace(/\r\n?/g, '\n');
+  const out = [];
+  let cur = '', inQ = false;
+  for (const ch of src) {
+    if (ch === '"') inQ = !inQ;
+    if (ch === '\n' && !inQ) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * A question's own line breaks: <br> (any case, <br/>, <br />) is a new
+ * line, as is a break typed inside the cell. The exam screen keeps them
+ * (white-space: pre-line); nothing else in a question is read as HTML.
+ */
+export function withLineBreaks(text) {
+  return String(text ?? '').replace(/<br\s*\/?>/gi, '\n')
+    .split('\n').map(l => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 /** Split one CSV line, honouring double quotes around a cell. */
 export function splitRow(row) {
   const cells = [];
@@ -238,7 +267,7 @@ function buildQuantity({ qText, points, given, answer, accept }, rowNo, errors) 
  * malformed row is reported next to the good ones rather than losing the file.
  */
 export function parseQuestionCSV(text) {
-  const rows = String(text ?? '').trim().split(/\r?\n/).map(splitRow);
+  const rows = splitRecords(String(text ?? '').trim()).map(splitRow);
   const questions = [], errors = [];
   if (rows.length === 0) return { questions, errors };
 
@@ -254,7 +283,7 @@ export function parseQuestionCSV(text) {
     // ---- named mode -------------------------------------------------
     if (header) {
       const f = header.fields;
-      const qText = at(f.question_text !== undefined ? f.question_text : 0);
+      const qText = withLineBreaks(at(f.question_text !== undefined ? f.question_text : 0));
       if (!qText) return;
 
       // Which set the item is in (sql/116); blank is every set.
@@ -324,7 +353,7 @@ export function parseQuestionCSV(text) {
     }
 
     // ---- positional mode, exactly as it has always worked ------------
-    const qText = (cols[0] ?? '').trim();
+    const qText = withLineBreaks(cols[0]);
     if (!qText) return;
 
     // A blank first choice is how an essay row is written.

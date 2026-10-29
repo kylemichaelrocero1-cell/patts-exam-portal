@@ -37,6 +37,7 @@ const LessonsManager = lazy(() => import('./dashboard/LessonsManager'));
 // Pure presentation over data the dashboard already holds — no queries of its
 // own — but split out because it is a large view most sessions never open.
 const ClassReview = lazy(() => import('./dashboard/ClassReview'));
+const RescoreModal = lazy(() => import('./dashboard/RescoreModal'));
 // Both pull in MathLive and Compute Engine — well over three megabytes of
 // maths editor and computer algebra. Split out hard, so an instructor who
 // never writes a worked item never downloads any of it.
@@ -302,6 +303,7 @@ const [targetSection, setTargetSection] = useState('');
 
   // --- SHARING STATES ---
   const [shareModal, setShareModal] = useState(null); // exam object | null
+  const [rescoreFor, setRescoreFor] = useState(null); // exam object | null — sql/131
   const [shareTarget, setShareTarget] = useState('');
   const [isSharing, setIsSharing] = useState(false);
   const [sharesMap, setSharesMap] = useState({}); // { [examId]: [{ id, shared_with }] }
@@ -3597,6 +3599,10 @@ const deleteResult = async (studentId, examId) => {
                       )}
                     </button>
                     <button onClick={() => openExamStats(exam.id)} className="btn ghost sm"><Icon name="bar-chart" size={13} /></button>
+                    <button onClick={() => setRescoreFor(exam)} className="btn ghost sm" style={{ width: 'auto' }}
+                      title="Mark every submitted paper again after you change a key">
+                      <Icon name="check-circle" size={13} /> Re-score
+                    </button>
                     <button
                       onClick={() => setReviewSettingsFor({
                         ...exam,
@@ -5383,6 +5389,11 @@ const deleteResult = async (studentId, examId) => {
 {/* ========================================= */}
       {/* MODAL: DUPLICATE EXAM                     */}
       {/* ========================================= */}
+      {rescoreFor && (
+        <Suspense fallback={null}>
+          <RescoreModal exam={rescoreFor} onClose={() => setRescoreFor(null)} onDone={() => fetchDashboardData()} />
+        </Suspense>
+      )}
       {dupModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
           <div style={{ background: 'var(--surface)', borderRadius: 'var(--r-2xl)', width: '100%', maxWidth: '500px', overflow: 'hidden', boxShadow: 'var(--sh-modal)' }}>

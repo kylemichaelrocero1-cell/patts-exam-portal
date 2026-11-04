@@ -4,10 +4,11 @@
 // their device was going to do it: a notification steals focus, the screen
 // sleeps, a cached tab is restored on top. The proctoring rules do not bend for
 // any of that, so the only fair thing is to say plainly, once, what will be
-// counted and what to turn off first. It is a checklist, not a quiz — nothing
-// here is verifiable from the browser, and pretending otherwise would just
-// block students over a check we cannot actually make.
+// counted and what to turn off first. It is a checklist, not a quiz: nothing
+// here is verifiable from the browser, so a tick is the student's own word.
+// "I understand" stays off until every box is ticked, so each rule gets read.
 
+import { useState } from 'react';
 import Icon from './Icon';
 
 const RULES = [
@@ -77,6 +78,17 @@ export function ChosenSet({ exam, setChoice }) {
 }
 
 export default function ExamReadinessModal({ exam, setChoice, onAcknowledge, onCancel }) {
+  // Every box ticked before the paper can be opened: the student has to go
+  // through the list, not tap straight past it.
+  const [ticked, setTicked] = useState(() => new Set());
+  const toggle = (title) => setTicked(prev => {
+    const next = new Set(prev);
+    if (next.has(title)) next.delete(title); else next.add(title);
+    return next;
+  });
+  const remaining = RULES.length - ticked.size;
+  const ready = remaining === 0;
+
   return (
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100, padding: 20 }}
@@ -108,36 +120,52 @@ export default function ExamReadinessModal({ exam, setChoice, onAcknowledge, onC
             This exam is proctored. Your device is watched for anything that takes you off this
             page, and every incident reaches your instructor with a timestamp. Set the following up
             <strong> now</strong> — once the timer starts, fixing it counts as a violation too.
+            Tick each one as you do it.
           </p>
 
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 10 }}>
-            {RULES.map(rule => (
-              <li key={rule.title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '11px 13px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2, #F7F8FA)' }}>
-                <span aria-hidden="true" style={{
-                  width: 30, height: 30, borderRadius: 8, flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'var(--navy-tint, #EAF0F8)', color: 'var(--navy)',
-                }}>
-                  <Icon name={rule.icon} size={16} />
-                </span>
-                <span>
-                  <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5, color: 'var(--navy)' }}>{rule.title}</span>
-                  <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.55 }}>{rule.body}</span>
-                </span>
-              </li>
-            ))}
+            {RULES.map(rule => {
+              const on = ticked.has(rule.title);
+              return (
+                <li key={rule.title}>
+                  {/* The whole row is the tap target: a bare checkbox is small on a phone. */}
+                  <label style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '11px 13px', cursor: 'pointer', borderRadius: 'var(--r-md)',
+                    border: `1.5px solid ${on ? 'var(--ok, #1A8A4A)' : 'var(--border)'}`,
+                    background: on ? 'var(--ok-bg, #EAF7EF)' : 'var(--surface-2, #F7F8FA)' }}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(rule.title)}
+                      style={{ width: 22, height: 22, flexShrink: 0, margin: '4px 0 0', accentColor: 'var(--navy)', cursor: 'pointer' }} />
+                    <span aria-hidden="true" style={{
+                      width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'var(--navy-tint, #EAF0F8)', color: 'var(--navy)',
+                    }}>
+                      <Icon name={rule.icon} size={16} />
+                    </span>
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5, color: 'var(--navy)' }}>{rule.title}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-3)', marginTop: 3, lineHeight: 1.55 }}>{rule.body}</span>
+                    </span>
+                  </label>
+                </li>
+              );
+            })}
           </ul>
         </div>
 
-        <div style={{ padding: '16px 28px 22px', borderTop: '1px solid var(--border)', display: 'flex', gap: 10, flexShrink: 0 }}>
-          <button type="button" onClick={onCancel}
-            style={{ flex: 1, background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}>
-            Not yet
-          </button>
-          <button type="button" onClick={onAcknowledge} autoFocus
-            style={{ flex: 2, background: 'var(--navy)', color: 'white', fontWeight: 700 }}>
-            I understand — continue
-          </button>
+        <div style={{ padding: '12px 28px 22px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <p aria-live="polite" style={{ margin: '0 0 10px', fontSize: 12.5, fontWeight: 600, textAlign: 'center', color: ready ? 'var(--ok, #1A8A4A)' : 'var(--text-3)' }}>
+            {ready ? 'All done. You can continue.' : `${ticked.size} of ${RULES.length} ticked — ${remaining} left`}
+          </p>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" onClick={onCancel}
+              style={{ flex: 1, background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}>
+              Not yet
+            </button>
+            <button type="button" onClick={onAcknowledge} disabled={!ready}
+              style={{ flex: 2, background: 'var(--navy)', color: 'white', fontWeight: 700, opacity: ready ? 1 : .45, cursor: ready ? 'pointer' : 'not-allowed' }}>
+              I understand — continue
+            </button>
+          </div>
         </div>
       </div>
     </div>

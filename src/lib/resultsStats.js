@@ -10,18 +10,19 @@
 //
 // No supabase import, so it can be tested in Node.
 
-import { combinedScore } from './workedShape.js';
+import { combinedScore, PASS_MARK } from './workedShape.js';
 
-export const PASS_MARK = 75;
+export { PASS_MARK };
 
 /**
- * The fraction a row's shown score stands for, 0..1, unrounded.
- * null while worked marks are still pending (combinedScore() withholds the
- * percentage for the same reason) and for a paper worth nothing at all.
+ * The fraction a row's shown percentage stands for, 0..1, unrounded and on
+ * the paper's grade base. null while worked marks are still pending
+ * (combinedScore() withholds the percentage for the same reason) and for a
+ * paper worth nothing at all.
  */
 export function scoreFraction(row) {
-  const m = combinedScore(row);
-  return m.pending === 0 && m.total > 0 ? m.score / m.total : null;
+  const { exact } = combinedScore(row);
+  return exact === null ? null : exact / 100;
 }
 
 /**
@@ -54,9 +55,9 @@ export function resultStatistics(rows) {
   const pcts = [];
   let pending = 0;
   for (const r of rows) {
-    const f = scoreFraction(r);
-    if (f === null) { if (combinedScore(r).pending > 0) pending++; }
-    else pcts.push(f * 100);
+    const m = combinedScore(r);
+    if (m.exact === null) { if (m.pending > 0) pending++; }
+    else pcts.push(m.exact);
   }
   const n = pcts.length;
   if (n === 0) return null;

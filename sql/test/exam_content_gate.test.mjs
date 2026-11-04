@@ -83,6 +83,16 @@ for (const f of ['001_assessments_and_lessons', '002_review_mode_and_server_scor
   await x(s116.slice(from, to + grant.length));
 }
 
+// 138's grade base column and its grant, likewise.
+{
+  const s138 = fs.readFileSync(`${P}/sql/138_grade_base_on_a_paper.sql`, 'utf8');
+  const from = s138.indexOf('ALTER TABLE public.assessments\n  ADD COLUMN IF NOT EXISTS grade_base');
+  const grant = 'GRANT SELECT (grade_base) ON public.assessments TO anon, authenticated;';
+  const to = s138.indexOf(grant);
+  if (from < 0 || to < 0) throw new Error('138 no longer has its grade_base column and grant');
+  await x(s138.slice(from, to + grant.length));
+}
+
 // A locked paper, open now, created the way the app creates one today.
 const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b33';
 await x(`INSERT INTO public.assessments (id, kind, title, target_section, instructor_id,

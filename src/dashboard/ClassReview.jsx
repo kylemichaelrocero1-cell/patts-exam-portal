@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
-import { combinedScore } from '../lib/workedShape';
+import { combinedScore, gradeOf } from '../lib/workedShape';
 import { classRecordSheets, groupOf } from '../lib/classRecord';
 import { workbookBytes } from '../lib/xlsx';
 import { formatName } from '../lib/personName';
@@ -347,7 +347,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                     );
                   })}
                   <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(r.avg) }}>
-                    {r.avg === null ? '–' : `${Math.round(r.avg)}%`}
+                    {r.avg === null ? '–' : `${gradeOf(r.avg, 100).pct}%`}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {r.missing > 0

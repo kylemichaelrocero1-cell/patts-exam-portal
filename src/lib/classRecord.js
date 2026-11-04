@@ -99,7 +99,7 @@ export function classRecordSheets({ sections, students = [], papers = [], result
     const outOf = cols.reduce((n, p) => n + p.points, 0);
 
     const title = [{ v: `Class record — ${section}`, style: 'title' }];
-    const note = [{ v: `Exported ${when}. Each paper in points; blank = not submitted; yellow = marks still to give. Papers with retakes: ${retakes === 'latest' ? 'latest' : 'best'} attempt.`, style: 'note' }];
+    const note = [{ v: `Exported ${when}. Each paper in raw points, and % is 0-base: total over points available, whatever base a paper shows students. Blank = not submitted; yellow = marks still to give. Papers with retakes: ${retakes === 'latest' ? 'latest' : 'best'} attempt.`, style: 'note' }];
     const groupRow = [null, null];
     cols.forEach((p, i) => { if (i === 0 || cols[i - 1].group !== p.group) groupRow[paperCol(i)] = { v: p.group, style: 'bold' }; });
     groups.forEach((g, gi) => { groupRow[subCol(gi)] = { v: 'Subtotals', style: 'bold' }; });

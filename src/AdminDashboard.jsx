@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import SectionPicker from './components/SectionPicker';
 import { supabase } from './supabase';
@@ -12,7 +12,7 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          isMissingFunctionError, isMissingTableError } from './lib/assessments';
 import { removalPrompt, removalSummary, purgeLabel, TRASH_DAYS } from './lib/removeStudents';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
-import { combinedScore, isWorkedSolution, workedKeyOf, workedItemStats } from './lib/workedShape';
+import { combinedScore, gradeBaseOf, gradeVerdict, isWorkedSolution, withGradeBases, workedKeyOf, workedItemStats } from './lib/workedShape';
 import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
 import { rowsMissingWork, workPatchFrom } from './lib/workRecovery';
 import { submittedDateTime } from './lib/examDates';
@@ -182,6 +182,7 @@ const [targetSection, setTargetSection] = useState('');
   const [newOpensAt, setNewOpensAt] = useState('');        // datetime-local
   const [newClosesAt, setNewClosesAt] = useState('');
   const [newDuration, setNewDuration] = useState(60);
+  const [newGradeBase, setNewGradeBase] = useState(0);        // 0 | 50 (sql/138)
 
   // --- NEW ANALYTICS STATES ---
   const [viewingStudent, setViewingStudent] = useState(null);
@@ -308,6 +309,15 @@ const [targetSection, setTargetSection] = useState('');
   const [isSharing, setIsSharing] = useState(false);
   const [sharesMap, setSharesMap] = useState({}); // { [examId]: [{ id, shared_with }] }
   const [sharedExamsList, setSharedExamsList] = useState([]); // exams shared WITH me
+  // Every score on this dashboard is read through these, so each row's
+  // percentage and verdict are on its own paper's grade base (sql/138). The
+  // raw rows stay in state: realtime and the marking screens write to those.
+  const gradedResults = useMemo(
+    () => withGradeBases(results, [...examsList, ...sharedExamsList]),
+    [results, examsList, sharedExamsList]);
+  const gradedAttempts = useMemo(
+    () => withGradeBases(practiceAttempts, [...examsList, ...sharedExamsList]),
+    [practiceAttempts, examsList, sharedExamsList]);
 
   // --- SECTION CO-INSTRUCTOR STATES ---
   const [sectionCoModal, setSectionCoModal] = useState(null); // section name string | null
@@ -1493,11 +1503,18 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   const deleteQuestion = async (questionId) => {
-    if (!window.confirm('Delete this question permanently?')) return;
-    const q = qList.find(q => q.id === questionId);
-    const { error } = await supabase.from('questions').delete().eq('id', questionId);
-    if (error) { alert('Error deleting question: ' + error.message); return; }
-    if (q?.image_url) await removeQuestionImageFromStorage(q.image_url);
+    if (!window.confirm(`Move this question to the Trash?\n\nYou can restore it for ${TRASH_DAYS} days, and it comes back with students' answers still attached.`)) return;
+    // Its image stays in storage: Restore brings the question back with it.
+    const { data, error } = await supabase.rpc('trash_questions', { p_paper: qExamId, p_ids: [questionId] });
+    if (error) {
+      console.error('Could not move question to the Trash:', error);
+      alert(isMissingFunctionError(error)
+        ? 'Deleting questions needs a database update (sql/139) that has not been run yet. Nothing was changed.'
+        : 'Could not delete this question. Nothing was changed — please try again.');
+      return;
+    }
+    if (data === 'not_yours') { alert('Only an instructor of this paper can delete its questions.'); return; }
+    refreshTrash();
     if (editingQ?.id === questionId) { setEditingQ(null); setQForm(emptyQ); setQImageFile(null); setQImagePreview(null); }
     setExamQuestionsCache(prev => { const n = { ...prev }; delete n[qExamId]; return n; });
     loadQuestionList(qExamId);
@@ -1617,7 +1634,19 @@ const [targetSection, setTargetSection] = useState('');
   const importQuestionsFromCSV = async (examId, questions, replace) => {
     setCsvImporting(true);
     try {
-      if (replace) await supabase.from('questions').delete().eq('exam_id', examId);
+      // The old questions go to the Trash as one entry. If that fails, nothing
+      // is imported: adding to a paper meant to be replaced would double it.
+      if (replace) {
+        const { data, error } = await supabase.rpc('trash_questions', { p_paper: examId, p_ids: null });
+        if (error) {
+          console.error('Could not move questions to the Trash:', error);
+          throw new Error(isMissingFunctionError(error)
+            ? 'Replacing questions needs a database update (sql/139) that has not been run yet. Nothing was changed.'
+            : 'The existing questions could not be moved to the Trash. Nothing was changed.');
+        }
+        if (data === 'not_yours') throw new Error('Only an instructor of this paper can replace its questions.');
+        refreshTrash();
+      }
       const payload = questions.map(q => ({ ...q, exam_id: examId }));
       for (let i = 0; i < payload.length; i += 50) {
         const { error } = await supabase.from('questions').insert(payload.slice(i, i + 50));
@@ -2186,20 +2215,29 @@ async function fetchDashboardData() {
       setIsLoading(false);
     }
   }
-const deleteResult = async (studentId, examId) => {
-    if (window.confirm("Delete this score permanently? This cannot be undone.")) {
-      const { error } = await supabase
-        .from('results')
-        .delete()
-        .eq('student_id', studentId)
-        .eq('exam_id', examId);
+// The Trash list on its own, after a delete that needs no full reload.
+  const refreshTrash = async () => {
+    const { data, error } = await supabase.from('trash')
+      .select('id, kind, item_id, label, detail, trashed_by, trashed_at, purge_after')
+      .order('trashed_at', { ascending: false });
+    if (!error) setTrashRows(data || []);
+  };
 
-      if (error) {
-        alert("Failed to delete: " + error.message);
-      } else {
-        setResults(prev => prev.filter(r => !(r.student_id === studentId && r.exam_id === examId)));
-      }
+  // A result goes to the Trash (sql/139). It leaves `results`, so the student
+  // can sit the paper again, and comes back from the Trash unless they have.
+  const deleteResult = async (studentId, examId) => {
+    if (!window.confirm(`Move this score to the Trash?\n\nThe student can sit the paper again. You can restore the score for ${TRASH_DAYS} days, unless they have sat it again by then.`)) return;
+    const { data, error } = await supabase.rpc('trash_result', { p_student: studentId, p_paper: examId });
+    if (error) {
+      console.error('Could not move result to the Trash:', error);
+      alert(isMissingFunctionError(error)
+        ? 'Deleting scores needs a database update (sql/139) that has not been run yet. Nothing was changed.'
+        : 'Could not delete this score. Nothing was changed — please try again.');
+      return;
     }
+    if (data === 'not_yours') { alert('Only an instructor of this paper can delete its scores.'); return; }
+    setResults(prev => prev.filter(r => !(r.student_id === studentId && r.exam_id === examId)));
+    refreshTrash();
   };
 
   // --- NEW: Create Exam Function ---
@@ -2231,7 +2269,7 @@ const deleteResult = async (studentId, examId) => {
     const useAssessments = assessmentsTableAvailable();
     const table = useAssessments ? 'assessments' : 'exams';
     const row = useAssessments
-      ? { ...base, kind: newKind, opens_at: toIso(newOpensAt), closes_at: toIso(newClosesAt) }
+      ? { ...base, kind: newKind, opens_at: toIso(newOpensAt), closes_at: toIso(newClosesAt), grade_base: newGradeBase }
       : base;
 
     const { data: newExam, error } = await supabase.from(table).insert([row]).select().single();
@@ -2261,6 +2299,7 @@ const deleteResult = async (studentId, examId) => {
     setNewOpensAt('');
     setNewClosesAt('');
     setNewDuration(60);
+    setNewGradeBase(0);
     setCsvExamParsed(null);
     await fetchDashboardData();
     const label = newKind === 'seatwork' ? 'Seatwork' : 'Exam';
@@ -2327,7 +2366,10 @@ const deleteResult = async (studentId, examId) => {
     }
     const outcome = data?.[0]?.outcome;
     if (outcome === 'not_yours') { alert('Only the instructor who deleted this, or the paper\'s owner, can restore it.'); return; }
+    if (outcome === 'taken') { alert('This student has sat the paper again since. Delete that newer score first if this one should stand.'); return; }
     if (outcome === 'gone') alert('This was already deleted for good, so there was nothing to restore.');
+    setExamQuestionsCache({});
+    if (qExamId) loadQuestionList(qExamId);
     await fetchDashboardData();
   };
 
@@ -2362,6 +2404,24 @@ const deleteResult = async (studentId, examId) => {
       return;
     }
     setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, requires_admission: next } : e));
+  };
+
+  // 0-base or 50-base (sql/138). Marks are untouched, so it can go back; but
+  // students see the new percentage at once, so it asks first.
+  const toggleGradeBase = async (exam) => {
+    const next = gradeBaseOf(exam) === 50 ? 0 : 50;
+    const example = next === 50 ? '30/60 will read 75%, Passed.' : '30/60 will read 50%, Failed.';
+    if (!window.confirm(`Show "${exam.title}" on ${next}-base?\n\n${example} Students and the Results tab show this straight away. No marks change, and you can switch back.`)) return;
+    try {
+      await updateAssessment(exam.id, { grade_base: next });
+    } catch (e) {
+      console.error('Could not switch the grade base:', e);
+      alert(/grade_base/.test(e?.message || '')
+        ? 'Choosing a grade base needs a database update (sql/138) that has not been run yet. Nothing was changed.'
+        : 'Could not switch the grade base. Nothing was changed — please try again.');
+      return;
+    }
+    setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, grade_base: next } : e));
   };
 
   // --- NEW: Toggle Exam Open/Close ---
@@ -2708,7 +2768,7 @@ const deleteResult = async (studentId, examId) => {
   results.forEach(r => { resultCounts[r.exam_id] = (resultCounts[r.exam_id] || 0) + 1; });
   const paperPicker = paperOptions({ ...paperView, counts: resultCounts, keep: selectedExam === 'All' ? null : selectedExam });
 
-  const filteredAndSortedResults = results
+  const filteredAndSortedResults = gradedResults
     .filter(row => {
       const studentInfo = students[row.student_id] || {};
       // section is a comma-separated list — match membership, not the whole string,
@@ -3002,7 +3062,7 @@ const deleteResult = async (studentId, examId) => {
                   { label: 'Live Now', value: liveSessions.length, color: liveSessions.length > 0 ? '#E74C3C' : 'var(--ink-3)', icon: 'activity', sub: 'active sessions' },
                   { label: 'Total Students', value: studentsList.length, color: '#2980B9', icon: 'users', sub: 'in your sections' },
                   { label: 'Total Results', value: results.length, color: '#27AE60', icon: 'bar-chart', sub: 'submissions' },
-                  { label: 'Pass Rate', value: (() => { const scored = results.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% · every paper, archived too` },
+                  { label: 'Pass Rate', value: (() => { const scored = gradedResults.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% · every paper, archived too` },
                   // Worked maths items can only be marked in this browser
                   // (sql/024), so scripts sit waiting until somebody opens
                   // them. This tile is the prompt; the Results table says which.
@@ -3079,8 +3139,8 @@ const deleteResult = async (studentId, examId) => {
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading class review…</div>}>
             <ClassReview
               studentsList={studentsList}
-              results={results}
-              practiceAttempts={practiceAttempts}
+              results={gradedResults}
+              practiceAttempts={gradedAttempts}
               examsList={examsList}
             />
           </Suspense>
@@ -3089,7 +3149,7 @@ const deleteResult = async (studentId, examId) => {
         {activeView === 'practice' && (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading practice results…</div>}>
             <PracticeResults
-              attempts={practiceAttempts}
+              attempts={gradedAttempts}
               students={students}
               examsDict={examsDict}
               examsList={examsList}
@@ -3102,6 +3162,7 @@ const deleteResult = async (studentId, examId) => {
             <LessonsManager
               instructorId={instructorId}
               instructorSections={[...instructorSections]}
+              onTrashed={refreshTrash}
             />
           </Suspense>
         )}
@@ -3334,6 +3395,11 @@ const deleteResult = async (studentId, examId) => {
                                   the answers are actually fetched. */}
                               <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</span>
                               <span style={{ display: 'inline-block', minWidth: '5ch', marginLeft: 6, color: m.pending > 0 ? 'var(--ink-4)' : percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
+                              {m.passed !== null && (
+                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: m.passed ? 'var(--ok)' : 'var(--bad)', marginTop: 2, textAlign: 'right' }}>
+                                  {gradeVerdict(m)}
+                                </span>
+                              )}
                               {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2, textAlign: 'right' }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
                               {/* The only thing that tells an instructor a
                                   script is waiting on them. Without it the
@@ -3511,6 +3577,20 @@ const deleteResult = async (studentId, examId) => {
                   >
                     <Icon name={exam.requires_admission ? 'shield-check' : 'shield'} size={12} color={exam.requires_admission ? 'white' : undefined} />
                     {exam.requires_admission ? 'Check-in on' : 'Check-in off'}
+                  </button>
+                  {/* The percentage students and this dashboard show (sql/138). */}
+                  <button
+                    type="button"
+                    onClick={() => toggleGradeBase(exam)}
+                    className="btn ghost sm"
+                    aria-label={`Grade base: ${gradeBaseOf(exam)}. Switch to ${gradeBaseOf(exam) === 50 ? 0 : 50}-base.`}
+                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5 }}
+                    title={gradeBaseOf(exam) === 50
+                      ? '50-base: percentage = 50 + score ÷ total × 50, so half marks is 75%. Pass mark 75. Click for 0-base.'
+                      : '0-base: percentage = score ÷ total × 100, so half marks is 50%. Pass mark 75. Click for 50-base.'}
+                  >
+                    <Icon name="bar-chart" size={12} />
+                    {gradeBaseOf(exam)}-base
                   </button>
                 </td>
 
@@ -3737,6 +3817,13 @@ const deleteResult = async (studentId, examId) => {
                 <select value={newKind} onChange={e => setNewKind(e.target.value)} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
                   <option value="exam">Exam</option>
                   <option value="seatwork">Seatwork</option>
+                </select>
+              </div>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <label htmlFor="new-grade-base" style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Grade base</label>
+                <select id="new-grade-base" value={newGradeBase} onChange={e => setNewGradeBase(Number(e.target.value))} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
+                  <option value={0}>0-base (half marks = 50%)</option>
+                  <option value={50}>50-base (half marks = 75%)</option>
                 </select>
               </div>
               <div style={{ flex: 1, minWidth: '110px' }}>
@@ -5034,7 +5121,7 @@ const deleteResult = async (studentId, examId) => {
                       </span>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer', fontWeight: 600, color: csvReplaceMode ? 'var(--bad)' : 'var(--ink-2)' }}>
                         <input type="checkbox" checked={csvReplaceMode} onChange={e => setCsvReplaceMode(e.target.checked)} style={{ width: '15px', height: '15px' }} />
-                        Replace existing questions
+                        Replace existing questions (they go to the Trash)
                       </label>
                       <button className="btn sm" onClick={() => importQuestionsFromCSV(qExamId, csvParsed.questions, csvReplaceMode)} disabled={csvImporting || csvParsed.questions.length === 0} style={{ width: 'auto', opacity: csvImporting ? 0.7 : 1 }}>
                         {csvImporting ? 'Importing…' : `Import ${csvParsed.questions.length} Questions`}
@@ -5172,9 +5259,18 @@ const deleteResult = async (studentId, examId) => {
       {activeView === 'trash' && (() => {
         const papers = trashRows.filter(t => t.kind === 'paper');
         const people = trashRows.filter(t => t.kind === 'student');
+        const scores = trashRows.filter(t => t.kind === 'result');
+        const items = trashRows.filter(t => t.kind === 'question');
+        const lessonRows = trashRows.filter(t => t.kind === 'lesson');
+        const scoreLine = (d) => {
+          const m = combinedScore(d);
+          return `${d?.paper_title || 'A paper'} · ${m.score}/${m.total}`;
+        };
         const when = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
         const trashRow = (row, icon, title, meta) => {
-          const mine = row.trashed_by === instructorId;
+          // A paper's teachers all see its deleted results and questions, and
+          // any of them may restore those; the server has the last word.
+          const mine = row.trashed_by === instructorId || row.kind === 'result' || row.kind === 'question' || row.kind === 'lesson';
           return (
             <div className="trash-row" key={row.id}>
               <span className="trash-row-icon"><Icon name={icon} size={16} /></span>
@@ -5200,8 +5296,8 @@ const deleteResult = async (studentId, examId) => {
           <div>
             <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)' }}>Trash</h1>
             <p style={{ margin: '0 0 22px', fontSize: 13, color: 'var(--ink-3)', maxWidth: 640, lineHeight: 1.55 }}>
-              Deleted papers and students wait here for {TRASH_DAYS} days. Restore puts them back as they were —
-              a paper comes back closed. After {TRASH_DAYS} days they are deleted for good.
+              Everything you delete waits here for {TRASH_DAYS} days: papers, students, scores, questions and lessons.
+              Restore puts it back as it was — a paper comes back closed. After {TRASH_DAYS} days it is deleted for good.
             </p>
             {trashRows.length === 0 ? (
               <div className="card" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)' }}>
@@ -5215,6 +5311,30 @@ const deleteResult = async (studentId, examId) => {
                     <h2 className="trash-heading">Papers <span>{papers.length}</span></h2>
                     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
                       {papers.map(row => trashRow(row, 'clipboard', row.label || 'Untitled paper', 'Questions and results kept'))}
+                    </div>
+                  </section>
+                )}
+                {scores.length > 0 && (
+                  <section style={{ marginBottom: 22 }}>
+                    <h2 className="trash-heading">Scores <span>{scores.length}</span></h2>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {scores.map(row => trashRow(row, 'bar-chart', formatName(row.label) || 'Unnamed student', scoreLine(row.detail)))}
+                    </div>
+                  </section>
+                )}
+                {items.length > 0 && (
+                  <section style={{ marginBottom: 22 }}>
+                    <h2 className="trash-heading">Questions <span>{items.length}</span></h2>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {items.map(row => trashRow(row, 'file-text', row.label || 'Untitled question', `From ${row.detail?.paper_title || 'a paper'}`))}
+                    </div>
+                  </section>
+                )}
+                {lessonRows.length > 0 && (
+                  <section style={{ marginBottom: 22 }}>
+                    <h2 className="trash-heading">Lessons <span>{lessonRows.length}</span></h2>
+                    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {lessonRows.map(row => trashRow(row, 'book', row.label || 'Untitled lesson', 'Read progress kept'))}
                     </div>
                   </section>
                 )}
@@ -5587,7 +5707,7 @@ const deleteResult = async (studentId, examId) => {
                       return (
                         <span className="px-pill" style={{ background: 'rgba(255,255,255,.15)', color: 'white', borderColor: 'transparent', fontSize: '13px' }}>
                           Score: <strong>{m.score} / {m.total}</strong>
-                          {m.pending > 0 ? ` · ${m.pending} to mark` : m.pct !== null ? ` · ${m.pct}%` : ''}
+                          {m.pending > 0 ? ` · ${m.pending} to mark` : m.pct !== null ? ` · ${m.pct}% · ${gradeVerdict(m)}` : ''}
                         </span>
                       );
                     })()}

@@ -9,7 +9,7 @@ import { paperNoun } from './lib/paperNoun.js';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
 import { useAnswerReview } from './lib/useAnswerReview';
-import { combinedScore } from './lib/workedShape.js';
+import { combinedScore, gradeOf, gradeVerdict, withGradeBases } from './lib/workedShape.js';
 import { homeReads } from './lib/studentHome';
 
 // A student's landing page: what needs doing, what has been done, how they did.
@@ -117,7 +117,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         setData({
           todo: mine.filter(a => !isPaperFinished(a, doneIds.has(a.id)) && availabilityState(a) === 'open'),
           upcoming: mine.filter(a => availabilityState(a) === 'scheduled'),
-          results: results.slice().sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
+          results: withGradeBases(results, behind).sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
           titles: Object.fromEntries([
             ...mine.map(a => [a.id, a.title]),
             ...behind.map(a => [a.id, a.title]),
@@ -155,7 +155,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
     .map(r => ({ row: r, m: combinedScore(r) }))
     .filter(({ m }) => m.total > 0 && m.pct !== null);
   const avg = graded.length
-    ? Math.round(graded.reduce((a, { m }) => a + m.pct, 0) / graded.length)
+    ? gradeOf(graded.reduce((a, { m }) => a + m.pct, 0) / graded.length, 100).pct
     : null;
 
   // A student's own record of their own work is permanent. Closing a paper or
@@ -284,7 +284,17 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                           )}
                         </td>
                         <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: pct === null ? 'var(--ink-4)' : pct >= 75 ? 'var(--ok)' : 'var(--ink-1)' }}>
-                          {m.score}/{m.total}{pct !== null ? ` · ${pct}%` : ''}
+                          {/* The percentage on the paper's base, the raw score
+                              under it, then the verdict and which base it is. */}
+                          {pct !== null && <span style={{ display: 'block', fontSize: 16 }}>{pct}%</span>}
+                          <span style={{ display: 'block', fontSize: pct !== null ? 12.5 : undefined, fontWeight: pct !== null ? 600 : undefined, color: pct !== null ? 'var(--ink-3)' : undefined }}>
+                            {m.score}/{m.total}
+                          </span>
+                          {pct !== null && (
+                            <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: m.passed ? 'var(--ok)' : 'var(--bad)', fontFamily: 'var(--font-sans)' }}>
+                              {gradeVerdict(m, { showBase: true })}
+                            </span>
+                          )}
                           {m.pending > 0 && (
                             <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 600, color: 'var(--warn)', fontFamily: 'var(--font-sans)' }}>
                               {m.pending} mark{m.pending === 1 ? '' : 's'} awaiting marking

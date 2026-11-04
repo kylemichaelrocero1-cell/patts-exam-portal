@@ -18,7 +18,7 @@ import Icon from './components/Icon';
 import { homeReads } from './lib/studentHome';
 import { papersToReview } from './lib/studentHomeCore';
 import { useAnswerReview } from './lib/useAnswerReview';
-import { combinedScore } from './lib/workedShape.js';
+import { combinedScore, gradeVerdict, withGradeBases } from './lib/workedShape.js';
 import { scoreFraction } from './lib/resultsStats.js';
 import { formatName } from './lib/personName.js';
 
@@ -588,7 +588,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               const isSeatwork = exam.kind === 'seatwork';
 
               // Practice history for this paper, newest first.
-              const myAttempts = attempts[exam.id] || [];
+              const myAttempts = withGradeBases(attempts[exam.id], [exam]);
               // Scored as the Summary scores them — points plus worked marks
               // (combinedScore). These pills read score / total_items, the
               // picked-item count alone, so a paper out of 67 said 9/9.
@@ -679,7 +679,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                               <span key={a.attempt_no} title={new Date(a.submitted_at).toLocaleString()}
                                 style={{ fontSize: 12, padding: '3px 9px', borderRadius: 'var(--r-full)', background: 'var(--surface-2)', border: '1px solid var(--line)', color: tone, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
                                 #{a.attempt_no} · {m.score}/{m.total}
-                                {pct !== null && <span style={{ opacity: .7 }}> · {pct}%</span>}
+                                {pct !== null && <span style={{ opacity: .7 }}> · {pct}% · {gradeVerdict(m)}</span>}
                               </span>
                             );
                           })}

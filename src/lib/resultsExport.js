@@ -8,7 +8,7 @@
 import { combinedScore } from './workedShape.js';
 import { submittedDateTime } from './examDates.js';
 
-export const RESULTS_CSV_HEADERS = ['Name', 'Section', 'Exam', 'Score', 'Total', 'Percentage',
+export const RESULTS_CSV_HEADERS = ['Name', 'Section', 'Exam', 'Score', 'Total', 'Percentage', 'Result', 'Grade Base',
   'Date Taken', 'Time Submitted', 'Time Taken (s)', 'Violations'];
 
 /** The cells for one result row, in RESULTS_CSV_HEADERS order, ready to join. */
@@ -28,6 +28,8 @@ export function resultsCsvRow(row, student, examTitle) {
     m.score,
     m.total,
     m.pending > 0 ? 'awaiting marking' : `${pct}%`,
+    m.passed === null ? '' : m.passed ? 'Passed' : 'Failed',
+    m.base,
     when.date,
     when.time,
     row.time_taken_seconds ?? '',

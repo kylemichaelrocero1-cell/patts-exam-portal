@@ -10,6 +10,7 @@
 import {
   isWorkedSolution, linesOf, hasWork, combinedScore, workMarksAvailable,
   finalLineOf, workedKeyOf, workedItemStats,
+  gradeBaseOf, gradeOf, gradeVerdict, showsScoreOnSubmit, withGradeBases,
 } from '../workedShape.js';
 
 let pass = 0, fail = 0;
@@ -144,6 +145,54 @@ console.log('\n=== the item analysis for a worked item ===');
     s.groups[0].full === 3 && s.groups[1].zero === 2 && s.groups[4].pending === 1);
   check('nobody sat it: all zero, no groups',
     eq(workedItemStats(q, []), { sat: 0, blank: 0, pending: 0, full: 0, partial: 0, zero: 0, groups: [] }));
+}
+
+console.log('\n=== grade base (sql/138) ===');
+{
+  check('a paper with no base is on 0-base', gradeBaseOf({}) === 0 && gradeBaseOf(null) === 0);
+  check('only 50 means 50-base', gradeBaseOf({ grade_base: 50 }) === 50 && gradeBaseOf({ grade_base: 25 }) === 0);
+
+  const zero = gradeOf(30, 60, 0), fifty = gradeOf(30, 60, 50);
+  check('half marks on 0-base is 50%, failed', zero.pct === 50 && zero.passed === false, JSON.stringify(zero));
+  check('half marks on 50-base is 75%, passed', fifty.pct === 75 && fifty.passed === true, JSON.stringify(fifty));
+  check('nothing right on 50-base is 50%', gradeOf(0, 60, 50).pct === 50 && gradeOf(0, 60, 50).passed === false);
+  check('full marks is 100% on both', gradeOf(60, 60, 0).pct === 100 && gradeOf(60, 60, 50).pct === 100);
+  check('a paper worth nothing has no grade', gradeOf(0, 0, 50).pct === null && gradeOf(0, 0, 50).passed === null);
+
+  // Just under the mark must never read as the mark.
+  const justUnder = gradeOf(50, 67, 0);
+  check('50/67 is 74.6: shown as 74, failed', justUnder.pct === 74 && justUnder.passed === false, JSON.stringify(justUnder));
+  const justUnder50 = gradeOf(49, 100, 50);
+  check('49/100 on 50-base is 74.5: shown as 74, failed', justUnder50.pct === 74 && justUnder50.passed === false, JSON.stringify(justUnder50));
+  check('exactly 75 passes', gradeOf(75, 100, 0).passed === true && gradeOf(50, 100, 50).passed === true);
+  check('other rounding is untouched', gradeOf(2, 3, 0).pct === 67 && gradeOf(1, 3, 0).pct === 33);
+
+  const m = combinedScore({ score: 30, total_items: 60, grade_base: 50 });
+  check('the marks stay raw on 50-base', m.score === 30 && m.total === 60 && m.pct === 75 && m.passed === true, JSON.stringify(m));
+  const worked = combinedScore({ points_earned: 10, points_total: 20, work_marks: 5, work_total: 10, grade_base: 50 });
+  check('worked marks fold in before the base', worked.score === 15 && worked.total === 30 && worked.pct === 75, JSON.stringify(worked));
+  const pending = combinedScore({ points_earned: 10, points_total: 20, work_total: 10, grade_base: 50 });
+  check('nothing is shown or decided while marks are pending', pending.pct === null && pending.passed === null, JSON.stringify(pending));
+  check('a paper with no base reads as it always did', combinedScore({ score: 40, total_items: 50 }).pct === 80);
+
+  check('verdict: passed on 0-base', gradeVerdict({ passed: true, base: 0 }) === 'Passed');
+  check('verdict: names 50-base', gradeVerdict({ passed: false, base: 50 }) === 'Failed · 50-base');
+  check('verdict: none while pending', gradeVerdict({ passed: null, base: 50 }) === '');
+  check('verdict: can always name the base', gradeVerdict({ passed: true, base: 0 }, { showBase: true }) === 'Passed · 0-base'
+    && gradeVerdict({ passed: true, base: 50 }, { showBase: true }) === 'Passed · 50-base');
+
+  check('after Submit: a 50-base exam shows the score', showsScoreOnSubmit({ grade_base: 50 }, false) === true);
+  check('after Submit: a paper that reveals answers shows it', showsScoreOnSubmit({ grade_base: 0 }, true) === true);
+  check('after Submit: a 0-base exam keeps it for the Summary', showsScoreOnSubmit({ grade_base: 0 }, false) === false);
+  check('after Submit: a paper with no base keeps it too', showsScoreOnSubmit({}, false) === false);
+
+  const rows = withGradeBases(
+    [{ exam_id: 'a', score: 1 }, { assessment_id: 'b', score: 2 }, { exam_id: 'gone', score: 3 }],
+    [{ id: 'a', grade_base: 50 }, { id: 'b', grade_base: 0 }]);
+  check('a result takes its paper\'s base', rows[0].grade_base === 50);
+  check('a practice attempt too', rows[1].grade_base === 0);
+  check('a paper not in view falls back to 0-base', rows[2].grade_base === 0);
+  check('no rows is no rows', withGradeBases(undefined, []).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -11,7 +11,8 @@ import {
 } from './lib/answers';
 import { sittingDecision, sittingNotFiled, restartPatch } from './lib/retakes';
 import { hasSavedWork } from './lib/proctoring';
-import { hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
+import { gradeBaseOf, hasWork, isWorkedSolution, showsScoreOnSubmit, workMarksAvailable } from './lib/workedShape.js';
+import ExamResult from './components/ExamResult.jsx';
 import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
 import { createFocusLossWatcher, isTypingTarget, keyboardHidesFocus, COVER_MS, COVER_GRACE_MS } from './lib/focusLoss.js';
@@ -1109,9 +1110,11 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
     // COVER_GRACE_MS just after an answer box was used, since a phone's
     // keyboard takes the focus for a moment as it slides up (lib/focusLoss.js).
     // No page can see another app's window; it can only see that it no
-    // longer has the focus. An iPad's keyboard takes the focus for as long
-    // as it is up, with no blur: that is not a loss (lib/focusLoss.js).
-    const keyboardUp = keyboardHidesFocus(device)
+    // longer has the focus. An iPad's keyboard takes the focus while it is up
+    // and for a while after it closes, with no blur: that is not a loss
+    // (lib/focusLoss.js).
+    const holdsFocus = keyboardHidesFocus(device);
+    const keyboardUp = holdsFocus
       ? () => isTypingTarget(document.activeElement)
       : () => false;
     const cover = createFocusLossWatcher({
@@ -1119,6 +1122,9 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
       hasFocus: () => document.hasFocus(),
       isHidden: () => false,
       keyboardUp,
+      holdsFocus,
+      // The keyboard's, not a leave: a later real one is timed from its own start.
+      onForgiven: () => { away = false; blurAt = null; },
       lossMs: COVER_MS,
       graceMs: COVER_GRACE_MS,
     });
@@ -1202,8 +1208,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
       lastTick = now;
       if (alertActiveRef.current || document.hidden) return;
       if (gap > PAUSE_MS) startAbsence('paused', now - gap);
-      if (document.hasFocus()) { if (away) back(); return; }
-      if (!away && keyboardUp()) return;
+      if (document.hasFocus()) { cover.focusSeen(); if (away) back(); return; }
+      if (!away && cover.keyboardExplains()) return;
       if (!away) blurAt = now;
       away = true;
       cover.check();
@@ -1566,41 +1572,17 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
             </div>
             <div style={{ padding: '28px 32px', textAlign: 'center' }}>
               {/* On a paper that reveals answers there is no reason to withhold
-                  the mark — the student is about to see every question anyway.
-                  On a real exam it stays hidden, as before. */}
-              {canReviewAnswers && scoreDisplay && (() => {
-                // A worked paper's score arrives a moment after submit, once
-                // the answers have been fetched and marked on this device. A
-                // percentage of a half-counted paper would be wrong, so while
-                // marks are still pending there is no percentage at all.
-                const pending = scoreDisplay.workPending > 0;
-                const pct = (!pending && scoreDisplay.total > 0)
-                  ? Math.round((scoreDisplay.score / scoreDisplay.total) * 100) : null;
-                const tone = pct === null ? 'var(--ink-2)'
-                  : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
-                return (
-                  <div style={{ marginBottom: 22 }}>
-                    <div style={{ fontSize: 11, letterSpacing: '.1em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700 }}>
-                      Your score{attemptNo > 1 ? ` · attempt ${attemptNo}` : ''}
-                    </div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 40, color: tone, lineHeight: 1.1, marginTop: 6 }}>
-                      {pending ? '—' : scoreDisplay.score}
-                      <span style={{ color: 'var(--ink-4)', fontSize: 26 }}>
-                        /{pending ? scoreDisplay.workPending + scoreDisplay.total : scoreDisplay.total}
-                      </span>
-                    </div>
-                    {pct !== null && (
-                      <div style={{ fontSize: 15, fontWeight: 700, color: tone, marginTop: 2 }}>{pct}%</div>
-                    )}
-                    {pending && (
-                      <div style={{ fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, marginTop: 4 }}>
-                        Your instructor will mark this
-                      </div>
-                    )}
-
-                  </div>
-                );
-              })()}
+                  the mark, and a 50-base paper shows it so a student knows
+                  they passed. Any other exam keeps it for the Summary tab. */}
+              {showsScoreOnSubmit(exam, canReviewAnswers) && (
+                <ExamResult
+                  score={scoreDisplay.score}
+                  total={scoreDisplay.total}
+                  workPending={scoreDisplay.workPending}
+                  base={gradeBaseOf(exam)}
+                  attemptNo={attemptNo}
+                />
+              )}
 
               <p style={{ margin: '0 0 22px', color: 'var(--ink-3)', fontSize: 13.5, lineHeight: 1.65 }}>
                 {canReviewAnswers

@@ -7,6 +7,7 @@ import {
   validateLessonFile, lessonFilePath, storagePathFromUrl, formatFileSize,
   MAX_LESSON_FILE_BYTES,
 } from '../lib/lessonMaterial';
+import { isMissingFunctionError } from '../lib/assessmentsCore';
 
 // One reader per module, so the "has this database been migrated" probe
 // happens once per session rather than once per reload of the list.
@@ -34,7 +35,7 @@ const EMPTY = {
   material_type: 'typed', file_url: null, file_name: null, file_size: null,
 };
 
-export default function LessonsManager({ instructorId, instructorSections = [] }) {
+export default function LessonsManager({ instructorId, instructorSections = [], onTrashed }) {
   const [lessons, setLessons] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -219,11 +220,18 @@ export default function LessonsManager({ instructorId, instructorSections = [] }
   };
 
   const remove = async (lesson) => {
-    if (!window.confirm(`Delete "${lesson.title}" permanently?\n\nStudents will lose access and their read progress for this lesson is removed too.`)) return;
-    const { error } = await supabase.from('lessons').delete().eq('id', lesson.id);
-    if (error) return alert('Delete failed: ' + error.message);
-    if (lesson.file_url) await removeStoredFile(lesson.file_url);
+    if (!window.confirm(`Move "${lesson.title}" to the Trash?\n\nStudents lose access now. You can restore it from the Trash for 30 days, with its file and their read progress; after that it is deleted for good.`)) return;
+    // The stored file stays: Restore brings the lesson back with it (sql/139).
+    const { data, error } = await supabase.rpc('trash_lesson', { p_lesson: lesson.id });
+    if (error) {
+      console.error('Could not move lesson to the Trash:', error);
+      return alert(isMissingFunctionError(error)
+        ? 'Deleting lessons needs a database update (sql/139) that has not been run yet. Nothing was changed.'
+        : 'Could not delete this lesson. Nothing was changed — please try again.');
+    }
+    if (data === 'not_yours') return alert('Only the instructor who owns this lesson can delete it.');
     setLessons(prev => prev.filter(l => l.id !== lesson.id));
+    onTrashed?.();
   };
 
   const visible = lessons.filter(l =>

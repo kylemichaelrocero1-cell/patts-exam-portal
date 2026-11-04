@@ -36,6 +36,64 @@ export function hasWork(value) {
   return linesOf(value).some(l => l.replace(LAW_TAIL, '').trim() !== '');
 }
 
+// A percentage at or above this is a pass, on either grade base.
+export const PASS_MARK = 75;
+
+/** A paper's grade base (sql/138), read off the paper or a row that carries it. 50 or 0. */
+export function gradeBaseOf(x) {
+  return Number(x?.grade_base) === 50 ? 50 : 0;
+}
+
+/**
+ * A score as a grade on this base.
+ *
+ *   0-base:  score / total × 100         30/60 is 50%
+ *   50-base: 50 + score / total × 50     30/60 is 75%
+ *
+ * `exact` is unrounded, and it alone decides `passed`. `pct` is the whole
+ * percent to show, which never rounds a failing grade up to the pass mark:
+ * 74.6 shows as 74, so no screen can read "75%, Failed".
+ */
+export function gradeOf(score, total, base = 0) {
+  if (!(total > 0)) return { exact: null, pct: null, passed: null };
+  const fraction = score / total;
+  const exact = base === 50 ? 50 + fraction * 50 : fraction * 100;
+  const rounded = Math.round(exact);
+  return {
+    exact,
+    pct: exact < PASS_MARK && rounded >= PASS_MARK ? PASS_MARK - 1 : rounded,
+    passed: exact >= PASS_MARK,
+  };
+}
+
+/**
+ * "Passed" or "Failed", with the base when it is not the plain one, or always
+ * with showBase. '' with no grade yet.
+ */
+export function gradeVerdict({ passed, base = 0 } = {}, { showBase = false } = {}) {
+  if (passed === null || passed === undefined) return '';
+  return `${passed ? 'Passed' : 'Failed'}${showBase || base === 50 ? ` · ${base}-base` : ''}`;
+}
+
+/**
+ * Does the screen after Submit show the score? A paper that reveals its answers
+ * always has. A 50-base paper does, so a student knows there and then that half
+ * marks passed. A 0-base exam keeps it for the Summary tab.
+ */
+export function showsScoreOnSubmit(exam, canReview) {
+  return !!canReview || gradeBaseOf(exam) === 50;
+}
+
+/**
+ * Result rows with each one's paper's base beside it, so combinedScore() and
+ * everything built on it reads the grade the paper asks for. A row is a result
+ * (exam_id) or a practice attempt (assessment_id).
+ */
+export function withGradeBases(rows, papers) {
+  const base = new Map((papers || []).map(p => [p.id, gradeBaseOf(p)]));
+  return (rows || []).map(r => ({ ...r, grade_base: base.get(r.exam_id ?? r.assessment_id) ?? 0 }));
+}
+
 /**
  * What a paper scored, with worked items folded in.
  *
@@ -60,7 +118,9 @@ export function hasWork(value) {
  * "8 marks awaiting marking" is the same fact told honestly.
  *
  * `pct` is deliberately null while anything is pending, because a percentage
- * of a partly-marked paper is a number nobody should act on.
+ * of a partly-marked paper is a number nobody should act on. It and `passed`
+ * are on the row's `grade_base` when it carries one (withGradeBases); `score`
+ * and `total` are always the raw marks.
  */
 export function combinedScore(row) {
   // An item may be worth more than one point (sql/025), so the picked-item
@@ -84,12 +144,10 @@ export function combinedScore(row) {
   const rawMarks = row?.work_marks;
   const marked = rawMarks !== null && rawMarks !== undefined && rawMarks !== '';
   const workMarks = marked ? Number(rawMarks) || 0 : 0;
+  const base = gradeBaseOf(row);
 
   if (workTotal <= 0) {
-    return {
-      score: mcScore, total: mcTotal, pending: 0, marked: true,
-      pct: mcTotal > 0 ? Math.round((mcScore / mcTotal) * 100) : null,
-    };
+    return { score: mcScore, total: mcTotal, pending: 0, marked: true, base, ...gradeOf(mcScore, mcTotal, base) };
   }
 
   const total = mcTotal + workTotal;
@@ -98,7 +156,8 @@ export function combinedScore(row) {
     score, total,
     pending: marked ? 0 : workTotal,
     marked,
-    pct: marked && total > 0 ? Math.round((score / total) * 100) : null,
+    base,
+    ...(marked ? gradeOf(score, total, base) : { exact: null, pct: null, passed: null }),
   };
 }
 

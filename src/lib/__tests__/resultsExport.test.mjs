@@ -54,5 +54,14 @@ const math117 = { score: 9, total_items: 9, points_earned: 9, points_total: 9, w
 check('names are quoted, so a comma in one cannot shift the columns',
   resultsCsvRow({ score: 1, total_items: 1 }, { name: 'Cruz, Ana', section: 'S' }, 'X')[0] === '"Cruz, Ana"');
 
+console.log('\n=== grade base (sql/138) ===');
+{
+  const c = resultsCsvRow({ score: 30, total_items: 60, grade_base: 50 }, STU, 'X');
+  check('the file shows the base, the percentage and the verdict',
+    cell(c, 'Percentage') === '75%' && cell(c, 'Result') === 'Passed' && cell(c, 'Grade Base') === 50 && cell(c, 'Score') === 30, JSON.stringify(c));
+  const p = resultsCsvRow({ score: 9, total_items: 9, work_total: 58 }, STU, 'X');
+  check('no verdict while marks are pending', cell(p, 'Percentage') === 'awaiting marking' && cell(p, 'Result') === '', JSON.stringify(p));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

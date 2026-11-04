@@ -1,8 +1,7 @@
 import { useState, useMemo } from 'react';
 import Icon from '../components/Icon';
 import { submittedDateTime } from '../lib/examDates.js';
-import { combinedScore } from '../lib/workedShape.js';
-import { scoreFraction } from '../lib/resultsStats.js';
+import { combinedScore, gradeOf } from '../lib/workedShape.js';
 import { paperOptions } from '../lib/paperFilter.js';
 import { formatName } from '../lib/personName';
 
@@ -22,8 +21,7 @@ const PASS = 75;
 // score / total_items, the picked-item count alone. null while worked marks
 // are pending.
 function pct(row) {
-  const f = scoreFraction(row);
-  return f === null ? null : f * 100;
+  return combinedScore(row).exact;
 }
 
 function toneFor(p) {
@@ -34,7 +32,7 @@ function toneFor(p) {
 }
 
 function fmtPct(p) {
-  return p === null ? '–' : `${Math.round(p)}%`;
+  return p === null ? '–' : `${gradeOf(p, 100).pct}%`;
 }
 
 function fmtTime(seconds) {

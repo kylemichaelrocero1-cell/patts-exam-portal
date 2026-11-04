@@ -61,5 +61,18 @@ console.log('\n=== statistics ===');
   check('nothing scored is no statistics', resultStatistics([{ score: 1, total_items: 9, work_total: 58 }]) === null);
 }
 
+console.log('\n=== grade base (sql/138) ===');
+{
+  const half = { score: 30, total_items: 60 };
+  const zero = resultStatistics([half]);
+  const fifty = resultStatistics([{ ...half, grade_base: 50 }]);
+  check('half marks on 0-base: mean 50, no pass', zero.mean === 50 && zero.passRate === 0, JSON.stringify(zero));
+  check('half marks on 50-base: mean 75, a pass', fifty.mean === 75 && fifty.passRate === 100, JSON.stringify(fifty));
+  check('50-base lands in the 75–79 bar', fifty.distribution.find(b => b.label === '75–79%').count === 1);
+  check('the fraction is on the base', scoreFraction({ ...half, grade_base: 50 }) === 0.75 && scoreFraction(half) === 0.5);
+  check('a sort across papers follows the shown percentage',
+    compareByScore({ score: 30, total_items: 60, grade_base: 50 }, { score: 40, total_items: 60 }, 'desc') < 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

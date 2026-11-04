@@ -93,6 +93,16 @@ ck('every existing paper keeps its sets',
   await x(s116.slice(from, to + grant.length));
 }
 
+// 138's grade base column and its grant, likewise.
+{
+  const s138 = fs.readFileSync(`${P}/sql/138_grade_base_on_a_paper.sql`, 'utf8');
+  const from = s138.indexOf('ALTER TABLE public.assessments\n  ADD COLUMN IF NOT EXISTS grade_base');
+  const grant = 'GRANT SELECT (grade_base) ON public.assessments TO anon, authenticated;';
+  const to = s138.indexOf(grant);
+  if (from < 0 || to < 0) throw new Error('138 no longer has its grade_base column and grant');
+  await x(s138.slice(from, to + grant.length));
+}
+
 console.log('\n=== who reads and who switches ===');
 {
   const r = await as('anon', null, studentRead);

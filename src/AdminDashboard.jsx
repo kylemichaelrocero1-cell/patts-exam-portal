@@ -74,7 +74,7 @@ const QuantityKey = ({ q }) => (
 const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
 // A query that can exceed that silently drops the overflow, and with no ORDER BY
@@ -2867,11 +2867,8 @@ async function fetchDashboardData() {
         height: '100vh', position: 'sticky', top: 0,
       }}>
         {/* Logo */}
-        <div style={{ padding: '20px 18px 14px', borderBottom: '1px solid rgba(255,255,255,.07)', flexShrink: 0 }}>
-          <img src="/patts-logo.png" alt="PATTS" style={{ height: 34, objectFit: 'contain', display: 'block' }} />
-          <div style={{ fontSize: 9.5, color: 'rgba(255,255,255,.38)', fontWeight: 700, letterSpacing: '.16em', marginTop: 8, textTransform: 'uppercase' }}>
-            Instructor Dashboard
-          </div>
+        <div style={{ height: 'var(--bar-h)', padding: '0 19px', display: 'flex', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,.07)', flexShrink: 0 }}>
+          <img src="/patts-logo.png" alt="PATTS" style={{ height: 36, objectFit: 'contain', display: 'block' }} />
         </div>
 
         {/* Nav */}
@@ -2885,14 +2882,14 @@ async function fetchDashboardData() {
               { id: 'lessons',    label: 'Lessons',       icon: 'book' },
             ] },
             { group: 'Assess', items: [
-              { id: 'manage',     label: 'Manage Exams',  icon: 'clipboard' },
-              { id: 'questions',  label: 'Questions',     icon: 'file-text' },
+              { id: 'manage',     label: 'Manage Exams',  icon: 'exam' },
+              { id: 'questions',  label: 'Questions',     icon: 'question-bank' },
               { id: 'live',       label: 'Live Monitor',  icon: 'activity', badge: liveSessions.length > 0 ? String(liveSessions.length) : null, live: true },
             ] },
             { group: 'Results', items: [
               { id: 'results',    label: 'Results',       icon: 'bar-chart' },
               { id: 'class',      label: 'Class Review',  icon: 'graduation' },
-              { id: 'practice',   label: 'Practice Results', icon: 'refresh' },
+              { id: 'practice',   label: 'Practice Results', icon: 'practice' },
               { id: 'attendance', label: 'Attendance',    icon: 'calendar' },
             ] },
             { group: 'Admin', items: [
@@ -2901,8 +2898,8 @@ async function fetchDashboardData() {
               { id: 'trash',      label: 'Trash',         icon: 'trash', badge: trashRows.length > 0 ? String(trashRows.length) : null },
             ] },
           ].map(({ group, items }) => (
-            <div key={group} role="group" aria-label={group} style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
-              <div style={{ padding: '8px 11px 4px', fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: 'rgba(255,255,255,.34)' }}>
+            <div key={group} role="group" aria-label={group} style={{ display: 'flex', flexDirection: 'column', gap: 1, marginBottom: 4 }}>
+              <div style={{ padding: '6px 11px 2px', fontSize: 11.5, fontWeight: 500, color: 'rgba(255,255,255,.55)' }}>
                 {group}
               </div>
               {items.map(item => {
@@ -2914,19 +2911,21 @@ async function fetchDashboardData() {
                 aria-current={active ? 'page' : undefined}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9,
-                  padding: '9px 11px', borderRadius: 'var(--r-sm)',
+                  padding: '6px 11px', borderRadius: 'var(--r-sm)',
                   border: 'none', cursor: 'pointer', textAlign: 'left', width: '100%',
-                  background: active ? 'rgba(255,255,255,.13)' : 'transparent',
-                  color: active ? 'white' : 'rgba(255,255,255,.58)',
-                  fontWeight: active ? 600 : 400,
-                  fontSize: 13.5, transition: 'all var(--t-1)',
+                  // Where you are: a white pill floating on the navy.
+                  background: active ? 'white' : 'transparent',
+                  boxShadow: active ? '0 6px 14px -6px rgba(0,0,0,.55)' : 'none',
+                  color: active ? 'var(--navy)' : 'rgba(255,255,255,.84)',
+                  fontWeight: active ? 600 : 500,
+                  fontSize: 13.5, transition: 'background var(--t-1), color var(--t-1)',
                 }}
               >
-                <Icon name={item.icon} size={16} style={{ flexShrink: 0 }} />
+                <Icon name={item.icon} size={17} style={{ flexShrink: 0 }} />
                 <span style={{ flex: 1 }}>{item.label}</span>
                 {item.badge && (
                   <span style={{
-                    background: item.live ? '#E74C3C' : 'rgba(255,255,255,.2)',
+                    background: item.live ? 'var(--live)' : 'rgba(255,255,255,.2)',
                     color: 'white', fontSize: 10.5, fontWeight: 700,
                     padding: '1px 6px', borderRadius: 99, lineHeight: 1.6,
                   }}>{item.badge}</span>
@@ -2938,62 +2937,38 @@ async function fetchDashboardData() {
           ))}
         </nav>
 
-        {/* Profile + Logout */}
-        <div style={{ padding: '12px 14px', borderTop: '1px solid rgba(255,255,255,.07)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
-            <div style={{
-              width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
-              background: 'var(--gold)', color: 'var(--navy)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12.5, fontWeight: 700,
-            }}>
-              {nameInitials(displayInstructor(instructorName))}
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {displayInstructor(instructorName)}
-              </div>
-              <div style={{ fontSize: 10.5, color: 'rgba(255,255,255,.38)' }}>Instructor</div>
-            </div>
+        {/* Who is signed in, and the two things to do about it. */}
+        <div style={{ padding: '10px 8px 10px 19px', borderTop: '1px solid rgba(255,255,255,.07)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+            background: 'var(--gold)', color: 'var(--navy)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, fontWeight: 700,
+          }}>
+            {nameInitials(displayInstructor(instructorName))}
           </div>
-          <button
-            onClick={() => setShowPwModal(true)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 7, width: '100%',
-              padding: '7px 10px', borderRadius: 'var(--r-sm)', marginBottom: 6,
-              border: '1px solid rgba(255,255,255,.14)',
-              background: 'rgba(255,255,255,.06)', color: 'rgba(255,255,255,.65)',
-              fontSize: 12.5, cursor: 'pointer', transition: 'all var(--t-1)',
-            }}
-          >
-            <Icon name="lock" size={13} />
-            Change password
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={displayInstructor(instructorName)}>
+            {displayInstructor(instructorName)}
+          </div>
+          <button className="dash-side-icon" onClick={() => setShowPwModal(true)} aria-label="Change password" title="Change password">
+            <Icon name="lock" size={16} />
           </button>
-          <button
-            onClick={onLogout}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 7, width: '100%',
-              padding: '7px 10px', borderRadius: 'var(--r-sm)',
-              border: '1px solid rgba(255,255,255,.14)',
-              background: 'rgba(255,255,255,.06)', color: 'rgba(255,255,255,.65)',
-              fontSize: 12.5, cursor: 'pointer', transition: 'all var(--t-1)',
-            }}
-          >
-            <Icon name="logout" size={13} />
-            Sign out
+          <button className="dash-side-icon" onClick={onLogout} aria-label="Sign out" title="Sign out">
+            <Icon name="logout" size={16} />
           </button>
         </div>
       </aside>
 
       {/* ── WORKSPACE ── */}
-      <main className="dash-main" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', overflow: 'hidden', background: 'var(--surface-2)' }}>
+      <main className="dash-main" style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', overflow: 'hidden', background: 'var(--paper)' }}>
 
         {/* Toolbar */}
         <div className="dash-toolbar" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '13px 24px', borderBottom: '1px solid var(--line)',
-          background: 'var(--paper)', position: 'sticky', top: 0, zIndex: 10,
-          boxShadow: '0 1px 0 var(--line)',
+          minHeight: 'var(--bar-h)', padding: '0 20px',
+          boxShadow: '0 1px 0 var(--line-soft), 0 8px 18px -14px rgba(10,35,66,.4)',
+          background: 'var(--surface)', position: 'sticky', top: 0, zIndex: 10,
         }}>
           {/* Phones only: opens the sidebar. It carries the live count, so a
               sitting in progress shows without opening the menu. */}
@@ -3036,12 +3011,8 @@ async function fetchDashboardData() {
                 setLastRefreshed(new Date().toLocaleTimeString());
                 setIsRefreshing(false);
               }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                background: 'transparent', border: '1px solid var(--line)',
-                color: 'var(--ink-3)', padding: '6px 13px', borderRadius: 'var(--r-sm)',
-                fontSize: 12.5, cursor: 'pointer', opacity: isRefreshing ? 0.6 : 1,
-              }}
+              className="btn ghost sm dash-refresh"
+              style={{ opacity: isRefreshing ? 0.6 : 1 }}
             >
               <Icon name="refresh" size={13} />
               {isRefreshing ? 'Refreshing…' : 'Refresh'}
@@ -3050,82 +3021,53 @@ async function fetchDashboardData() {
         </div>
 
         {/* Panel content */}
-        <div className="dash-panel" ref={dashPanelRef} style={{ flex: 1, padding: '24px', overflowY: 'auto' }}>
+        <div className="dash-panel" ref={dashPanelRef} style={{ flex: 1, padding: '14px 20px', overflowY: 'auto' }}>
 
           {/* --- OVERVIEW HOME PANEL --- */}
           {activeView === 'home' && (
             <div>
-              <div style={{ marginBottom: 20 }}>
-                <div className="eyebrow" style={{ fontSize: 10 }}>Dashboard</div>
-                <h3 style={{ margin: '4px 0 4px', fontSize: 18 }}>Welcome back, {displayInstructor(instructorName).split(' ')[0] || 'Instructor'}.</h3>
-                <p style={{ margin: 0, fontSize: 13, color: 'var(--ink-3)' }}>
-                  {examsList.length} exam{examsList.length !== 1 ? 's' : ''} · {studentsList.length} student{studentsList.length !== 1 ? 's' : ''} · {results.length} submission{results.length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 24 }}>
+              <div className="stat-strip stat-strip-tight">
                 {[
-                  { label: 'Open Exams', value: examsList.filter(e => e.is_open).length, color: 'var(--navy)', icon: 'clipboard', sub: 'currently open' },
-                  { label: 'Live Now', value: liveSessions.length, color: liveSessions.length > 0 ? '#E74C3C' : 'var(--ink-3)', icon: 'activity', sub: 'active sessions' },
-                  { label: 'Total Students', value: studentsList.length, color: '#2980B9', icon: 'users', sub: 'in your sections' },
-                  { label: 'Total Results', value: results.length, color: '#27AE60', icon: 'bar-chart', sub: 'submissions' },
-                  { label: 'Pass Rate', value: (() => { const scored = gradedResults.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), color: '#16A085', icon: 'trend-up', sub: `≥${PASS_MARK}% · every paper, archived too` },
+                  { label: 'Open exams', value: examsList.filter(e => e.is_open).length, icon: 'exam', chip: 'gold' },
+                  { label: 'Live now', value: liveSessions.length, icon: 'activity', chip: liveSessions.length > 0 ? 'bad' : 'navy', tone: liveSessions.length > 0 ? 'var(--live)' : undefined },
+                  { label: 'Students', value: studentsList.length, icon: 'users', chip: 'navy' },
+                  { label: 'Results', value: results.length, icon: 'bar-chart', chip: 'blue' },
+                  { label: 'Pass rate', value: (() => { const scored = gradedResults.map(scoreFraction).filter(f => f !== null); if (scored.length === 0) return '–'; const p = scored.filter(f => f * 100 >= PASS_MARK).length; return `${Math.round((p / scored.length) * 100)}%`; })(), icon: 'trend-up', chip: 'ok', title: `Scored ${PASS_MARK}% or more, on every paper, archived too` },
                   // Worked maths items can only be marked in this browser
                   // (sql/024), so scripts sit waiting until somebody opens
                   // them. This tile is the prompt; the Results table says which.
                   ...(scriptsToMark > 0
-                    ? [{ label: 'To Mark', value: scriptsToMark, color: 'var(--warn)', icon: 'edit', sub: `script${scriptsToMark === 1 ? '' : 's'} with working` }]
+                    ? [{ label: 'To mark', value: scriptsToMark, icon: 'edit', chip: 'gold', tone: 'var(--warn)' }]
                     : []),
                 ].map(card => (
-                  <div key={card.label} style={{ background: 'var(--surface-2)', border: '1.5px solid var(--line)', borderRadius: 'var(--r-md)', padding: '16px 14px', textAlign: 'center' }}>
-                    <Icon name={card.icon} size={20} color={card.color} style={{ marginBottom: 8 }} />
-                    <div style={{ fontSize: 24, fontWeight: 800, color: card.color, lineHeight: 1 }}>{card.value}</div>
-                    <div style={{ fontSize: 11, color: 'var(--ink-3)', fontWeight: 600, marginTop: 4 }}>{card.label}</div>
-                    <div style={{ fontSize: 10.5, color: 'var(--ink-4)', marginTop: 2 }}>{card.sub}</div>
+                  <div key={card.label} className="stat-cell" title={card.title}>
+                    <span className={`chip chip-${card.chip}`}><Icon name={card.icon} size={18} /></span>
+                    <div>
+                      <div className="stat-cell-label">{card.label}</div>
+                      <div className="stat-cell-value" style={card.tone ? { color: card.tone } : undefined}>{card.value}</div>
+                    </div>
                   </div>
                 ))}
               </div>
-              <div className="dash-two-col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                <div>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>Your Exams</div>
-                  {examsList.length === 0 ? (
-                    <p style={{ fontSize: 13, color: 'var(--ink-4)' }}>No exams yet — create one in Manage Exams.</p>
-                  ) : [...examsList].filter(e => !e.archived_at)
-                    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 6).map(e => (
-                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', marginBottom: 5 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: e.is_open ? '#27AE60' : 'var(--ink-4)', flexShrink: 0 }} />
-                      <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
-                      <span style={{ fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{e.target_section}</span>
+              {examsList.length === 0 ? (
+                <p style={{ fontSize: 13, color: 'var(--ink-4)' }}>No exams yet. Create one in Manage Exams.</p>
+              ) : (
+                <div className="row-list">
+                  {[...examsList].filter(e => !e.archived_at)
+                    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))).slice(0, 10).map(e => (
+                    <div key={e.id} className="row-list-item">
+                      <span title={e.is_open ? 'Open' : 'Closed'} style={{ width: 8, height: 8, borderRadius: '50%', background: e.is_open ? 'var(--ok)' : 'var(--ink-5)', flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
+                      <span style={{ fontSize: 12.5, fontWeight: 400, color: 'var(--ink-4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '40%' }}>{e.target_section}</span>
                     </div>
                   ))}
-                  {examsList.filter(e => !e.archived_at).length > 6 && <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '4px 0 0' }}>+{examsList.filter(e => !e.archived_at).length - 6} more — view all in Manage Exams</p>}
                 </div>
-                <div>
-                  <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ink-3)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.08em' }}>Quick Actions</div>
-                  {[
-                    { label: 'Manage Exams', icon: 'clipboard', view: 'manage' },
-                    { label: 'View Results', icon: 'bar-chart', view: 'results' },
-                    { label: 'Live Monitor', icon: 'activity', view: 'live' },
-                    { label: 'Student Roster', icon: 'users', view: 'students' },
-                  ].map(action => (
-                    <button
-                      key={action.view}
-                      onClick={() => setActiveView(action.view)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                        padding: '9px 12px', marginBottom: 6,
-                        background: 'var(--surface-2)', border: '1px solid var(--line)',
-                        borderRadius: 'var(--r-sm)', cursor: 'pointer',
-                        fontSize: 13, fontWeight: 500, color: 'var(--ink-1)',
-                        transition: 'all var(--t-1)',
-                      }}
-                    >
-                      <Icon name={action.icon} size={15} color="var(--navy)" />
-                      {action.label}
-                      <Icon name="chevron-right" size={14} color="var(--ink-4)" style={{ marginLeft: 'auto' }} />
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
+              {examsList.filter(e => !e.archived_at).length > 10 && (
+                <button className="btn ghost sm" style={{ marginTop: 8, width: 'auto' }} onClick={() => setActiveView('manage')}>
+                  +{examsList.filter(e => !e.archived_at).length - 10} more
+                </button>
+              )}
             </div>
           )}
 
@@ -3175,16 +3117,6 @@ async function fetchDashboardData() {
 
         {activeView === 'results' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Results</h1>
-                <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>Submitted scores across all your exams.</p>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn ghost sm" onClick={exportCSV}><Icon name="download" size={14} /> Export CSV</button>
-              </div>
-            </div>
-
             {/* Rescore banner — only for 0/0 rows on a paper with picked
                 items, which is exactly what rescoreZeroResults() repairs. Do
                 not widen this to 0/N: the dashboard query does not select
@@ -3196,15 +3128,15 @@ async function fetchDashboardData() {
             ) && (
               <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Icon name="alert" size={16} color="#B8860B" />
-                  <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>Some results show 0/0</span>
-                  <span style={{ color: '#A07000', fontSize: 13 }}>— answers are saved on the server and can be re-scored</span>
+                  <Icon name="alert" size={16} color="var(--warn)" />
+                  <span style={{ fontWeight: 600, color: 'var(--warn)', fontSize: 14 }}>Some results show 0/0</span>
+                  <span style={{ color: 'var(--warn)', fontSize: 13 }}>— answers are saved on the server and can be re-scored</span>
                 </div>
                 <button
                   className="btn sm"
                   onClick={rescoreZeroResults}
                   disabled={isRescoring}
-                  style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                  style={{ background: 'var(--gold)', borderColor: 'var(--gold)', color: 'var(--navy-900)', width: 'auto', fontWeight: 700 }}
                 >
                   {isRescoring ? 'Re-scoring…' : 'Fix 0/0 Results'}
                 </button>
@@ -3218,17 +3150,17 @@ async function fetchDashboardData() {
               return (
                 <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <Icon name="alert" size={16} color="#B8860B" />
-                    <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>
+                    <Icon name="alert" size={16} color="var(--warn)" />
+                    <span style={{ fontWeight: 600, color: 'var(--warn)', fontSize: 14 }}>
                       {missing.length} paper{missing.length === 1 ? ' is' : 's are'} missing {missing.length === 1 ? 'its' : 'their'} worked answers
                     </span>
-                    <span style={{ color: '#A07000', fontSize: 13 }}>— the working was kept in the live session and can be recovered and marked</span>
+                    <span style={{ color: 'var(--warn)', fontSize: 13 }}>— the working was kept in the live session and can be recovered and marked</span>
                   </div>
                   <button
                     className="btn sm"
                     onClick={recoverMissingWork}
                     disabled={isRecoveringWork}
-                    style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                    style={{ background: 'var(--gold)', borderColor: 'var(--gold)', color: 'var(--navy-900)', width: 'auto', fontWeight: 700 }}
                   >
                     {isRecoveringWork ? 'Recovering…' : 'Recover working'}
                   </button>
@@ -3237,7 +3169,7 @@ async function fetchDashboardData() {
             })()}
 
             {/* Filters — on a phone, folded behind one button that says what is picked */}
-            <div className={`card dash-filters${filtersOpen ? '' : ' is-collapsed'}`} style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div className={`card dash-filters${filtersOpen ? '' : ' is-collapsed'}`}>
               <button type="button" className="btn ghost sm dash-filters-toggle" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(o => !o)}>
                 <Icon name="sliders" size={14} />
                 <span className="dash-filters-summary">
@@ -3249,16 +3181,14 @@ async function fetchDashboardData() {
                 <Icon name={filtersOpen ? 'chevron-up' : 'chevron-down'} size={14} style={{ marginLeft: 'auto' }} />
               </button>
               <div className="dash-filter-field">
-                <label className="label">Course</label>
-                <select className="input" style={{ width: 'auto', minWidth: 130, display: 'inline-block' }} value={selectedCourse}
+                <select className="input" aria-label="Course" value={selectedCourse}
                   onChange={e => { setSelectedCourse(e.target.value); setSelectedExam('All'); }}>
                   <option value="All">All courses</option>
                   {paperPicker.courses.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div className="dash-filter-field" style={{ minWidth: 0, flex: '1 1 260px', maxWidth: 520 }}>
-                <label className="label">Paper</label>
-                <select className="input" style={{ width: '100%' }} value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
+              <div className="dash-filter-field dash-filter-grow">
+                <select className="input" aria-label="Paper" value={selectedExam} onChange={e => setSelectedExam(e.target.value)}>
                   <option value="All">All papers{selectedCourse !== 'All' ? ` in ${selectedCourse}` : ''}</option>
                   {paperPicker.groups.map(g => (
                     <optgroup key={g.course} label={g.course}>
@@ -3270,80 +3200,73 @@ async function fetchDashboardData() {
                     </optgroup>
                   ))}
                 </select>
-                {(paperPicker.hiddenArchived > 0 || showArchivedResults) && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ink-3)', marginTop: 6, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={showArchivedResults} onChange={e => setShowArchivedResults(e.target.checked)} />
-                    Include archived papers{!showArchivedResults ? ` (${paperPicker.hiddenArchived})` : ''}
-                  </label>
-                )}
               </div>
               <div className="dash-filter-field">
-                <label className="label">Filter by Section</label>
-                <select className="input" style={{ width: 'auto', minWidth: 160, display: 'inline-block' }} value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
-                  {uniqueSections.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                <select className="input" aria-label="Section" value={selectedSection} onChange={e => setSelectedSection(e.target.value)}>
+                  {uniqueSections.map(sec => <option key={sec} value={sec}>{sec === 'All' ? 'All sections' : sec}</option>)}
                 </select>
               </div>
               <div className="dash-filter-field">
-                <label className="label">Student</label>
-                <input className="input" style={{ width: 'auto', minWidth: 170, display: 'inline-block' }}
-                  placeholder="Search by name" value={resultQuery} onChange={e => setResultQuery(e.target.value)} />
+                <input className="input" aria-label="Student name"
+                  placeholder="Student" value={resultQuery} onChange={e => setResultQuery(e.target.value)} />
               </div>
               <div className="dash-filter-field">
-                <label className="label">Sort by</label>
-                <select className="input" style={{ width: 'auto', minWidth: 180, display: 'inline-block' }} value={resultSort} onChange={e => setResultSort(e.target.value)}>
-                  <option value="section">Section (A–Z)</option>
-                  <option value="name">Name (A–Z)</option>
-                  <option value="score_desc">Score (Highest First)</option>
-                  <option value="score_asc">Score (Lowest First)</option>
+                <select className="input" aria-label="Sort by" value={resultSort} onChange={e => setResultSort(e.target.value)}>
+                  <option value="section">By section</option>
+                  <option value="name">By name</option>
+                  <option value="score_desc">Highest first</option>
+                  <option value="score_asc">Lowest first</option>
                 </select>
               </div>
+              {(paperPicker.hiddenArchived > 0 || showArchivedResults) && (
+                <label className="dash-filter-field dash-filter-check">
+                  <input type="checkbox" checked={showArchivedResults} onChange={e => setShowArchivedResults(e.target.checked)} />
+                  Archived{!showArchivedResults ? ` (${paperPicker.hiddenArchived})` : ''}
+                </label>
+              )}
               {/* One row per submission, so a student appears once per exam —
                   counting rows as "students" overstated it badly (AENG 426 shows
                   1025 rows, which is 122 students across 15 exams). Show both. */}
-              <span className="px-pill brand" style={{ marginLeft: 'auto' }}>
-                {filteredAndSortedResults.length} result{filteredAndSortedResults.length !== 1 ? 's' : ''}
-                {' · '}
-                {(() => {
-                  const n = new Set(filteredAndSortedResults.map(r => r.student_id)).size;
-                  return `${n} student${n !== 1 ? 's' : ''}`;
-                })()}
+              <span className="res-tail">
+                <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
+                  {filteredAndSortedResults.length} result{filteredAndSortedResults.length !== 1 ? 's' : ''}
+                  {' · '}
+                  {(() => {
+                    const n = new Set(filteredAndSortedResults.map(r => r.student_id)).size;
+                    return `${n} student${n !== 1 ? 's' : ''}`;
+                  })()}
+                </span>
+                <button className="btn ghost sm" onClick={exportCSV} style={{ width: 'auto' }}><Icon name="download" size={14} /> CSV</button>
               </span>
             </div>
 
-            {/* Stats */}
+            {/* Stats and the spread of scores, one short band. */}
             {resultStats && (
-              <div className="dash-stats-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14, marginBottom: 16 }}>
-                <div className="card" style={{ padding: 18 }}>
-                  <h4 style={{ marginBottom: resultStats.pending > 0 ? 2 : 12 }}>Quick stats</h4>
-                  {resultStats.pending > 0 && (
-                    <div style={{ fontSize: 11.5, color: 'var(--warn)', fontWeight: 600, marginBottom: 10 }}>
-                      {resultStats.pending} paper{resultStats.pending === 1 ? '' : 's'} still to mark — not counted yet
+              <div className="card res-summary">
+                <div className="res-stats">
+                  {[
+                    { label: 'Mean', value: resultStats.mean },
+                    { label: 'Median', value: resultStats.median },
+                    { label: 'Pass rate', value: resultStats.passRate, plain: true },
+                    { label: 'Highest', value: resultStats.highest },
+                  ].map(s => (
+                    <div key={s.label}>
+                      <div className="res-stat-label">{s.label}</div>
+                      <div className="res-stat-value" style={s.plain ? undefined : { color: s.value >= PASS_MARK ? 'var(--ok)' : 'var(--bad)' }}>{s.value.toFixed(1)}%</div>
                     </div>
+                  ))}
+                  {resultStats.pending > 0 && (
+                    <div className="res-pending">{resultStats.pending} to mark, not counted</div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                    {[
-                      { label: 'Mean', value: `${resultStats.mean.toFixed(1)}%` },
-                      { label: 'Median', value: `${resultStats.median.toFixed(1)}%` },
-                      { label: 'Pass rate', value: `${resultStats.passRate.toFixed(1)}%` },
-                      { label: 'Highest', value: `${resultStats.highest.toFixed(1)}%` },
-                    ].map(s => (
-                      <div key={s.label} style={{ padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 8 }}>
-                        <div style={{ fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600 }}>{s.label}</div>
-                        <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 2 }}>{s.value}</div>
-                      </div>
-                    ))}
-                  </div>
                 </div>
-                <div className="card" style={{ padding: 18 }}>
-                  <h4 style={{ marginBottom: 12 }}>Score distribution</h4>
-                  <ResponsiveContainer width="100%" height={160}>
-                    <BarChart data={resultStats.distribution} margin={{ top: 4, right: 10, left: -20, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--ink-3)' }} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--ink-3)' }} />
-                      <Tooltip formatter={(value) => [`${value} student${value !== 1 ? 's' : ''}`, 'Count']} contentStyle={{ fontSize: '12px', borderRadius: '6px' }} />
-                      <Bar dataKey="count" radius={[4, 4, 0, 0]}>
+                <div className="res-chart" role="img" aria-label="Number of students in each score band">
+                  <ResponsiveContainer width="100%" height={92}>
+                    <BarChart data={resultStats.distribution} margin={{ top: 14, right: 4, left: 4, bottom: 0 }}>
+                      <XAxis dataKey="label" interval={0} tickFormatter={(l) => String(l).replace('%', '')} tickLine={false} axisLine={{ stroke: 'var(--line)' }} tick={{ fontSize: 11, fill: 'var(--ink-3)' }} height={18} />
+                      <Tooltip formatter={(value) => [`${value} student${value !== 1 ? 's' : ''}`, 'Count']} contentStyle={{ fontSize: '12px', borderRadius: '6px' }} cursor={{ fill: 'var(--navy-50)' }} />
+                      <Bar dataKey="count" radius={[5, 5, 1, 1]} isAnimationActive={false}>
                         {resultStats.distribution.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                        <LabelList dataKey="count" position="top" formatter={(v) => (v > 0 ? v : '')} style={{ fontSize: 11, fill: 'var(--ink-2)', fontWeight: 600 }} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
@@ -3354,15 +3277,15 @@ async function fetchDashboardData() {
             {/* Table */}
             <div className="card" style={{ overflow: 'hidden' }}>
               <div className="table-scroll">
-                <table className="tbl tbl-stack">
+                <table className="tbl tbl-stack tbl-results">
                   <thead>
                     <tr>
                       <th>Student</th>
                       <th>Section</th>
                       {selectedExam === 'All' && <th>Paper</th>}
-                      <th style={{ textAlign: 'right' }}>Score</th>
+                      <th>Score</th>
                       <th>Time</th>
-                      <th>Violations</th>
+                      <th>Flags</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -3385,12 +3308,12 @@ async function fetchDashboardData() {
                         const essayCount = (examQuestionsCache[row.exam_id] || []).filter(q => q.question_type === 'essay').length;
                         return (
                           <tr key={index}>
-                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{formatName(student.name)}</td>
-                            <td data-label="Section"><span className="px-pill brand">{student.section}</span></td>
+                            <td className="tbl-stack-title res-name" style={{ fontWeight: 600 }}>{formatName(student.name)}</td>
+                            <td className="res-section" data-label="Section" style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{student.section}</td>
                             {selectedExam === 'All' && (
-                              <td data-label="Paper" title={examTitle} style={{ color: 'var(--ink-2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
+                              <td className="res-paper" data-label="Paper" title={examTitle} style={{ color: 'var(--ink-3)', fontSize: 12.5, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
                             )}
-                            <td data-label="Score" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <td className="res-score" data-label="Score" style={{ whiteSpace: 'nowrap' }}>
                               {/* The percentage has a fixed width so every
                                   fraction lines up under the header, 9% or
                                   100%. The manual-score pencil used to sit
@@ -3399,40 +3322,40 @@ async function fetchDashboardData() {
                                   on every row and pushed the scores out of
                                   line. It lives in the paper view now, where
                                   the answers are actually fetched. */}
-                              <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</span>
-                              <span style={{ display: 'inline-block', minWidth: '5ch', marginLeft: 6, color: m.pending > 0 ? 'var(--ink-4)' : percentage >= 75 ? 'var(--ok)' : 'var(--warn)', fontWeight: 600, fontSize: 12 }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
+                              <span style={{ display: 'inline-block', minWidth: '7ch', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{m.score}/{m.total}</span>
+                              <span style={{ display: 'inline-block', minWidth: '5ch', textAlign: 'right', marginLeft: 6, color: m.pending > 0 ? 'var(--ink-4)' : (m.passed ?? percentage >= PASS_MARK) ? 'var(--ok)' : 'var(--bad)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.pending > 0 ? '—' : `${percentage}%`}</span>
                               {m.passed !== null && (
-                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: m.passed ? 'var(--ok)' : 'var(--bad)', marginTop: 2, textAlign: 'right' }}>
+                                <span style={{ display: 'inline-block', marginLeft: 8, fontSize: 12, fontWeight: 600, color: m.passed ? 'var(--ok)' : 'var(--bad)', textAlign: 'left' }}>
                                   {gradeVerdict(m)}
                                 </span>
                               )}
-                              {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2, textAlign: 'right' }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
+                              {essayCount > 0 && <span style={{ display: 'block', fontSize: 11, color: 'var(--info)', marginTop: 2 }}>+{essayCount} essay{essayCount !== 1 ? 's' : ''}</span>}
                               {/* The only thing that tells an instructor a
                                   script is waiting on them. Without it the
                                   pending-marks window is invisible from this
                                   side and nobody ever opens the paper. */}
                               {missingWorkKeys.has(`${row.student_id}_${row.exam_id}`) && (
-                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--bad)', marginTop: 2, textAlign: 'right' }}>
+                                <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--bad)', marginTop: 2 }}>
                                   working not saved
                                 </span>
                               )}
                               {m.pending > 0 && (
-                                <span style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'var(--warn)', marginTop: 2, textAlign: 'right' }}>
+                                <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--warn)', marginTop: 2 }}>
                                   {m.pending} mark{m.pending === 1 ? '' : 's'} to mark
                                 </span>
                               )}
                             </td>
-                            <td data-label="Time" style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ink-3)' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : 'N/A'}</td>
-                            <td data-label="Flags">
+                            <td className="res-time" data-label="Time" style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : '–'}</td>
+                            <td className="res-flags" data-label="Flags">
                               {row.tab_switches > 0
-                                ? <span className="px-pill bad"><Icon name="flag" size={11} /> {row.tab_switches}</span>
-                                : <span className="px-pill ok"><Icon name="check" size={10} /> Clean</span>
+                                ? <span className="px-pill bad" title={`${row.tab_switches} flagged`}><Icon name="flag" size={11} /> {row.tab_switches}</span>
+                                : <span title="No flags" aria-label="No flags" style={{ color: 'var(--ok)', display: 'inline-flex' }}><Icon name="check" size={15} /></span>
                               }
                             </td>
-                            <td data-label="">
+                            <td className="res-actions" data-label="">
                               <div style={{ display: 'flex', gap: 4 }}>
-                                <button onClick={() => openStudentDetails(row)} className="btn ghost sm"><Icon name="eye" size={13} /></button>
-                                <button onClick={() => deleteResult(row.student_id, row.exam_id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
+                                <button onClick={() => openStudentDetails(row)} className="btn ghost sm icon-btn" aria-label={`Open ${formatName(student.name)}'s paper`} title="Open paper"><Icon name="eye" size={15} /></button>
+                                <button onClick={() => deleteResult(row.student_id, row.exam_id)} className="btn ghost sm icon-btn" aria-label={`Delete ${formatName(student.name)}'s score`} title="Move to Trash" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={15} /></button>
                               </div>
                             </td>
                           </tr>
@@ -3449,23 +3372,6 @@ async function fetchDashboardData() {
 {/* --- MANAGE EXAMS PANEL --- */}
         {activeView === 'manage' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Manage Exams</h1>
-                <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>Open or close a paper, change its settings, and jump to its questions and results.</p>
-              </div>
-              {examsList.some(e => e.archived_at) && (
-                <button
-                  onClick={() => setShowArchived(v => !v)}
-                  className={showArchived ? 'btn sm' : 'btn ghost sm'}
-                  style={{ width: 'auto' }}
-                >
-                  <Icon name="archive" size={13} />
-                  {showArchived ? 'Hide archived' : `Show archived (${examsList.filter(e => e.archived_at).length})`}
-                </button>
-              )}
-            </div>
-
             {/* Find a paper: most instructors have a term's worth of them. */}
             {examsList.length > 0 && (
               <div className="mx-toolbar">
@@ -3493,6 +3399,16 @@ async function fetchDashboardData() {
                     </button>
                   ))}
                 </div>
+                {examsList.some(e => e.archived_at) && (
+                  <button
+                    onClick={() => setShowArchived(v => !v)}
+                    className={showArchived ? 'btn sm' : 'btn ghost sm'}
+                    style={{ width: 'auto' }}
+                  >
+                    <Icon name="archive" size={14} />
+                    {showArchived ? 'Hide archived' : `Archived (${examsList.filter(e => e.archived_at).length})`}
+                  </button>
+                )}
               </div>
             )}
 
@@ -3615,8 +3531,7 @@ async function fetchDashboardData() {
                     {/* Co-instructor buttons per unique section name on this exam */}
                     {(exam.target_section || '').split(',').map(x => x.trim()).filter(Boolean).length > 0 && (
                       <div className="mx-row mx-coteach">
-                        <span>Co-instructors:</span>
-                        {(exam.target_section || '').split(',').map(x => x.trim()).filter(Boolean).map(sec => (
+                                                {(exam.target_section || '').split(',').map(x => x.trim()).filter(Boolean).map(sec => (
                           <button
                             key={sec}
                             className="btn ghost sm"
@@ -3708,14 +3623,14 @@ async function fetchDashboardData() {
                     className="btn sm"
                     title="Grade base, retakes, answer review and shuffling"
                   >
-                    <Icon name="settings" size={14} /> Exam settings
+                    <Icon name="settings" size={14} /> Settings
                   </button>
                   <button
                     onClick={() => { handleQExamChange(exam.id); setActiveView('questions'); }}
                     className="btn ghost sm"
                     title="Add or edit this paper's questions"
                   >
-                    <Icon name="file-text" size={14} /> Questions
+                    <Icon name="question-bank" size={14} /> Questions
                   </button>
                   <button
                     onClick={() => { setSelectedCourse('All'); setSelectedExam(exam.id); setActiveView('results'); }}
@@ -3725,7 +3640,7 @@ async function fetchDashboardData() {
                     <Icon name="bar-chart" size={14} /> Results
                   </button>
                   <button onClick={() => openExamStats(exam.id)} className="btn ghost sm" title="How the class did on each question">
-                    <Icon name="activity" size={14} /> Item analysis
+                    <Icon name="activity" size={14} /> Analysis
                   </button>
                   <button onClick={() => setRescoreFor(exam)} className="btn ghost sm"
                     title="Mark every submitted paper again after you change a key">
@@ -3988,14 +3903,10 @@ async function fetchDashboardData() {
           return (
             <div>
               {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Students</h1>
-                  <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>
-                    {studentsList.length} student{studentsList.length !== 1 ? 's' : ''} across {instructorSections.size} section{instructorSections.size !== 1 ? 's' : ''}
-                  </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   {mySectionChips.length > 0 && (
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                    <div className="student-chips" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                       {mySectionChips.map(chip => (
                         <span
                           key={chip.name}
@@ -4021,51 +3932,46 @@ async function fetchDashboardData() {
                     </div>
                   )}
                 </div>
-                <button className="btn ghost sm" onClick={downloadStudentCSVTemplate}>
-                  <Icon name="download" size={13} /> Download Template
+                <button className="btn ghost sm" style={{ width: 'auto', flexShrink: 0 }} onClick={downloadStudentCSVTemplate}>
+                  <Icon name="download" size={13} /> Template
                 </button>
               </div>
 
-              {/* Section filter bar */}
-              <div className="card" style={{ padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <label className="label" style={{ margin: 0, whiteSpace: 'nowrap' }}>Section</label>
-                <select
-                  value={studentSectionFilter}
-                  onChange={e => { setStudentSectionFilter(e.target.value); setSelectedStudentIds(new Set()); }}
-                  className="input"
-                  style={{ width: 'auto', minWidth: 160, display: 'inline-block', padding: '7px 10px' }}
-                >
-                  {studentSections.map(sec => (
-                    <option key={sec} value={sec}>{sec === 'All' ? 'All Sections' : sec}</option>
-                  ))}
-                </select>
-                <span className="px-pill brand">{filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}</span>
-                {studentSectionFilter !== 'All' && (
-                  <button onClick={() => { setStudentSectionFilter('All'); setSelectedStudentIds(new Set()); }} className="btn ghost sm"><Icon name="x" size={12} /> Clear</button>
-                )}
-              </div>
-
-              {/* Batch bar */}
-              <div className="card" style={{ padding: '12px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', borderColor: selectedStudentIds.size > 0 ? 'var(--navy-200)' : 'var(--line)', background: selectedStudentIds.size > 0 ? 'var(--navy-50)' : 'var(--surface)' }}>
-                <span style={{ fontWeight: 600, color: 'var(--ink-2)', fontSize: 13, minWidth: 160 }}>
-                  {selectedStudentIds.size > 0 ? `${selectedStudentIds.size} selected` : 'Select students to batch edit'}
+              {/* Which students, and what to do with the ones ticked. */}
+              <div className="card filter-row" style={{ borderColor: selectedStudentIds.size > 0 ? 'var(--navy)' : undefined }}>
+                <div className="dash-filter-field">
+                  <select
+                    value={studentSectionFilter}
+                    onChange={e => { setStudentSectionFilter(e.target.value); setSelectedStudentIds(new Set()); }}
+                    className="input"
+                    aria-label="Section"
+                  >
+                    {studentSections.map(sec => (
+                      <option key={sec} value={sec}>{sec === 'All' ? 'All sections' : sec}</option>
+                    ))}
+                  </select>
+                </div>
+                <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
+                  {selectedStudentIds.size > 0
+                    ? `${selectedStudentIds.size} selected`
+                    : `${filteredStudents.length} student${filteredStudents.length !== 1 ? 's' : ''}`}
                 </span>
                 <input
                   type="text"
                   value={batchSection}
                   onChange={e => setBatchSection(e.target.value)}
-                  placeholder="Set selected students' section to…"
+                  placeholder="New section for ticked students"
                   aria-label="Section to set for the selected students (replaces your sections for them)"
                   title="Replaces the sections you have these students in. Other instructors' sections are kept."
                   className="input"
-                  style={{ flex: 1, minWidth: 180, padding: '7px 10px' }}
+                  style={{ flex: '1 1 200px', width: 'auto', minWidth: 0 }}
                 />
                 <button onClick={batchUpdateSection} disabled={isBatchSaving || selectedStudentIds.size === 0 || !batchSection.trim()} className="btn sm">
                   {isBatchSaving ? 'Saving…' : 'Set section'}
                 </button>
                 {selectedStudentIds.size > 0 && (
                   <>
-                    <button onClick={batchDeleteStudents} disabled={isBatchSaving} className="btn sm danger"><Icon name="trash" size={13} /> Remove Selected</button>
+                    <button onClick={batchDeleteStudents} disabled={isBatchSaving} className="btn sm danger"><Icon name="trash" size={13} /> Remove</button>
                     <button onClick={() => setSelectedStudentIds(new Set())} className="btn ghost sm">Clear</button>
                   </>
                 )}
@@ -4105,7 +4011,7 @@ async function fetchDashboardData() {
                       if (item.type === 'header') {
                         return (
                           <tr key={`sec-${item.section}-${idx}`}>
-                            <td colSpan="5" style={{ padding: '8px 14px', background: 'var(--navy-50)', borderTop: idx > 0 ? '1px solid var(--line)' : 'none', fontWeight: 700, fontSize: 11, color: 'var(--navy)', letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                            <td colSpan="5" style={{ padding: '8px 14px', background: 'var(--navy-50)', borderTop: idx > 0 ? '1px solid var(--line)' : 'none', fontWeight: 600, fontSize: 12.5, color: 'var(--navy)', }}>
                               {item.section}
                             </td>
                           </tr>
@@ -4341,7 +4247,7 @@ async function fetchDashboardData() {
                 <div className="card live-waiting" style={{ border: `1.5px solid ${waitingRows.length ? 'var(--navy)' : 'var(--line)'}`, borderRadius: 'var(--r-lg)', padding: '12px 14px', marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: shownWaiting.length ? 10 : 0 }}>
                     <Icon name="shield-check" size={15} color="var(--navy)" />
-                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--navy)' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--navy)' }}>
                       Waiting to enter
                     </span>
                     <span className={`px-pill${waitingRows.length ? ' live' : ''}`} style={{ fontSize: 11 }}>{waitingRows.length}</span>
@@ -4399,7 +4305,7 @@ async function fetchDashboardData() {
                 <div style={{ background: 'var(--bad-bg)', border: '1.5px solid var(--bad-bd)', borderRadius: 'var(--r-lg)', padding: '12px 14px', marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                     <Icon name="flag" size={14} color="var(--bad)" />
-                    <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--bad)' }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--bad)' }}>
                       Recent violations
                     </span>
                     <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>
@@ -4420,7 +4326,7 @@ async function fetchDashboardData() {
                           maxWidth: '100%',
                         }}
                       >
-                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 11, color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>
                           {v.stamp || '—'}
                         </span>
                         <strong style={{ color: 'var(--ink-1)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
@@ -4439,29 +4345,25 @@ async function fetchDashboardData() {
               {forceSubmittable.length > 0 && (
                 <div style={{ background: 'var(--warn-bg, #FFF8E1)', border: '1.5px solid var(--warn-bd, #F9A825)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Icon name="alert" size={16} color="#B8860B" />
-                    <span style={{ fontWeight: 600, color: '#7B5800', fontSize: 14 }}>
+                    <Icon name="alert" size={16} color="var(--warn)" />
+                    <span style={{ fontWeight: 600, color: 'var(--warn)', fontSize: 14 }}>
                       {forceSubmittable.length} student{forceSubmittable.length !== 1 ? 's' : ''} need{forceSubmittable.length === 1 ? 's' : ''} force submission
                     </span>
-                    <span style={{ color: '#A07000', fontSize: 13 }}>— time expired or exam closed</span>
+                    <span style={{ color: 'var(--warn)', fontSize: 13 }}>— time expired or exam closed</span>
                   </div>
                   <button
                     className="btn sm"
                     onClick={() => setForceSubmitConfirmList(forceSubmittable)}
-                    style={{ background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', width: 'auto', fontWeight: 700 }}
+                    style={{ background: 'var(--gold)', borderColor: 'var(--gold)', color: 'var(--navy-900)', width: 'auto', fontWeight: 700 }}
                   >
-                    <Icon name="send" size={13} color="#1a1000" /> Force Submit All ({forceSubmittable.length})
+                    <Icon name="send" size={13} color="var(--navy-900)" /> Force Submit All ({forceSubmittable.length})
                   </button>
                 </div>
               )}
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
-                <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span className="px-pill live" style={{ fontSize: '12px' }}>{activeSessions.length} active</span>
-                  Live Exam Monitor
-                </h1>
+                <span className="px-pill live" style={{ fontSize: '12.5px' }}>{activeSessions.length} active</span>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span className="eyebrow">Sort:</span>
                   <button className={`btn ghost sm${liveSort === 'name' ? '' : ''}`} onClick={() => applyLiveSort('name')} style={liveSort === 'name' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>A–Z Name</button>
                   <button className="btn ghost sm" onClick={() => applyLiveSort('section')} style={liveSort === 'section' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>By Section</button>
                   {stuckCount > 0 && (
@@ -4481,51 +4383,42 @@ async function fetchDashboardData() {
                   )}
                 </div>
               </div>
-              <p style={{ color: 'var(--ink-3)', marginBottom: '16px', fontSize: '13px' }}>
-                Order is locked once set — student data updates in place without shuffling rows.
-                {openSittings.length > 0 && ' “Submit All Now” ends every open sitting on the spot, even one with time left — it asks first.'}
-              </p>
-
               {/* FILTERS — section, paper, status, name */}
               {(sittingRows.length > 0 || waitingRows.length > 0) && (
-                <div className="card live-filters" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="card filter-row live-filters">
                   <div className="dash-filter-field">
-                    <label className="label" htmlFor="live-f-section">Section</label>
-                    <select id="live-f-section" className="input" style={{ width: 'auto', minWidth: 140 }} value={liveFilter.section} onChange={e => setFilter('section', e.target.value)}>
+                    <select id="live-f-section" aria-label="Section" className="input" value={liveFilter.section} onChange={e => setFilter('section', e.target.value)}>
                       <option value="">All sections</option>
                       {liveSectionChoices.map(sec => <option key={sec} value={sec}>{sec}</option>)}
                     </select>
                   </div>
-                  <div className="dash-filter-field" style={{ minWidth: 0, flex: '1 1 200px', maxWidth: 360 }}>
-                    <label className="label" htmlFor="live-f-paper">Paper</label>
-                    <select id="live-f-paper" className="input" style={{ width: '100%' }} value={liveFilter.paper} onChange={e => setFilter('paper', e.target.value)}>
+                  <div className="dash-filter-field dash-filter-grow">
+                    <select id="live-f-paper" aria-label="Paper" className="input" value={liveFilter.paper} onChange={e => setFilter('paper', e.target.value)}>
                       <option value="">All papers</option>
                       {livePaperChoices.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                     </select>
                   </div>
                   <div className="dash-filter-field">
-                    <label className="label" htmlFor="live-f-status">Status</label>
-                    <select id="live-f-status" className="input" style={{ width: 'auto', minWidth: 120 }} value={liveFilter.status} onChange={e => setFilter('status', e.target.value)}>
+                    <select id="live-f-status" aria-label="Status" className="input" value={liveFilter.status} onChange={e => setFilter('status', e.target.value)}>
                       <option value="">Any status</option>
                       <option value="active">Active</option>
                       <option value="locked">Locked</option>
                       <option value="timed_out">Timed out</option>
                     </select>
                   </div>
-                  <div className="dash-filter-field" style={{ flex: '1 1 160px', maxWidth: 260 }}>
-                    <label className="label" htmlFor="live-f-name">Name</label>
-                    <input id="live-f-name" className="input" type="search" placeholder="Search a name" value={liveFilter.query}
-                      onChange={e => setFilter('query', e.target.value)} style={{ width: '100%', height: 42, boxSizing: 'border-box' }} />
+                  <div className="dash-filter-field" style={{ flex: '1 1 150px' }}>
+                    <input id="live-f-name" aria-label="Name" className="input" type="search" placeholder="Search a name" value={liveFilter.query}
+                      onChange={e => setFilter('query', e.target.value)} />
                   </div>
                   {filtering && (
-                    <button type="button" className="btn ghost sm" style={{ width: 'auto', minHeight: 38 }}
+                    <button type="button" className="btn ghost sm" style={{ width: 'auto' }}
                       onClick={() => setLiveFilter({ section: '', paper: '', status: '', query: '' })}>
-                      <Icon name="x" size={13} /> Clear filters
+                      <Icon name="x" size={13} /> Clear
                     </button>
                   )}
                   {filtering && (
                     <span style={{ fontSize: 12.5, color: 'var(--ink-3)', alignSelf: 'center' }}>
-                      Showing {shownSittings.length} of {sittingRows.length} sitting{sittingRows.length !== 1 ? 's' : ''}
+                      {shownSittings.length} of {sittingRows.length}
                     </span>
                   )}
                 </div>
@@ -4564,8 +4457,8 @@ async function fetchDashboardData() {
                           {session.status === 'locked'
                             ? <span className="px-pill bad"><Icon name="lock" size={11} /> LOCKED</span>
                             : isSessionForceSubmittable(session)
-                              ? <span className="px-pill" style={{ background: '#FFF3CD', color: '#856404', border: '1px solid #FFDA6A', fontSize: 11 }}>
-                                  <Icon name="alert" size={11} color="#856404" /> TIMED OUT
+                              ? <span className="px-pill" style={{ background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid var(--warn-bd)', fontSize: 11 }}>
+                                  <Icon name="alert" size={11} color="var(--warn)" /> TIMED OUT
                                 </span>
                               : <span className="px-pill ok"><Icon name="dot" size={11} /> Active</span>}
                         </td>
@@ -4605,9 +4498,9 @@ async function fetchDashboardData() {
                               <button
                                 className="btn sm"
                                 onClick={() => setForceSubmitConfirmList([session])}
-                                style={{ width: 'auto', background: '#F9A825', borderColor: '#F9A825', color: '#1a1000', fontWeight: 700 }}
+                                style={{ width: 'auto', background: 'var(--gold)', borderColor: 'var(--gold)', color: 'var(--navy-900)', fontWeight: 700 }}
                               >
-                                <Icon name="send" size={13} color="#1a1000" /> Force Submit
+                                <Icon name="send" size={13} color="var(--navy-900)" /> Force Submit
                               </button>
                             ) : (
                               <button className={`btn sm ${session.status === 'locked' ? '' : 'danger'}`} onClick={() => toggleStudentLock(session.id, session.status)} style={{ width: 'auto' }}>
@@ -4703,15 +4596,10 @@ async function fetchDashboardData() {
 
         return (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-              <h1 style={{ margin: 0, fontFamily: 'var(--font-display)' }}>Attendance Overview</h1>
-            </div>
-
             {/* Filters */}
-            <div className="card" style={{ padding: '16px 20px', marginBottom: '20px', display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <div>
-                <label className="label">Select Exam</label>
-                <select className="input" style={{ width: 'auto', minWidth: 'min(200px, 100%)', maxWidth: '100%' }} value={attendanceExam} onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}>
+            <div className="card filter-row">
+              <div className="dash-filter-field dash-filter-grow">
+                <select className="input" aria-label="Exam" value={attendanceExam} onChange={e => { setAttendanceExam(e.target.value); setAttendanceSection('All'); }}>
                   <option value="">— Choose an exam —</option>
                   {sharedExamsList.length > 0 ? (
                     <>
@@ -4728,16 +4616,15 @@ async function fetchDashboardData() {
                 </select>
               </div>
               {attendanceExam && (
-                <div>
-                  <label className="label">Filter by Section</label>
-                  <select className="input" style={{ width: 'auto' }} value={attendanceSection} onChange={e => setAttendanceSection(e.target.value)}>
-                    {sectionOptions.map(sec => <option key={sec} value={sec}>{sec}</option>)}
+                <div className="dash-filter-field">
+                  <select className="input" aria-label="Section" value={attendanceSection} onChange={e => setAttendanceSection(e.target.value)}>
+                    {sectionOptions.map(sec => <option key={sec} value={sec}>{sec === 'All' ? 'All sections' : sec}</option>)}
                   </select>
                 </div>
               )}
               {attendanceExam && eligibleStudents.length > 0 && (
                 <button className="btn ghost sm" onClick={exportAttendanceCSV} style={{ marginBottom: 1 }}>
-                  <Icon name="download" size={14} /> Export CSV
+                  <Icon name="download" size={14} /> CSV
                 </button>
               )}
             </div>
@@ -4760,7 +4647,7 @@ async function fetchDashboardData() {
                 ) : (
                   <div className="card" style={{ overflow: 'hidden' }}>
                   <div className="table-scroll">
-                  <table className="tbl tbl-stack">
+                  <table className="tbl tbl-stack tbl-attendance">
                     <thead>
                       <tr>
                         <th>#</th>
@@ -4778,10 +4665,10 @@ async function fetchDashboardData() {
 
                         return (
                           <tr key={s.id} style={rowBg ? { background: rowBg } : {}}>
-                            <td data-label="#" style={{ color: 'var(--ink-4)', width: 40 }}>{idx + 1}</td>
-                            <td className="tbl-stack-title" style={{ fontWeight: 600 }}>{formatName(s.full_name) || 'Unknown'}</td>
-                            <td data-label="Section" style={{ color: 'var(--ink-2)' }}>{s.section || '—'}</td>
-                            <td data-label="Status"><span className={`px-pill ${pillClass}`}>{pillLabel}</span></td>
+                            <td className="att-no" data-label="#" style={{ color: 'var(--ink-4)', width: 40 }}>{idx + 1}</td>
+                            <td className="tbl-stack-title att-name" style={{ fontWeight: 600 }}>{formatName(s.full_name) || 'Unknown'}</td>
+                            <td className="att-section" data-label="Section" style={{ color: 'var(--ink-2)' }}>{s.section || '—'}</td>
+                            <td className="att-status" data-label="Status"><span className={`px-pill ${pillClass}`}>{pillLabel}</span></td>
                           </tr>
                         );
                       })}
@@ -4799,8 +4686,6 @@ async function fetchDashboardData() {
       {/* --- TAB 6: QUESTION MANAGEMENT --- */}
       {activeView === 'questions' && (
         <div>
-          <h1 style={{ margin: '0 0 20px', fontFamily: 'var(--font-display)' }}>Question Management</h1>
-
           {/* Exam selector */}
           <div className="card" style={{ padding: '16px 20px', marginBottom: '20px' }}>
             <label className="label">Select Exam to Manage</label>
@@ -5209,7 +5094,7 @@ async function fetchDashboardData() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
                           <div style={{ flex: 1 }}>
                             <p style={{ margin: '0 0 8px 0', fontWeight: 600, color: 'var(--ink-1)', fontSize: '14px' }}>
-                              <span style={{ color: 'var(--navy)', marginRight: '8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{idx + 1}.</span>
+                              <span style={{ color: 'var(--navy)', marginRight: '8px', fontVariantNumeric: 'tabular-nums', fontSize: '12px' }}>{idx + 1}.</span>
                               <span style={{ whiteSpace: 'pre-line' }}>{q.question_text}</span>
                               {q.question_type === 'essay' && <span className="px-pill info" style={{ marginLeft: 10 }}>Essay</span>}
                               {q.question_type === 'worked_solution' && <span className="px-pill info" style={{ marginLeft: 10 }}>{q.work_rubric?.mode === 'text' ? 'Text' : q.work_rubric?.mode === 'quantity' ? 'Values + units' : 'Maths'}</span>}
@@ -5341,10 +5226,8 @@ async function fetchDashboardData() {
         };
         return (
           <div>
-            <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)' }}>Trash</h1>
-            <p style={{ margin: '0 0 22px', fontSize: 13, color: 'var(--ink-3)', maxWidth: 640, lineHeight: 1.55 }}>
-              Everything you delete waits here for {TRASH_DAYS} days: papers, students, scores, questions and lessons.
-              Restore puts it back as it was — a paper comes back closed. After {TRASH_DAYS} days it is deleted for good.
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--ink-3)' }}>
+              Deleted for good after {TRASH_DAYS} days. A restored paper comes back closed.
             </p>
             {trashRows.length === 0 ? (
               <div className="card" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--ink-3)' }}>
@@ -5402,9 +5285,8 @@ async function fetchDashboardData() {
 
       {activeView === 'transfer' && (
         <div>
-          <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)' }}>Transfer Exams</h1>
-          <p style={{ margin: '0 0 24px', fontSize: '13px', color: 'var(--ink-3)' }}>
-            Reassign your exams to another instructor. Students automatically follow — no student data changes.
+          <p style={{ margin: '0 0 14px', fontSize: '13px', color: 'var(--ink-3)' }}>
+            Give your exams to another instructor. Students follow automatically.
           </p>
 
           {/* Step 1 — Destination */}
@@ -5739,11 +5621,11 @@ async function fetchDashboardData() {
       {/* ========================================= */}
       {viewingStudent && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.88)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: '20px' }}>
-          <div style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '90%', maxWidth: '800px', maxHeight: '88vh', overflowY: 'auto', position: 'relative', boxShadow: 'var(--sh-modal)' }}>
+          <div className="dash-modal" style={{ background: 'var(--paper)', borderRadius: 'var(--r-2xl)', width: '90%', maxWidth: '800px', maxHeight: '88vh', overflowY: 'auto', position: 'relative', boxShadow: 'var(--sh-modal)' }}>
             {/* Modal header */}
-            <div className="patts-header" style={{ padding: '24px 28px', position: 'sticky', top: 0, zIndex: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
+            <div className="patts-header modal-head" style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <h2 style={{ margin: 0, color: 'white', fontSize: '18px' }}>{formatName(students[viewingStudent.student_id]?.name)}'s Exam Paper</h2>
                   <div style={{ marginTop: 6, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                     {/* The same score as the Results row — points plus worked
@@ -5783,8 +5665,8 @@ async function fetchDashboardData() {
                     )}
                   </div>
                 </div>
-                <button className="btn ghost sm" onClick={() => setViewingStudent(null)} style={{ color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
-                  <Icon name="x" size={14} color="white" /> Close
+                <button className="btn ghost sm" aria-label="Close" onClick={() => setViewingStudent(null)} style={{ flexShrink: 0,  color: 'white', borderColor: 'rgba(255,255,255,.3)', background: 'rgba(255,255,255,.1)', width: 'auto' }}>
+                  <Icon name="x" size={14} color="white" /> <span className="hide-narrow">Close</span>
                 </button>
               </div>
             </div>
@@ -5800,7 +5682,7 @@ async function fetchDashboardData() {
                       const split = log.indexOf('] ');
                       const ts = split >= 0 ? log.substring(0, split + 1) : '';
                       const reason = split >= 0 ? log.substring(split + 2) : log;
-                      return <li key={i}><strong style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{ts}</strong> {reason}</li>;
+                      return <li key={i}><strong style={{ fontVariantNumeric: 'tabular-nums', fontSize: '11px' }}>{ts}</strong> {reason}</li>;
                     })}
                   </ul>
                 </div>
@@ -6333,7 +6215,7 @@ async function fetchDashboardData() {
         // loudly, and with the minutes it is taking off each student.
         const early = forceSubmitConfirmList.filter(s => !isSessionForceSubmittable(s));
         const isEarly = early.length > 0;
-        const accent = isEarly ? 'var(--bad, #C0392B)' : '#B8860B';
+        const accent = isEarly ? 'var(--bad, #C0392B)' : 'var(--warn)';
         const n = forceSubmitConfirmList.length;
 
         return (
@@ -6435,7 +6317,7 @@ async function fetchDashboardData() {
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <Icon name="flag" size={14} color="var(--gold-bright)" />
-              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--gold-bright)', letterSpacing: '.06em', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--gold-bright)', }}>
                 {session.student_name}
               </span>
               <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'rgba(255,255,255,.5)' }}>
@@ -6450,7 +6332,7 @@ async function fetchDashboardData() {
                   const reason = split >= 0 ? log.substring(split + 2) : log;
                   return (
                     <li key={i} style={{ fontSize: '12.5px', lineHeight: 1.5 }}>
-                      {ts && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,.4)', marginRight: 6 }}>{ts}</span>}
+                      {ts && <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: '11px', color: 'rgba(255,255,255,.4)', marginRight: 6 }}>{ts}</span>}
                       <span style={{ color: 'rgba(255,255,255,.85)' }}>{reason}</span>
                     </li>
                   );
@@ -6516,7 +6398,7 @@ function InlinePoints({ value, onSave, busy }) {
         }}
         style={{
           width: 52, padding: '2px 6px', textAlign: 'center',
-          fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700,
+          fontVariantNumeric: 'tabular-nums', fontSize: 12, fontWeight: 700,
           color: 'var(--ink-1)', background: 'var(--surface)',
           border: `1px solid ${editing ? 'var(--navy)' : 'var(--line)'}`,
           borderRadius: 'var(--r-sm)', opacity: busy ? 0.5 : 1,

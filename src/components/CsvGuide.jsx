@@ -73,7 +73,7 @@ export default function CsvGuide() {
           return (
             <button key={g.key} type="button" aria-pressed={on} onClick={() => setKey(g.key)}
               style={{
-                width: 'auto', padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                width: 'auto', padding: '8px 13px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
                 border: `1px solid ${on ? 'var(--navy)' : 'var(--line)'}`,
                 background: on ? 'var(--navy)' : 'var(--surface)', color: on ? 'white' : 'var(--ink-2)',
               }}>

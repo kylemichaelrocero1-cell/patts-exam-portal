@@ -85,13 +85,13 @@ export default function AdmissionWait({ exam, student, onEnter, onCancel }) {
     <div className="admission-wait" role="dialog" aria-modal="true" aria-labelledby="admission-title"
       style={{ position: 'fixed', inset: 0, background: 'rgba(6,24,41,.92)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000, padding: 16, overflowY: 'auto' }}>
       <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: 420, width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
-        <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 22px 18px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
+        <div style={{ background: 'var(--navy)', padding: '22px 22px 18px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
           <p style={{ color: 'rgba(244,208,63,.85)', margin: 0, fontSize: 13, fontWeight: 600 }}>{exam.title}</p>
           <h2 id="admission-title" style={{ color: 'white', margin: '10px 0 2px', fontSize: 24, fontWeight: 800, lineHeight: 1.2, overflowWrap: 'anywhere' }}>
             {formatName(student.full_name)}
           </h2>
           <p style={{ color: 'rgba(255,255,255,.75)', margin: 0, fontSize: 13 }}>Show this screen to your instructor</p>
-          <p aria-live="off" style={{ color: 'white', margin: '12px 0 0', fontFamily: 'var(--font-mono)', fontSize: 28, fontWeight: 700, letterSpacing: '.04em' }}>
+          <p aria-live="off" style={{ color: 'white', margin: '12px 0 0', fontVariantNumeric: 'tabular-nums', fontSize: 28, fontWeight: 700, letterSpacing: '.04em' }}>
             {clock}
           </p>
         </div>

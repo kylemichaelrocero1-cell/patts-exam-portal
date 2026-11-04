@@ -457,7 +457,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
             onSubmit={handlePasswordSubmit}
             style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: '400px', width: '100%', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}
           >
-            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '28px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
+            <div style={{ background: 'var(--navy)', padding: '28px', textAlign: 'center', borderBottom: '3px solid var(--gold)' }}>
               <span aria-hidden="true" style={{ width: 44, height: 44, borderRadius: 12, margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(244,208,63,.14)', border: '1px solid rgba(244,208,63,.35)' }}>
                 <Icon name="lock" size={21} color="var(--gold-bright, #F4D03F)" />
               </span>
@@ -531,12 +531,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
       )}
 
       {/* Content */}
-      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '36px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px 12px', marginBottom: '28px', flexWrap: 'wrap' }}>
-          <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>{kind === 'seatwork' ? 'Available Seatwork' : 'Available Examinations'}</h2>
-          <span style={{ background: 'var(--navy-tint)', color: 'var(--navy)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-            {countLabel}
-          </span>
+      <div className="student-main home-wrap">
+        <div className="greet">
+          <p>{selectedSection}</p>
+          <h1>{countLabel}</h1>
         </div>
 
         {fetchError ? (
@@ -551,7 +549,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
             <p style={{ color: 'var(--text-3)', fontSize: '14px', margin: '8px 0 0' }}>{kind === 'seatwork' ? 'Please wait for your instructor to open one.' : 'Please wait for your instructor to open an exam.'}</p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '16px' }}>
+          <div className="exam-grid">
             {exams.map(exam => {
               // Switching retakes on re-opens a paper this student has already
               // sat: the graded row stays on file untouched and the new sitting
@@ -598,30 +596,19 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               const lastAttempt = myAttempts[0] || null;
 
               return (
-                <div key={exam.id} className="exam-card" style={{
-                  background: 'var(--white)',
-                  borderRadius: 'var(--r-lg)',
-                  boxShadow: isResumable ? 'var(--s-md)' : 'var(--s-sm)',
-                  border: `1px solid ${isResumable ? 'var(--gold)' : 'var(--border)'}`,
-                  borderLeft: `5px solid ${isAlreadyDone ? 'var(--success)' : isResumable ? 'var(--gold)' : 'var(--navy)'}`,
-                  padding: '22px 28px',
-                  transition: 'box-shadow var(--t-fast)',
-                }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <h3 style={{ margin: '0 0 6px', color: 'var(--navy)', fontSize: '18px', fontWeight: 700 }}>{exam.title}</h3>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                      <span style={{
-                        background: isSeatwork ? 'var(--navy-tint)' : 'var(--gold-pale)',
-                        color: isSeatwork ? 'var(--navy)' : 'var(--gold-700)',
-                        border: `1px solid ${isSeatwork ? 'var(--navy-100)' : 'var(--gold-100)'}`,
-                        padding: '2px 10px', borderRadius: 'var(--r-full)',
-                        fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
-                      }}>
-                        {paperNoun(exam)}
-                      </span>
-                      <span style={{ color: 'var(--text-3)', fontSize: '13.5px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <Icon name="clock" size={14} /> <strong style={{ color: 'var(--text-2)' }}>{exam.duration_minutes} min</strong> time limit
-                      </span>
+                <div key={exam.id} className={`exam-card paper-tile paper-${isAlreadyDone ? 'done' : isResumable ? 'resume' : notYetOpen ? 'later' : isSeatwork ? 'seatwork' : 'exam'}`}>
+                  {/* The band says what kind of paper and where it stands by
+                      its colour; the white below is what to read and do. */}
+                  <div className="paper-band">
+                    <span className="tile-chip">
+                      <Icon name={isAlreadyDone ? 'check-circle' : isSeatwork ? 'clipboard-check' : 'exam'} size={18} />
+                    </span>
+                    <span className="paper-kind">{paperNoun(exam)}</span>
+                    <span className="paper-time"><Icon name="clock" size={14} /> {exam.duration_minutes} min</span>
+                  </div>
+                  <div className="paper-body">
+                    <h3>{exam.title}</h3>
+                    <div className="paper-notes">
                       {windowLabel && (
                         <span style={{ color: 'var(--text-3)', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: 5 }}>
                           <Icon name="calendar" size={14} /> {windowLabel}
@@ -643,7 +630,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         </span>
                       )}
                       {isResumable && (
-                        <span style={{ background: '#FFF8E1', color: '#A56B0A', border: '1px solid #F0CA80', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
+                        <span style={{ background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid var(--warn-bd)', padding: '2px 10px', borderRadius: 'var(--r-full)', fontSize: '12px', fontWeight: 600 }}>
                           {resumeSet ? `Set ${resumeSet} · ` : ''}{answeredCount} answered{minutesLeft !== null ? ` · ${minutesLeft}m left` : ''}
                         </span>
                       )}
@@ -659,7 +646,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
 
                     {myAttempts.length > 0 && (
                       <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-lt, var(--border))' }}>
-                        <div style={{ fontSize: 11, letterSpacing: '.07em', textTransform: 'uppercase', color: 'var(--text-4)', fontWeight: 700, marginBottom: 6 }}>
+                        <div style={{ fontSize: 12.5, color: 'var(--text-4)', fontWeight: 600, marginBottom: 6 }}>
                           Your attempts ({myAttempts.length})
                           {bestScore && bestScore.total > 0 && bestScore.pending === 0 && (
                             <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--ok)', marginLeft: 8 }}>
@@ -674,10 +661,10 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                             const m = combinedScore(a);
                             const pct = m.pct;
                             const tone = pct === null ? 'var(--text-3)'
-                              : pct >= 75 ? 'var(--ok)' : pct >= 50 ? 'var(--warn)' : 'var(--bad)';
+                              : pct >= 75 ? 'var(--ok)' : 'var(--bad)';
                             return (
                               <span key={a.attempt_no} title={new Date(a.submitted_at).toLocaleString()}
-                                style={{ fontSize: 12, padding: '3px 9px', borderRadius: 'var(--r-full)', background: 'var(--surface-2)', border: '1px solid var(--line)', color: tone, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
+                                style={{ fontSize: 12, padding: '3px 9px', borderRadius: 'var(--r-full)', background: 'var(--surface-2)', border: '1px solid var(--line)', color: tone, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                                 #{a.attempt_no} · {m.score}/{m.total}
                                 {pct !== null && <span style={{ opacity: .7 }}> · {pct}% · {gradeVerdict(m)}</span>}
                               </span>
@@ -691,7 +678,6 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         </div>
                       </div>
                     )}
-                  </div>
 
                   <div className="exam-card-actions">
                     {notYetOpen ? (
@@ -699,14 +685,12 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         <span style={{ background: 'var(--surface-2)', color: 'var(--text-3)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--border)' }}>
                           Opens {new Date(exam.opens_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </span>
-                        <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: 6, marginBottom: 0 }}>Not open yet.</p>
-                      </div>
+                                              </div>
                     ) : isAlreadyDone ? (
                       <div style={{ textAlign: 'center' }}>
                         <span style={{ background: 'var(--success-bg)', color: 'var(--success)', padding: '10px 20px', borderRadius: 'var(--r-full)', fontWeight: 700, display: 'inline-block', fontSize: '13px', border: '1px solid var(--success-bd)' }}>
                           <Icon name="check-circle" size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Submitted
                         </span>
-                        <p style={{ fontSize: '11.5px', color: 'var(--text-4)', marginTop: '6px', marginBottom: 0 }}>Responses recorded.</p>
                         {exam.show_answers && (
                           <button
                             className="btn ghost sm"
@@ -720,15 +704,14 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                         )}
                       </div>
                     ) : canResume ? (
-                      <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}
-                        style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--gold)', color: 'var(--navy-dark)', fontSize: '14px', fontWeight: 700, borderRadius: 'var(--r-sm)', border: 'none' }}>
+                      <button className="btn gold" disabled={isCheckingSession} onClick={() => handleStartClick(exam, resumeSet)}>
                         {isCheckingSession ? 'Checking…' : <><Icon name="undo" size={15} style={{ verticalAlign: '-3px', marginRight: 6 }} />Resume {paperNoun(exam)}</>}
                       </button>
                     ) : !usesSets ? (
                       <div className="exam-card-btns">
                         <button disabled={isCheckingSession} onClick={() => handleStartClick(exam, null)}
                           data-retake={lastAttempt ? 'true' : undefined}
-                          style={{ width: 'auto', padding: '11px 26px', background: isCheckingSession ? 'var(--text-4)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                          className="btn">
                           {isCheckingSession ? 'Checking…' : `${lastAttempt ? 'Retake' : 'Start'} ${paperNoun(exam)}`}
                         </button>
                       </div>
@@ -738,12 +721,13 @@ export default function ExamList({ embedded = false, kind = null, student, selec
                           <button key={set} disabled={isCheckingSession} onClick={() => handleStartClick(exam, set)}
                             data-retake={i === 0 && lastAttempt ? 'true' : undefined}
                             aria-label={`${lastAttempt ? 'Retake' : 'Start'} Set ${set}`}
-                            style={{ width: 'auto', padding: '11px 22px', background: isCheckingSession ? 'var(--text-4)' : i % 2 ? 'var(--navy-mid)' : 'var(--navy)', color: 'white', fontSize: '14px', fontWeight: 600, borderRadius: 'var(--r-sm)' }}>
+                            className="btn">
                             {isCheckingSession ? 'Checking…' : `Set ${set}`}
                           </button>
                         ))}
                       </div>
                     )}
+                  </div>
                   </div>
                 </div>
               );
@@ -755,30 +739,26 @@ export default function ExamList({ embedded = false, kind = null, student, selec
             opened up. Below the open papers, because those are what a student
             arriving here mostly needs. */}
         {!fetchError && toReview.length > 0 && (
-          <div style={{ marginTop: 36 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: 6 }}>
-              <h2 style={{ margin: 0, color: 'var(--navy)', fontSize: '17px', fontWeight: 700 }}>Ready to review</h2>
+          <div style={{ marginTop: 20 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: 8 }}>
+              <h2 className="home-heading" style={{ margin: 0 }}>Ready to review</h2>
               <span style={{ background: 'var(--surface-2)', color: 'var(--text-3)', padding: '3px 12px', borderRadius: 'var(--r-full)', fontSize: '13px', fontWeight: 600, border: '1px solid var(--border)' }}>
                 {toReview.length}
               </span>
             </div>
-            <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 14px' }}>
-              Closed, but your instructor has opened the answers. Your score is on the Summary tab.
-            </p>
-            <div style={{ display: 'grid', gap: '10px' }}>
+            <div className="exam-grid">
               {(showAllReview ? toReview : toReview.slice(0, REVIEW_RECENT)).map(p => (
                 <div key={p.id} className="exam-card" style={{
-                  background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--s-sm)',
-                  border: '1px solid var(--border)', borderLeft: '5px solid var(--success)', padding: '16px 22px',
+                  background: 'var(--white)', borderRadius: 'var(--r-lg)', boxShadow: 'var(--s-sm)', padding: '14px 16px',
                 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <h3 style={{ margin: '0 0 6px', color: 'var(--navy)', fontSize: '16px', fontWeight: 700, overflowWrap: 'anywhere' }}>{p.title}</h3>
+                  <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+                    <h3 style={{ margin: '0 0 6px', color: 'var(--ink-1)', fontSize: '15px', fontWeight: 600, overflowWrap: 'anywhere' }}>{p.title}</h3>
                     <span style={{
                       background: p.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
                       color: p.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
                       border: `1px solid ${p.kind === 'seatwork' ? 'var(--navy-100)' : 'var(--gold-100)'}`,
                       padding: '2px 10px', borderRadius: 'var(--r-full)',
-                      fontSize: '11.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase',
+                      fontSize: '12.5px', fontWeight: 600, 
                     }}>
                       {paperNoun(p)}
                     </span>
@@ -810,7 +790,6 @@ export default function ExamList({ embedded = false, kind = null, student, selec
         )}
       </div>
       <AnswerReviewOverlay review={review} onClose={closeReview} />
-      <p style={{ textAlign: 'center', margin: '0 0 14px', fontSize: '10.5px', color: 'var(--text-4)', letterSpacing: '.14em', fontWeight: 700 }}>KMR</p>
     </div>
   );
 }

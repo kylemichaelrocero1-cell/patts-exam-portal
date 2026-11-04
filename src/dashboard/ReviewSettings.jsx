@@ -153,8 +153,8 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
         {/* The warning that matters. Shown before the switch, not after. */}
         {hasResults && !a.show_answers && (
           <div style={{ background: 'var(--warn-bg)', border: '1.5px solid var(--warn-bd)', borderRadius: 'var(--r-md)', padding: '12px 14px', marginBottom: 16, display: 'flex', gap: 9 }}>
-            <Icon name="alert" size={16} color="#B8860B" />
-            <span style={{ fontSize: 13, color: '#7B5800', lineHeight: 1.55 }}>
+            <Icon name="alert" size={16} color="var(--warn)" />
+            <span style={{ fontSize: 13, color: 'var(--warn)', lineHeight: 1.55 }}>
               This paper already has <strong>{a._resultCount} graded submissions</strong>. Switching
               review on opens the answers to every one of those students straight away, so treat the
               questions as public from then on. If you might set this paper again, duplicate it as a

@@ -1,7 +1,22 @@
 import { useState, useEffect } from 'react';
 import { selectAssessments, isAvailableNow, availabilityState } from './lib/assessments';
-import { formatName } from './lib/personName.js';
+import { formatName, givenName } from './lib/personName.js';
 import Icon from './components/Icon';
+
+// A colour and a glyph per subject family, so a long list can be scanned by eye
+// rather than read. Anything else falls back to the blue book.
+function sectionLook(name) {
+  if (/^aeng/i.test(name)) return { tone: 'navy', icon: 'airfoil' };
+  if (/^math/i.test(name)) return { tone: 'gold', icon: 'mathematics' };
+  if (/^esci/i.test(name)) return { tone: 'steel', icon: 'structures' };
+  if (/pre-?board/i.test(name)) return { tone: 'deep', icon: 'trophy' };
+  return { tone: 'blue', icon: 'book' };
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning,' : h < 18 ? 'Good afternoon,' : 'Good evening,';
+}
 
 export default function SectionSelector({ student, onSelect, onLogout }) {
   const [sections, setSections] = useState([]);
@@ -51,130 +66,66 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
   }, [onlySection, onSelect]);
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
-
-      {/* Header */}
-      <header style={{
-        background: 'linear-gradient(110deg, var(--navy-dark) 0%, var(--navy) 60%, var(--navy-mid) 100%)',
-        borderBottom: '3px solid var(--gold)',
-        padding: '16px 32px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        boxShadow: 'var(--s-md)',
-      }}>
-        <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: '44px', width: 'auto', objectFit: 'contain' }} />
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+      <header className="header" style={{ borderRadius: 0, marginBottom: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 }}>
+          <img src="/patts-logo.png" alt="PATTS College of Aeronautics" style={{ height: 34, width: 'auto', objectFit: 'contain' }} />
+          <p className="shell-welcome" style={{ margin: 0, color: 'white', fontSize: 13.5, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {formatName(student.full_name)}
+          </p>
+        </div>
         <button
           onClick={onLogout}
-          style={{ background: 'rgba(255,255,255,.12)', border: '1px solid rgba(255,255,255,.25)', color: 'white', padding: '8px 18px', borderRadius: 'var(--r-sm)', fontWeight: 600, fontSize: '13px', width: 'auto' }}
+          style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.28)', color: 'white', padding: '6px 14px', width: 'auto', fontSize: 13, fontWeight: 600, borderRadius: 'var(--r-sm)', flexShrink: 0 }}
         >
           Log Out
         </button>
       </header>
 
-      {/* Body */}
-      <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '48px 20px' }}>
-        <div style={{ width: '100%', maxWidth: '560px' }}>
-
-          {/* Welcome Card */}
-          <div style={{
-            background: 'var(--white)', borderRadius: 'var(--r-xl)', boxShadow: 'var(--s-lg)',
-            overflow: 'hidden', marginBottom: '28px',
-            border: '1px solid var(--border)',
-          }}>
-            <div style={{
-              background: 'var(--navy-tint)', borderBottom: '1px solid var(--border)',
-              padding: '22px 28px', display: 'flex', alignItems: 'center', gap: '14px',
-            }}>
-              <div style={{
-                width: '48px', height: '48px', borderRadius: '50%',
-                background: 'var(--navy)', display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: '20px', flexShrink: 0,
-                boxShadow: 'var(--s-sm)',
-              }}>
-                <Icon name="user" size={22} color="white" />
-              </div>
-              <div>
-                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-3)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: '.05em' }}>Welcome back</p>
-                <h2 style={{ margin: '2px 0 0', color: 'var(--navy)', fontSize: '20px', fontWeight: 700 }}>
-                  {formatName(student.full_name)}
-                </h2>
-              </div>
-            </div>
-            <div style={{ padding: '18px 28px' }}>
-              <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '14px' }}>
-                Select your subject-section below to view your available examinations.
-              </p>
-            </div>
+      <div className="student-main home-wrap">
+        {isLoading || onlySection ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
+            Loading sections…
           </div>
-
-          {/* Section Buttons */}
-          {isLoading || onlySection ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
-              Loading sections…
+        ) : fetchError ? (
+          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
+            <p style={{ margin: '0 0 12px', color: 'var(--danger)', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="alert" size={17} /> Could not connect to the server.</p>
+            <button className="btn sm" onClick={() => { setFetchError(false); setIsLoading(true); setRetryCount(c => c + 1); }} style={{ width: 'auto' }}>
+              Retry
+            </button>
+          </div>
+        ) : sections.length > 0 ? (
+          <>
+            <div className="greet">
+              <p>{greeting()}</p>
+              <h1>{givenName(student.full_name) || 'there'}</h1>
             </div>
-          ) : fetchError ? (
-            <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger-bd)', borderRadius: 'var(--r-lg)', padding: '28px', textAlign: 'center' }}>
-              <p style={{ margin: '0 0 14px', color: 'var(--danger)', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="alert" size={17} /> Could not connect to the server.</p>
-              <button onClick={() => { setFetchError(false); setIsLoading(true); setRetryCount(c => c + 1); }}
-                style={{ background: 'var(--danger)', color: 'white', width: 'auto', padding: '9px 20px' }}>
-                Retry
-              </button>
+            {/* Tiles, so a student in many sections sees them all at once. */}
+            <div className="section-grid">
+              {sections.map(sec => {
+                const look = sectionLook(sec);
+                return (
+                  <button key={sec} className={`section-tile tile-${look.tone}`} onClick={() => onSelect(sec)}>
+                    <span className="tile-chip"><Icon name={look.icon} size={20} /></span>
+                    <span className="tile-go"><Icon name="arrow-right" size={15} /></span>
+                    <span className="tile-name">{sec}</span>
+                    <Icon className="tile-ghost" name={look.icon} size={96} strokeWidth={1.1} />
+                  </button>
+                );
+              })}
             </div>
-          ) : sections.length > 0 ? (
-            <div style={{ display: 'grid', gap: '12px' }}>
-              {sections.map((sec, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => onSelect(sec)}
-                  style={{
-                    background: 'var(--white)',
-                    color: 'var(--navy)',
-                    border: '2px solid var(--border)',
-                    padding: '18px 24px',
-                    borderRadius: 'var(--r-lg)',
-                    fontSize: '16px',
-                    fontWeight: 600,
-                    textAlign: 'left',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    boxShadow: 'var(--s-xs)',
-                    transition: 'all var(--t-fast)',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = 'var(--navy)';
-                    e.currentTarget.style.background = 'var(--navy-tint)';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = 'var(--s-md)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = 'var(--border)';
-                    e.currentTarget.style.background = 'var(--white)';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'var(--s-xs)';
-                  }}
-                >
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}><Icon name="book" size={17} /> {sec}</span>
-                  <span style={{ color: 'var(--gold)', fontSize: '18px' }}>→</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div style={{
-              background: 'var(--white)', borderRadius: 'var(--r-lg)', padding: '40px 28px',
-              textAlign: 'center', boxShadow: 'var(--s-sm)', border: '1px solid var(--border)',
-            }}>
-              <Icon name="clipboard" size={36} color="var(--ink-4)" style={{ marginBottom: 12 }} />
-              <p style={{ margin: 0, color: 'var(--text-2)', fontWeight: 600, fontSize: '16px' }}>No Open Exams</p>
-              <p style={{ margin: '8px 0 0', color: 'var(--text-3)', fontSize: '14px' }}>
-                {enrolledSections.length === 0
-                  ? 'Your account has no section assigned. Please contact your instructor.'
-                  : 'No exams are currently open for your section(s). Please wait for your instructor.'}
-              </p>
-            </div>
-          )}
-        </div>
+          </>
+        ) : (
+          <div className="card" style={{ padding: '24px 20px', textAlign: 'center' }}>
+            <p style={{ margin: 0, color: 'var(--text-2)', fontWeight: 600, fontSize: 15 }}>No open exams</p>
+            <p style={{ margin: '6px 0 0', color: 'var(--text-3)', fontSize: 13.5 }}>
+              {enrolledSections.length === 0
+                ? 'Your account has no section yet. Ask your instructor to add you.'
+                : 'Wait for your instructor to open one.'}
+            </p>
+          </div>
+        )}
       </div>
-      <p style={{ textAlign: 'center', margin: '0 0 14px', fontSize: '10.5px', color: 'var(--text-4)', letterSpacing: '.14em', fontWeight: 700 }}>KMR</p>
     </div>
   );
 }

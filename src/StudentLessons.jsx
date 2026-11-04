@@ -184,12 +184,9 @@ export default function StudentLessons({ student, selectedSection }) {
   const doneCount = lessons.filter(l => progress[l.id]?.completed_at).length;
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto' }}>
-      <div style={{ marginBottom: 22 }}>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 25, letterSpacing: '-0.02em', margin: 0 }}>
-          Lessons
-        </h1>
-        <p style={{ color: 'var(--ink-3)', fontSize: 13.5, margin: '4px 0 0' }}>
+    <div className="home-wrap">
+      <div style={{ marginBottom: 10 }}>
+        <p style={{ color: 'var(--ink-3)', fontSize: 13, fontWeight: 500, margin: 0 }}>
           {lessons.length === 0
             ? 'Nothing posted for your section yet.'
             : `${lessons.length} lesson${lessons.length !== 1 ? 's' : ''} for ${selectedSection} · ${doneCount} done`}
@@ -213,15 +210,12 @@ export default function StudentLessons({ student, selectedSection }) {
       )}
 
       {[...bySubject.entries()].map(([key, group]) => (
-        <div key={key} style={{ marginBottom: 26 }}>
-          <h2 style={{
-            fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase',
-            color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 10px',
-          }}>
+        <div key={key} style={{ marginBottom: 16 }}>
+          <h2 className="home-heading">
             {subjectTitle(key)}
           </h2>
 
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div className="lesson-grid">
             {group.map(l => {
               const p = progress[l.id];
               return (
@@ -230,8 +224,8 @@ export default function StudentLessons({ student, selectedSection }) {
                   className="card"
                   onClick={() => openLesson(l)}
                   style={{
-                    padding: '16px 18px', textAlign: 'left', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', gap: 14, width: '100%',
+                    padding: '9px 14px', textAlign: 'left', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                     border: '1px solid var(--line)', background: 'var(--surface)',
                   }}
                 >

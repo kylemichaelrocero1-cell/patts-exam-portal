@@ -246,13 +246,7 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Lessons</h1>
-          <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>
-            Post reading material for your sections — typed, or as a PDF handout. Students see published lessons only.
-          </p>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <button className="btn sm" style={{ width: 'auto' }} onClick={() => { setEditing({ ...EMPTY }); setPendingFile(null); setShowPreview(false); }}>
           <Icon name="plus" size={14} /> New lesson
         </button>
@@ -260,8 +254,8 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
 
       {loadError && (
         <div style={{ background: 'var(--warn-bg)', border: '1.5px solid var(--warn-bd)', borderRadius: 'var(--r-lg)', padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-          <Icon name="alert" size={16} color="#B8860B" />
-          <span style={{ fontSize: 13.5, color: '#7B5800' }}>{loadError}</span>
+          <Icon name="alert" size={16} color="var(--warn)" />
+          <span style={{ fontSize: 13.5, color: 'var(--warn)' }}>{loadError}</span>
         </div>
       )}
 

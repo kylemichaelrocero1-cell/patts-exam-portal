@@ -98,7 +98,7 @@ export default function ExamReadinessModal({ exam, setChoice, onAcknowledge, onC
       aria-labelledby="readiness-title"
     >
       <div style={{ background: 'var(--white)', borderRadius: 'var(--r-xl)', maxWidth: 560, width: '100%', maxHeight: '92vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: 'var(--s-xl)' }}>
-        <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '24px 28px', borderBottom: '3px solid var(--gold)', flexShrink: 0 }}>
+        <div style={{ background: 'var(--navy)', padding: '24px 28px', borderBottom: '3px solid var(--gold)', flexShrink: 0 }}>
           <span aria-hidden="true" style={{
             width: 40, height: 40, borderRadius: 12, marginBottom: 12,
             display: 'flex', alignItems: 'center', justifyContent: 'center',

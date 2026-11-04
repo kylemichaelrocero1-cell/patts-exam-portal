@@ -250,8 +250,12 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
   const [zoomedOutPhone] = useState(() => {
     try {
       const shortSide = Math.min(window.screen.width, window.screen.height);
+      const longSide = Math.max(window.screen.width, window.screen.height);
+      // A phone held sideways is wide too, and is not zoomed out: the page has
+      // to be wider than the screen is across, the way it is being held.
+      const across = window.matchMedia('(orientation: landscape)').matches ? longSide : shortSide;
       return navigator.maxTouchPoints > 0 && shortSide > 0 && shortSide < 600
-        && window.innerWidth > 780;
+        && window.innerWidth > 780 && window.innerWidth > across + 40;
     } catch { return false; }
   });
   const [zoomNoticeClosed, setZoomNoticeClosed] = useState(false);
@@ -1515,7 +1519,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
 
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 20px 40px', marginTop: -56, position: 'relative', zIndex: 1 }}>
           <div className="card" style={{ width: '100%', maxWidth: 440, padding: 0, overflow: 'hidden', boxShadow: 'var(--s-lg)' }}>
-            <div style={{ background: 'linear-gradient(135deg, #34495E 0%, #22313F 100%)', padding: '36px 32px', textAlign: 'center' }}>
+            <div style={{ background: 'var(--navy)', padding: '36px 32px', textAlign: 'center' }}>
               <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
               <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your instructor has ended this exam.</h2>
               <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
@@ -1557,7 +1561,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
         {/* Result card */}
         <div style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: '0 20px 40px', marginTop: -56, position: 'relative', zIndex: 1 }}>
           <div className="card" style={{ width: '100%', maxWidth: 440, padding: 0, overflow: 'hidden', boxShadow: 'var(--s-lg)' }}>
-            <div style={{ background: 'linear-gradient(135deg, #27AE60 0%, #1E8449 100%)', padding: '36px 32px', textAlign: 'center' }}>
+            <div style={{ background: 'var(--ok)', padding: '36px 32px', textAlign: 'center' }}>
               <Icon name="check-circle" size={48} color="white" style={{ marginBottom: 14, opacity: .92 }} />
               <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Your answers have been saved.</h2>
               <p style={{ margin: '8px 0 0', color: 'rgba(255,255,255,.78)', fontSize: 13.5 }}>
@@ -1619,8 +1623,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
           </div>
         )}
 
-        <p style={{ textAlign: 'center', margin: '20px 0 14px', fontSize: 10, color: 'var(--ink-4)', letterSpacing: '.18em', fontWeight: 700 }}>
-          KMR · PATTS COLLEGE OF AERONAUTICS
+        <p style={{ textAlign: 'center', margin: '20px 0 14px', fontSize: 12, color: 'var(--ink-4)' }}>
+        KMR · PATTS College of Aeronautics
         </p>
       </div>
     );
@@ -1650,8 +1654,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
             </p>
           </div>
         </div>
-        <p style={{ margin: '28px 0 0', fontSize: 10, color: 'rgba(255,255,255,.14)', letterSpacing: '.18em', fontWeight: 700 }}>
-          KMR · PATTS COLLEGE OF AERONAUTICS
+        <p style={{ margin: '28px 0 0', color: 'var(--ink-4)', }}>
+          KMR · PATTS College of Aeronautics
         </p>
       </div>
     );
@@ -1724,7 +1728,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
       {showSubmitModal && (
         <div className="exam-overlay" role="dialog" aria-modal="true" aria-labelledby="submit-title">
           <div className="card exam-dialog">
-            <div style={{ background: 'linear-gradient(110deg, var(--navy-dark), var(--navy))', padding: '22px 24px', borderBottom: '3px solid var(--gold)' }}>
+            <div style={{ background: 'var(--navy)', padding: '22px 24px', borderBottom: '3px solid var(--gold)' }}>
               <h2 id="submit-title" style={{ margin: 0, color: 'white', fontSize: 17, fontWeight: 700 }}>Hand in your {noun.toLowerCase()}</h2>
               <p style={{ margin: '5px 0 0', color: 'rgba(255,255,255,.62)', fontSize: 13 }}>
                 {totalAnswered} of {questions.length} questions answered
@@ -1754,7 +1758,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
               {flaggedNos.length > 0 && (
                 <div className="submit-list flag">
                   <div className="submit-list-title">
-                    <Icon name="bookmark" size={14} color="#E67E22" />
+                    <Icon name="bookmark" size={14} color="var(--flag)" />
                     {flaggedNos.length} bookmarked for review
                   </div>
                   <div className="submit-chips">
@@ -1913,7 +1917,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
             </span>
             <span style={{ color: 'var(--ink-4)', fontSize: 13, flexShrink: 0 }}>of {questions.length}</span>
             {isEssay && (
-              <span style={{ background: '#EBF4FF', color: '#1565C0', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+              <span style={{ background: 'var(--info-bg)', color: 'var(--info)', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
                 Essay
               </span>
             )}
@@ -1921,8 +1925,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
                 each one only added words. */}
             {(worked || Number(currentQ?.marks) > 1) && (
               <span style={{
-                background: worked ? '#EBF4FF' : 'var(--gold-100)',
-                color: worked ? '#1565C0' : 'var(--gold-700)',
+                background: worked ? 'var(--info-bg)' : 'var(--gold-50)',
+                color: worked ? 'var(--info)' : 'var(--gold-700)',
                 padding: '3px 10px', borderRadius: 'var(--r-full)',
                 fontSize: 11.5, fontWeight: 700, flexShrink: 0,
               }}>
@@ -1930,7 +1934,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
               </span>
             )}
             {multiSelect && (
-              <span style={{ background: '#EEF6EE', color: '#1B6E2F', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
+              <span style={{ background: 'var(--ok-bg)', color: 'var(--ok)', padding: '3px 10px', borderRadius: 'var(--r-full)', fontSize: 11.5, fontWeight: 700, flexShrink: 0 }}>
                 Select all that apply
               </span>
             )}
@@ -2052,7 +2056,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
             </button>
             {isLast ? (
               <button
-                className="btn" style={{ flex: 1, background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none' }}
+                className="btn" style={{ flex: 1, background: 'var(--ok)', border: 'none' }}
                 onClick={openSubmit}
               >
                 <Icon name="check-circle" size={15} /> Review &amp; Submit
@@ -2136,7 +2140,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
             )}
             {flaggedNos.length > 0 && (
               <button type="button" className="jump-btn flagged" onClick={() => goTo(nextOf(flaggedNos))}>
-                <Icon name="bookmark" size={12} color="#E67E22" />
+                <Icon name="bookmark" size={12} color="var(--flag)" />
                 {flaggedNos.length} bookmarked — go to next
                 <Icon name="chevron-right" size={12} style={{ marginLeft: 'auto' }} />
               </button>
@@ -2164,7 +2168,7 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
 
           <button
             className="btn"
-            style={{ marginTop: 14, width: '100%', background: 'linear-gradient(135deg, #27AE60, #1E8449)', border: 'none', boxShadow: 'var(--s-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+            style={{ marginTop: 14, width: '100%', background: 'var(--ok)', border: 'none', boxShadow: 'var(--s-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
             onClick={openSubmit}
           >
             <Icon name="check-circle" size={16} />
@@ -2173,8 +2177,8 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
         </aside>
       </div>
 
-      <p style={{ textAlign: 'center', margin: '6px 0 10px', fontSize: 10, color: 'rgba(0,0,0,.15)', letterSpacing: '.18em', fontWeight: 700 }}>
-        KMR · PATTS COLLEGE OF AERONAUTICS
+      <p style={{ textAlign: 'center', margin: '6px 0 10px', fontSize: 12, color: 'var(--ink-4)' }}>
+        KMR · PATTS College of Aeronautics
       </p>
 
       {/* ── Phone: previous / question list / next, under the thumb ── */}

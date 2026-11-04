@@ -27,7 +27,6 @@ function pct(row) {
 function toneFor(p) {
   if (p === null) return 'var(--ink-4)';
   if (p >= PASS) return 'var(--ok)';
-  if (p >= 50) return 'var(--warn)';
   return 'var(--bad)';
 }
 
@@ -48,9 +47,9 @@ function fmtDate(ts) {
 
 function Stat({ label, value, sub, tone }) {
   return (
-    <div className="card" style={{ padding: '14px 16px', flex: '1 1 150px', minWidth: 140 }}>
-      <div style={{ fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 3, color: tone || 'var(--ink-1)' }}>{value}</div>
+    <div className="card" style={{ padding: '10px 14px', flex: '1 1 130px', minWidth: 120 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginTop: 3, color: tone || 'var(--ink-1)' }}>{value}</div>
       {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 2 }}>{sub}</div>}
     </div>
   );
@@ -171,15 +170,9 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}>Practice Results</h1>
-          <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>
-            Every sitting on a paper with unlimited retakes — who took what, how many times, and whether they are improving.
-          </p>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
         <button className="btn ghost sm" onClick={exportCSV} disabled={filtered.length === 0}>
-          <Icon name="download" size={14} /> Export CSV
+          <Icon name="download" size={14} /> CSV
         </button>
       </div>
 
@@ -276,9 +269,9 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
                         <td style={{ fontWeight: 600 }}>{formatName(g.name)}</td>
                         <td style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{g.section}</td>
                         <td>{g.title}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{g.rows.length}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ink-3)' }}>{fmtPct(g.firstPct)}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(g.latestPct) }}>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{g.rows.length}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>{fmtPct(g.firstPct)}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: toneFor(g.latestPct) }}>
                           {fmtPct(g.latestPct)}
                           {moved !== null && Math.round(moved) !== 0 && (
                             <span style={{ fontSize: 10.5, marginLeft: 4, color: moved > 0 ? 'var(--ok)' : 'var(--bad)' }}>
@@ -286,13 +279,13 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: toneFor(g.bestPct) }}>{fmtPct(g.bestPct)}</td>
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: toneFor(g.bestPct) }}>{fmtPct(g.bestPct)}</td>
                         <td style={{ textAlign: 'right', color: 'var(--ink-3)', fontSize: 12.5, whiteSpace: 'nowrap' }}>{fmtDate(g.lastSat)}</td>
                       </tr>,
                       isOpen && (
                         <tr key={`${g.key}-open`}>
                           <td colSpan="9" style={{ background: 'var(--surface-2)', padding: '10px 16px 14px' }}>
-                            <div style={{ fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, marginBottom: 6 }}>
+                            <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontWeight: 600, marginBottom: 6 }}>
                               Attempt history
                             </div>
                             <table style={{ width: '100%' }}>
@@ -311,10 +304,10 @@ export default function PracticeResults({ attempts, students, examsDict, examsLi
                                   const m = combinedScore(r);
                                   return (
                                     <tr key={r.attempt_no}>
-                                      <td style={{ fontFamily: 'var(--font-mono)' }}>#{r.attempt_no}</td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{m.score}/{m.total}</td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(p) }}>{fmtPct(p)}</td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ink-3)' }}>{fmtTime(r.time_taken_seconds)}</td>
+                                      <td style={{ fontVariantNumeric: 'tabular-nums' }}>#{r.attempt_no}</td>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{m.score}/{m.total}</td>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: toneFor(p) }}>{fmtPct(p)}</td>
+                                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}>{fmtTime(r.time_taken_seconds)}</td>
                                       <td style={{ textAlign: 'right', color: 'var(--ink-3)', fontSize: 12.5, whiteSpace: 'nowrap' }}>{fmtDate(r.submitted_at)}</td>
                                     </tr>
                                   );

@@ -32,15 +32,14 @@ function scoreOf(row) {
 function toneFor(p) {
   if (p === null) return 'var(--ink-4)';
   if (p >= PASS) return 'var(--ok)';
-  if (p >= 50) return 'var(--warn)';
   return 'var(--bad)';
 }
 
 function Stat({ label, value, sub, tone }) {
   return (
-    <div className="card" style={{ padding: '14px 16px', flex: '1 1 150px', minWidth: 140 }}>
-      <div style={{ fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', marginTop: 3, color: tone || 'var(--ink-1)' }}>{value}</div>
+    <div className="card" style={{ padding: '10px 14px', flex: '1 1 130px', minWidth: 120 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--ink-4)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, fontVariantNumeric: 'tabular-nums', marginTop: 1, color: tone || 'var(--ink-1)' }}>{value}</div>
       {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 2 }}>{sub}</div>}
     </div>
   );
@@ -171,25 +170,16 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
 
   return (
     <div>
-      <div style={{ marginBottom: 18 }}>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}>Class Review</h1>
-        <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>
-          One section at a time — who is behind, who is struggling, and how each assessment went.
-        </p>
-      </div>
-
       {/* Controls */}
-      <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div>
-          <label className="label">Section</label>
-          <select className="input" style={{ width: 'auto', minWidth: 180, display: 'inline-block' }}
+      <div className="card filter-row">
+        <div className="dash-filter-field">
+          <select className="input" aria-label="Section"
             value={active} onChange={e => setSection(e.target.value)}>
             {sections.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <div>
-          <label className="label">Sort students by</label>
-          <select className="input" style={{ width: 'auto', minWidth: 180, display: 'inline-block' }}
+        <div className="dash-filter-field" style={{ flexBasis: 190 }}>
+          <select className="input" aria-label="Sort students by"
             value={sort} onChange={e => setSort(e.target.value)}>
             <option value="name">Name (A–Z)</option>
             <option value="avg_asc">Lowest average first</option>
@@ -198,46 +188,39 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
           </select>
         </div>
         {(archivedHere > 0 || showArchived) && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-3)', cursor: 'pointer', paddingBottom: 8 }}>
+          <label className="dash-filter-check">
             <input type="checkbox" checked={showArchived} onChange={e => setShowArchived(e.target.checked)} />
-            Include archived papers{!showArchived ? ` (${archivedHere})` : ''}
+            Archived{!showArchived ? ` (${archivedHere})` : ''}
           </label>
         )}
-        <span className="px-pill brand" style={{ marginLeft: 'auto' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 12.5, fontWeight: 500, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>
           {rows.length} student{rows.length !== 1 ? 's' : ''} · {items.length} assessment{items.length !== 1 ? 's' : ''}
         </span>
       </div>
 
       {/* Class record download */}
-      <div className="card" style={{ padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14 }}>Class record</div>
-          <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>
-            An Excel file: a student a row, each paper in points, grouped into quizzes, seatworks,
-            assignments and exams, with subtotals and a total you can weight. Opens in Excel; in Google Sheets use File → Import.
-          </div>
-        </div>
-        <div>
-          <label className="label">Sections</label>
-          <select className="input" style={{ width: 'auto', minWidth: 150, display: 'inline-block' }} value={scope} onChange={e => setScope(e.target.value)}>
+      <div className="card filter-row">
+        <span style={{ fontWeight: 600, fontSize: 14 }}>Class record</span>
+        <span className="filter-note" title="A student a row, each paper in points, grouped into quizzes, seatworks, assignments and exams, with subtotals and a total you can weight. In Google Sheets use File → Import.">Excel file, one student per row</span>
+        <div className="dash-filter-field" style={{ marginLeft: 'auto', flexBasis: 170 }}>
+          <select className="input" aria-label="Sections" value={scope} onChange={e => setScope(e.target.value)}>
             <option value="section">{active} only</option>
             <option value="all">All my sections ({sections.length})</option>
           </select>
         </div>
-        <div>
-          <label className="label">Papers with retakes</label>
-          <select className="input" style={{ width: 'auto', minWidth: 140, display: 'inline-block' }} value={retakes} onChange={e => setRetakes(e.target.value)}>
+        <div className="dash-filter-field" style={{ flexBasis: 140 }}>
+          <select className="input" aria-label="Papers with retakes" value={retakes} onChange={e => setRetakes(e.target.value)}>
             <option value="best">Best attempt</option>
             <option value="latest">Latest attempt</option>
           </select>
         </div>
         <button className="btn sm" style={{ width: 'auto' }} onClick={downloadClassRecord}>
-          <Icon name="download" size={14} /> Download .xlsx
+          <Icon name="download" size={14} /> Download
         </button>
       </div>
 
       {/* Headline numbers */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 18 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
         <Stat label="Class average" value={classAvg === null ? '–' : `${classAvg.toFixed(1)}%`}
           sub={graded.length ? `${graded.length} with scores` : 'no scores yet'}
           tone={toneFor(classAvg)} />
@@ -250,7 +233,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
       </div>
 
       {/* Per-assessment breakdown */}
-      <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 10px' }}>
+      <h2 className="home-heading">
         By assessment
       </h2>
       <div className="card" style={{ overflow: 'hidden', marginBottom: 24 }}>
@@ -258,7 +241,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
           <table>
             <thead>
               <tr>
-                <th>Assessment</th><th>Type</th>
+                <th>Assessment</th><th className="hide-narrow">Type</th>
                 <th style={{ textAlign: 'right' }}>Submitted</th>
                 <th style={{ textAlign: 'right' }}>Average</th>
                 <th style={{ textAlign: 'right' }}>Pass rate</th>
@@ -277,7 +260,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                 return (
                   <tr key={it.id}>
                     <td style={{ fontWeight: 600 }}>{it.title}</td>
-                    <td>
+                    <td className="hide-narrow">
                       {/* The class record's grouping (src/lib/classRecord.js), so a quiz
                           or an assignment is not called an exam. */}
                       <span className="px-pill" style={{
@@ -289,11 +272,11 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                           'Practice & review': 'Practice', Other: it.kind === 'seatwork' ? 'Seatwork' : 'Paper' }[groupOf(it)]}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{rs.length}/{rows.length}</td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(a) }}>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{rs.length}/{rows.length}</td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: toneFor(a) }}>
                       {a === null ? '–' : `${a.toFixed(1)}%`}
                     </td>
-                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: toneFor(pr) }}>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: toneFor(pr) }}>
                       {pr === null ? '–' : `${Math.round(pr)}%`}
                     </td>
                   </tr>
@@ -305,7 +288,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
       </div>
 
       {/* Student × assessment grid */}
-      <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 10px' }}>
+      <h2 className="home-heading">
         By student
       </h2>
       <div className="card" style={{ overflow: 'hidden' }}>
@@ -336,7 +319,7 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                     const m = scoreOf(res);
                     const p = m ? m.pct : null;
                     return (
-                      <td key={it.id} style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: toneFor(p) }}>
+                      <td key={it.id} style={{ textAlign: 'center', fontVariantNumeric: 'tabular-nums', fontSize: 12.5, color: toneFor(p) }}>
                         {res ? (p === null ? `${m.score}/${m.total}` : `${Math.round(p)}%`) : '—'}
                         {res && res.attempts > 1 && (
                           <span title={`Latest of ${res.attempts} attempts`} style={{ color: 'var(--ink-4)', fontSize: 10.5, marginLeft: 3 }}>
@@ -346,12 +329,12 @@ export default function ClassReview({ studentsList, results, practiceAttempts, e
                       </td>
                     );
                   })}
-                  <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: toneFor(r.avg) }}>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: toneFor(r.avg) }}>
                     {r.avg === null ? '–' : `${gradeOf(r.avg, 100).pct}%`}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {r.missing > 0
-                      ? <span className="px-pill" style={{ background: 'var(--warn-bg)', color: '#7B5800', border: '1px solid var(--warn-bd)' }}>{r.missing}</span>
+                      ? <span className="px-pill" style={{ background: 'var(--warn-bg)', color: 'var(--warn)', border: '1px solid var(--warn-bd)' }}>{r.missing}</span>
                       : <Icon name="check" size={14} color="var(--ok)" />}
                   </td>
                 </tr>

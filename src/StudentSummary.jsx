@@ -4,7 +4,6 @@ import AnswerReviewOverlay from './components/AnswerReviewOverlay';
 import {
   availabilityState, formatWindow, closingNote,
 } from './lib/assessments';
-import { givenName } from './lib/personName.js';
 import { paperNoun } from './lib/paperNoun.js';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import { isPaperFinished } from './lib/retakes';
@@ -18,16 +17,14 @@ import { homeReads } from './lib/studentHome';
 
 const card = { padding: '16px 18px' };
 
-function Stat({ label, value, sub, tone = 'var(--navy)' }) {
+function Stat({ label, value, tone, icon, chip }) {
   return (
-    <div className="card" style={{ ...card, flex: '1 1 150px', minWidth: 140 }}>
-      <div style={{ fontSize: 10.5, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700 }}>
-        {label}
+    <div className="stat-cell">
+      <span className={`chip chip-${chip}`}><Icon name={icon} size={18} /></span>
+      <div>
+        <div className="stat-cell-label">{label}</div>
+        <div className="stat-cell-value" style={tone ? { color: tone } : undefined}>{value}</div>
       </div>
-      <div style={{ fontSize: 24, fontWeight: 700, fontFamily: 'var(--font-mono)', color: tone, marginTop: 4, lineHeight: 1.1 }}>
-        {value}
-      </div>
-      {sub && <div style={{ fontSize: 11.5, color: 'var(--ink-4)', marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -171,73 +168,52 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
   const anyReviewable = shown.some(r => reviewable.has(r.exam_id));
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto' }}>
-      <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 25, letterSpacing: '-0.02em', margin: '0 0 4px' }}>
-        Hello, {givenName(student.full_name) || 'there'}
-      </h1>
-      <p style={{ color: 'var(--ink-3)', fontSize: 13.5, margin: '0 0 20px' }}>{selectedSection}</p>
-
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 22 }}>
-        <Stat label="To do" value={todo.length}
-          sub={todo.length ? 'open now' : 'nothing due'}
-          tone={todo.length ? 'var(--gold-700)' : 'var(--ink-3)'} />
-        <Stat label="Submitted" value={results.length} sub="all time" />
-        <Stat label="Average" value={avg === null ? '–' : `${avg}%`}
-          sub={graded.length ? `${graded.length} graded` : 'no scores yet'}
-          tone={avg === null ? 'var(--ink-3)' : avg >= 75 ? 'var(--ok)' : 'var(--navy)'} />
-        <Stat label="Lessons" value={lessons.length ? `${completed.size}/${lessons.length}` : '–'}
-          sub={lessons.length ? 'completed' : 'none posted'} />
+    <div className="home-wrap">
+      <div className="stat-strip stat-strip-4">
+        <Stat label="To do" value={todo.length} icon="clock" chip="gold" tone={todo.length ? 'var(--gold-700)' : undefined} />
+        <Stat label="Submitted" value={results.length} icon="check-circle" chip="navy" />
+        <Stat label="Average" value={avg === null ? '–' : `${avg}%`} icon="trend-up"
+          chip={avg === null ? 'navy' : avg >= 75 ? 'ok' : 'bad'}
+          tone={avg === null ? undefined : avg >= 75 ? 'var(--ok)' : 'var(--bad)'} />
+        <Stat label="Lessons" value={lessons.length ? `${completed.size}/${lessons.length}` : '–'} icon="book" chip="blue" />
       </div>
 
+      <div className="home-grid">
+      <div>
       {/* To do */}
-      <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 10px' }}>
-        Needs your attention
+      <h2 className="home-heading">
+        To do
       </h2>
       {todo.length === 0 && upcoming.length === 0 ? (
-        <div className="card" style={{ ...card, textAlign: 'center', padding: '30px 18px', marginBottom: 24 }}>
-          <Icon name="check-circle" size={26} color="var(--ok)" />
-          <p style={{ margin: '10px 0 0', color: 'var(--ink-3)', fontSize: 13.5 }}>
-            You&apos;re all caught up.
-          </p>
+        <div className="card" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 8, color: 'var(--ink-3)', fontSize: 13.5 }}>
+          <Icon name="check-circle" size={18} color="var(--ok)" />
+          All caught up
         </div>
       ) : (
         // minmax(0, 1fr): a grid column is otherwise as wide as its longest
         // unbreakable line, and a long paper title pushed the card — and the
         // whole page — off the side of a phone.
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, marginBottom: 24 }}>
+        <div className="row-list">
           {[...todo, ...upcoming].map(a => {
             const scheduled = availabilityState(a) === 'scheduled';
             const closing = scheduled ? null : closingNote(a);
             return (
               <button
                 key={a.id}
-                className="card"
+                className="row-list-item"
                 onClick={() => onGoToTab(a.kind === 'seatwork' ? 'seatwork' : 'exams')}
-                style={{ ...card, display: 'flex', alignItems: 'center', gap: 12, textAlign: 'left', cursor: 'pointer', width: '100%', border: '1px solid var(--line)', background: 'var(--surface)' }}
               >
-                {/* The title wraps and the status sits under it. On one line
-                    a scheduled paper's date range left a phone room for one
-                    letter of the title, and papers in a series ("AE Board
-                    Review — …") were cut before the part that tells them
-                    apart. The colour is explicit because this whole card is a
-                    <button>, and the global button rule paints text white. */}
-                {/* The type badge sits above the title, not beside it: a
-                    wide one ("ASSIGNMENT") left a phone a column so narrow
-                    the title ran to five lines. */}
-                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
-                  <span style={{
-                    fontSize: 10.5, fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase',
-                    padding: '2px 8px', borderRadius: 'var(--r-full)', marginBottom: 2,
-                    background: a.kind === 'seatwork' ? 'var(--navy-tint)' : 'var(--gold-pale)',
-                    color: a.kind === 'seatwork' ? 'var(--navy)' : 'var(--gold-700)',
-                  }}>
-                    {paperNoun(a)}
-                  </span>
-                  <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink-1)', lineHeight: 1.35, overflowWrap: 'anywhere' }}>
+                <span className={`chip chip-${a.kind === 'seatwork' ? 'navy' : 'gold'}`}>
+                  <Icon name={a.kind === 'seatwork' ? 'clipboard-check' : 'exam'} size={17} />
+                </span>
+                {/* The title wraps rather than cuts: papers in a series differ
+                    at the end of the title. */}
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13.5, lineHeight: 1.35, overflowWrap: 'anywhere' }}>
                     {a.title || 'Untitled'}
                   </span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: scheduled ? 'var(--ink-4)' : closing?.soon ? 'var(--warn)' : 'var(--ok)' }}>
-                    {scheduled ? formatWindow(a) : closing ? `Open · ${closing.label}` : 'Open now'}
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: scheduled ? 'var(--ink-4)' : closing?.soon ? 'var(--warn)' : 'var(--ok)' }}>
+                    {paperNoun(a)} · {scheduled ? formatWindow(a) : closing ? `Open, ${closing.label}` : 'Open now'}
                   </span>
                 </span>
                 <Icon name="chevron-right" size={15} color="var(--ink-4)" />
@@ -247,24 +223,21 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         </div>
       )}
 
+      </div>
+
       {/* Recent scores */}
       {results.length > 0 && (
-        <>
-          <h2 style={{ fontSize: 11.5, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--ink-4)', fontWeight: 700, margin: '0 0 4px' }}>
-            {showAllResults ? `All results (${results.length})` : 'Recent results'}
-          </h2>
-          <p style={{ fontSize: 12, color: 'var(--ink-4)', margin: '0 0 10px' }}>
-            Your scores stay here after a paper is closed or archived.
-          </p>
-          <div className="card" style={{ overflow: 'hidden', marginBottom: 30 }}>
+        <div>
+          <h2 className="home-heading">Scores</h2>
+          <div className="card" style={{ overflow: 'hidden' }}>
             <div className="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Assessment</th>
-                    <th style={{ textAlign: 'right' }}>Score</th>
-                    <th className="hide-narrow" style={{ textAlign: 'right' }}>Submitted</th>
-                    {anyReviewable && <th style={{ textAlign: 'right' }}>Answers</th>}
+                    <th>Paper</th>
+                    <th className="home-score-head">Score</th>
+                    <th className="hide-narrow" style={{ textAlign: 'right' }}>Date</th>
+                    {anyReviewable && <th aria-label="Review answers" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -283,22 +256,18 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                             </span>
                           )}
                         </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 700, color: pct === null ? 'var(--ink-4)' : pct >= 75 ? 'var(--ok)' : 'var(--ink-1)' }}>
-                          {/* The percentage on the paper's base, the raw score
-                              under it, then the verdict and which base it is. */}
-                          {pct !== null && <span style={{ display: 'block', fontSize: 16 }}>{pct}%</span>}
-                          <span style={{ display: 'block', fontSize: pct !== null ? 12.5 : undefined, fontWeight: pct !== null ? 600 : undefined, color: pct !== null ? 'var(--ink-3)' : undefined }}>
-                            {m.score}/{m.total}
-                          </span>
+                        <td className="home-score">
+                          {/* The percentage on the paper's base, coloured by
+                              the verdict, then the raw score. */}
                           {pct !== null && (
-                            <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', color: m.passed ? 'var(--ok)' : 'var(--bad)', fontFamily: 'var(--font-sans)' }}>
-                              {gradeVerdict(m, { showBase: true })}
-                            </span>
+                            <strong title={gradeVerdict(m, { showBase: true })} style={{ color: m.passed ? 'var(--ok)' : 'var(--bad)' }}>{pct}%</strong>
+                          )}
+                          <span>{m.score}/{m.total}</span>
+                          {pct !== null && (
+                            <em style={{ color: m.passed ? 'var(--ok)' : 'var(--bad)' }}>{gradeVerdict(m)}</em>
                           )}
                           {m.pending > 0 && (
-                            <span style={{ display: 'block', marginTop: 2, fontSize: 11, fontWeight: 600, color: 'var(--warn)', fontFamily: 'var(--font-sans)' }}>
-                              {m.pending} mark{m.pending === 1 ? '' : 's'} awaiting marking
-                            </span>
+                            <em style={{ color: 'var(--warn)' }}>{m.pending} to mark</em>
                           )}
                         </td>
                         <td className="hide-narrow" style={{ textAlign: 'right', color: 'var(--ink-4)', fontSize: 12.5 }}>
@@ -310,11 +279,13 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                               <button
                                 className="btn ghost sm"
                                 style={{ width: 'auto' }}
+                                aria-label={`Review ${titles[r.exam_id] || 'Assessment'}`}
+                                title="Review answers"
                                 disabled={reviewBusy === r.exam_id}
                                 onClick={() => openReview(r.exam_id, titles[r.exam_id] || 'Assessment')}
                               >
-                                <Icon name="eye" size={13} />
-                                {reviewBusy === r.exam_id ? 'Loading…' : 'Review'}
+                                <Icon name="eye" size={14} />
+                                {reviewBusy === r.exam_id ? '…' : ''}
                               </button>
                             ) : (
                               <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>—</span>
@@ -334,13 +305,14 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
                 style={{ width: '100%', borderRadius: 0, borderLeft: 0, borderRight: 0, borderBottom: 0, borderTop: '1px solid var(--line)' }}
               >
                 {showAllResults
-                  ? 'Show recent only'
-                  : `Show all ${results.length} results`}
+                  ? 'Show less'
+                  : `Show all ${results.length}`}
               </button>
             )}
           </div>
-        </>
+        </div>
       )}
+      </div>
 
       <AnswerReviewOverlay review={review} onClose={closeReview} />
     </div>

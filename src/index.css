@@ -1,13 +1,13 @@
 /*
   ═══════════════════════════════════════════════════════════════
-  PATTS Exam — Refined Design Tokens
-  Drop-in superset of src/index.css.
-  All your OLD variables (--navy, --gold, --bg, --text-1, --r-sm,
-  --s-md, --t-fast, etc.) still resolve. New tokens are added.
+  PATTS Exam — design tokens.
+  PATTS navy and gold on a pale overcast-sky page. Most screens are styled
+  inline through these variables, so a change here reaches all of them.
+  --ink-3 and --ink-4 are small text: keep them at 4.5:1 on white.
   ═══════════════════════════════════════════════════════════════
 */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
 :root {
   /* ── Brand (existing + extended) ───────────── */
@@ -19,40 +19,40 @@
   --navy-600:   #163660;
   --navy-500:   #1E4A82;
   --navy-light: #1e4a82;  /* legacy alias for --navy-500 */
-  --navy-200:   #C8D6EA;
-  --navy-100:   #E3ECF8;
-  --navy-tint:  #EDF3FB;  /* legacy alias for --navy-100 */
-  --navy-50:    #F2F6FC;
+  --navy-200:   #CBD8E8;
+  --navy-100:   #E6EDF6;
+  --navy-tint:  #ECF2F9;
+  --navy-50:    #F1F5FA;
 
   --gold:       #C49830;
   --gold-bright:#E5B847;
   --gold-100:   #FBEFCC;
   --gold-pale:  #FDF7E4;  /* legacy alias for --gold-50 */
   --gold-50:    #FDF7E4;
-  --gold-dark:  #9A7620;  /* legacy alias for --gold-700 */
-  --gold-700:   #9A7620;
+  --gold-dark:  #86661A;
+  --gold-700:   #86661A;
 
   /* ── Surfaces & neutrals ───────────────────── */
   --white:      #FFFFFF;
-  --bg:         #F6F7FB;   /* was #ECF0F7 — softer */
-  --paper:      #F6F7FB;
+  --bg:         #F3F6FA;
+  --paper:      #F3F6FA;
   --surface:    #FFFFFF;
-  --surface-2:  #FAFBFD;
-  --border:     #E4E9F2;   /* was #DDE5EF */
-  --border-lt:  #EEF1F7;
-  --line:       #E4E9F2;
-  --line-soft:  #EEF1F7;
+  --surface-2:  #F8FAFC;
+  --border:     #E1E7EF;
+  --border-lt:  #EDF1F6;
+  --line:       #E1E7EF;
+  --line-soft:  #EDF1F6;
 
   /* Text */
-  --text-1:     #0D1B2E;
-  --text-2:     #3A4A60;
-  --text-3:     #677890;
-  --text-4:     #9AA8BC;
-  --ink-1:      #0D1B2E;
-  --ink-2:      #3A4A60;
-  --ink-3:      #677890;
-  --ink-4:      #9AA8BC;
-  --ink-5:      #BCC6D6;
+  --text-1:     #15263F;
+  --text-2:     #37475E;
+  --text-3:     #56657A;
+  --text-4:     #627185;
+  --ink-1:      #15263F;
+  --ink-2:      #37475E;
+  --ink-3:      #56657A;
+  --ink-4:      #627185;
+  --ink-5:      #B9C3D0;
 
   /* ── Status ────────────────────────────────── */
   --success:    #1B6B3A;
@@ -62,42 +62,45 @@
   --ok-bg:      #EBF6F0;
   --ok-bd:      #B5DAC4;
 
-  --danger:     #B92B1A;
+  --danger:     #B3321F;
   --danger-bright:#E74C3C;
   --danger-bg:  #FCEEEC;
   --danger-bd:  #F0B5AC;
-  --bad:        #B92B1A;
+  --bad:        #B3321F;
   --bad-bg:     #FCEEEC;
   --bad-bd:     #F0B5AC;
 
-  --warning:    #A56B0A;
+  --warning:    #8F5C08;
   --warning-bg: #FFF6E5;
   --warning-bd: #F0CA80;
-  --warn:       #A56B0A;
+  --warn:       #8F5C08;
   --warn-bg:    #FFF6E5;
   --warn-bd:    #F0CA80;
 
   --info:       #1558A8;
   --info-bg:    #E8F1FC;
   --info-bd:    #A8C8EC;
-  --live:       #D63D2F;
+  /* The bookmark mark on the exam navigator: seen on navy and on white. */
+  --flag:       #D08A1E;
+  --live:       #D14B3E;
 
   /* ── Elevation (softer) ────────────────────── */
-  --s-xs: 0 1px 2px rgba(13,27,46,.04), 0 0 0 1px rgba(13,27,46,.04);
-  --s-sm: 0 2px 6px rgba(13,27,46,.06), 0 0 0 1px rgba(13,27,46,.04);
-  --s-md: 0 6px 18px rgba(13,27,46,.08), 0 0 0 1px rgba(13,27,46,.04);
-  --s-lg: 0 14px 40px rgba(13,27,46,.12), 0 2px 6px rgba(13,27,46,.06);
-  --s-xl: 0 30px 80px rgba(6,24,41,.18), 0 8px 24px rgba(6,24,41,.10);
+  --s-xs: 0 1px 2px rgba(10,35,66,.05), 0 3px 8px -4px rgba(10,35,66,.08);
+  --s-sm: 0 1px 2px rgba(10,35,66,.04), 0 8px 22px -10px rgba(10,35,66,.16);
+  --s-md: 0 2px 4px rgba(10,35,66,.05), 0 14px 30px -12px rgba(10,35,66,.2);
+  --s-lg: 0 4px 8px rgba(10,35,66,.05), 0 22px 44px -16px rgba(10,35,66,.26);
+  --s-xl: 0 24px 64px rgba(6,24,41,.18);
   --sh-1: var(--s-xs);
   --sh-2: var(--s-sm);
   --sh-3: var(--s-md);
   --sh-4: var(--s-lg);
+  --sh-modal: var(--s-xl);
 
   /* ── Shape ─────────────────────────────────── */
-  --r-xs:  4px;
-  --r-sm:  8px;
-  --r-md:  12px;
-  --r-lg:  16px;
+  --r-xs:  6px;
+  --r-sm:  10px;
+  --r-md:  14px;
+  --r-lg:  18px;
   --r-xl:  22px;
   --r-2xl: 28px;
   --r-full:9999px;
@@ -114,8 +117,14 @@
   --t-3: var(--t-slow);
 
   /* ── Type ──────────────────────────────────── */
+  /* The page's left and right edge, shared by the bar and the content under it. */
+  --edge: max(20px, calc((100vw - 1480px) / 2));
+  /* The dashboard's two top bands, sidebar and toolbar, line up at this height. */
+  --bar-h: 56px;
+  --inset: 14px;
+
   --font-sans:    'Inter', 'SF Pro Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Fraunces', 'Source Serif Pro', Georgia, serif;
+  --font-display: var(--font-sans);
   --font-mono:    'JetBrains Mono', 'SF Mono', ui-monospace, monospace;
 }
 
@@ -128,7 +137,7 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   background: var(--paper);
   color: var(--ink-1);
   -webkit-font-smoothing: antialiased;
@@ -142,8 +151,8 @@ textarea,
 select {
   font-family: var(--font-sans);
   font-size: 14px;
-  padding: 10px 14px;
-  border: 1.5px solid var(--border);
+  padding: 8px 12px;
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   outline: none;
   width: 100%;
@@ -187,13 +196,11 @@ button {
 
 button:hover:not(:disabled) {
   background: var(--navy-mid);
-  box-shadow: var(--s-sm);
-  transform: translateY(-1px);
 }
 
-button:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: none;
+:is(button, a, select, summary, [role="button"]):focus-visible {
+  outline: 2px solid var(--navy-500);
+  outline-offset: 2px;
 }
 
 button:disabled {
@@ -208,9 +215,10 @@ button:disabled {
    ═══════════════════════════════════════════════ */
 
 .px-pill {
+  font-family: var(--font-sans);
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 3px 10px; border-radius: var(--r-pill);
-  font-size: 11.5px; font-weight: 600; letter-spacing: .01em;
+  padding: 2px 8px; border-radius: var(--r-pill);
+  font-size: 12px; font-weight: 600; letter-spacing: .01em;
   border: 1px solid transparent; white-space: nowrap;
 }
 .px-pill.muted   { background: var(--surface-2); color: var(--ink-3); border-color: var(--line); }
@@ -242,17 +250,18 @@ button:disabled {
   background: var(--navy); color: white; cursor: pointer; font-family: inherit;
   width: auto;
 }
-.btn:hover:not(:disabled)  { background: var(--navy-700); box-shadow: var(--s-sm); transform: none; }
+.btn:hover:not(:disabled)  { background: var(--navy-700); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.ghost  { background: transparent; color: var(--ink-2); border-color: var(--line); }
-.btn.ghost:hover { background: var(--surface-2); border-color: var(--ink-5); color: var(--ink-1); }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--ink-5); color: var(--ink-1); }
 .btn.gold   { background: var(--gold); color: var(--navy-900); }
-.btn.gold:hover { background: var(--gold-bright); }
+.btn.gold:hover:not(:disabled) { background: var(--gold-bright); }
 .btn.danger { background: white; color: var(--bad); border-color: var(--bad-bd); }
-.btn.danger:hover { background: var(--bad-bg); }
+.btn.danger:hover:not(:disabled) { background: var(--bad-bg); }
 .btn.icon-only { padding: 8px; width: 36px; height: 36px; }
-.btn.sm { padding: 7px 12px; font-size: 12.5px; }
+.btn.sm { padding: 5px 10px; font-size: 12.5px; }
+.btn.icon-btn { width: 28px; height: 28px; padding: 0; }
 .btn.lg { padding: 13px 22px; font-size: 15px; }
 
 .card {
@@ -264,13 +273,15 @@ button:disabled {
 
 .input {
   display: block; width: 100%;
-  padding: 11px 14px;
+  padding: 8px 12px;
   font-size: 14px; color: var(--ink-1);
-  background: var(--surface); border: 1.5px solid var(--line);
+  background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r-sm);
   transition: border-color var(--t-1), box-shadow var(--t-1);
   font-family: inherit;
 }
+/* A box and a list beside it are one height, whatever the browser does to a list. */
+input.input:not(.ws-text-answer):not([type='checkbox']):not([type='radio']), select.input { height: 36px; padding-top: 0; padding-bottom: 0; }
 .input:focus {
   outline: none; border-color: var(--navy);
   box-shadow: 0 0 0 4px rgba(10,35,66,.08);
@@ -282,9 +293,8 @@ button:disabled {
   color: var(--ink-2); letter-spacing: .02em; margin-bottom: 6px;
 }
 .eyebrow {
-  font-size: 11px; font-weight: 700;
-  color: var(--ink-3); letter-spacing: .12em;
-  text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--ink-3);
 }
 
 /* ── Heading defaults ────────────────────────── */
@@ -297,24 +307,23 @@ h4 { font-size: 14px; line-height: 1.3; }
 
 /* ── PATTS Header band ───────────────────────── */
 .patts-header {
-  background: linear-gradient(110deg, var(--navy-900) 0%, var(--navy) 55%, var(--navy-600) 100%);
+  background: var(--navy);
   color: white;
-  border-bottom: 3px solid var(--gold);
+  border-bottom: 2px solid var(--gold);
   position: relative;
 }
 
 /* Legacy .header alias used in ExamList / ExamBoard */
 .header {
-  background: linear-gradient(110deg, var(--navy-dark) 0%, var(--navy) 55%, var(--navy-mid) 100%);
+  background: var(--navy);
   color: white;
-  padding: 18px 28px;
+  padding: 8px var(--edge);
   border-radius: var(--r-lg);
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
-  border-bottom: 3px solid var(--gold);
-  box-shadow: var(--s-lg);
+  border-bottom: 2px solid var(--gold);
 }
 
 /* ── Login card (legacy) ─────────────────────── */
@@ -359,14 +368,16 @@ h4 { font-size: 14px; line-height: 1.3; }
 table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 thead tr { background: var(--surface-2); }
 thead th {
-  padding: 10px 14px; text-align: left;
-  font-size: 11px; font-weight: 600; color: var(--ink-3);
-  letter-spacing: .08em; text-transform: uppercase;
+  padding: 7px 12px; text-align: left;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-3);
   border-bottom: 1px solid var(--line);
 }
 tbody tr { border-bottom: 1px solid var(--line-soft); transition: background var(--t-1); }
 tbody tr:hover { background: var(--navy-50); }
-tbody td { padding: 12px 14px; vertical-align: middle; }
+tbody td { padding: 6px 12px; vertical-align: middle; }
+/* Every card keeps its text the same distance from its edge. */
+thead th:first-child, tbody td:first-child { padding-left: var(--inset); }
+thead th:last-child, tbody td:last-child { padding-right: var(--inset); }
 tbody tr:last-child td { border-bottom: none; }
 
 /* ── Question navigator ──────────────────────── */
@@ -397,7 +408,7 @@ tbody tr:last-child td { border-bottom: none; }
 .grid-flag {
   position: absolute; top: 0; right: 0;
   width: 0; height: 0;
-  border-top: 10px solid #E67E22; border-left: 10px solid transparent;
+  border-top: 10px solid var(--flag); border-left: 10px solid transparent;
   border-top-right-radius: var(--r-xs);
 }
 
@@ -412,7 +423,7 @@ tbody tr:last-child td { border-bottom: none; }
 .nav-legend .lg-answered { background: var(--navy); }
 .nav-legend .lg-current  { background: var(--surface-2); box-shadow: inset 0 0 0 2px var(--gold); }
 .nav-legend .lg-open     { background: var(--surface-2); border: 1px solid var(--line); }
-.nav-legend .lg-flagged  { width: 0; height: 0; border-radius: 0; border-top: 10px solid #E67E22; border-left: 10px solid transparent; }
+.nav-legend .lg-flagged  { width: 0; height: 0; border-radius: 0; border-top: 10px solid var(--flag); border-left: 10px solid transparent; }
 
 /* The two "go to next" shortcuts under the progress bar. Hover is restated
    because the global button:hover would otherwise repaint them navy. */
@@ -432,7 +443,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .exam-shell .jump-btn.flagged,
 .exam-shell .jump-btn.flagged:hover:not(:disabled) {
-  background: #FFF6E5; border: 1px solid #F0CA80; color: #A56B0A;
+  background: var(--warn-bg); border: 1px solid var(--warn-bd); color: var(--warn);
 }
 .exam-shell .jump-btn + .jump-btn { margin-top: 6px; }
 
@@ -466,8 +477,8 @@ tbody tr:last-child td { border-bottom: none; }
   width: 100%;
   text-align: left;
   background: var(--white);
-  border: 2px solid var(--border);
-  color: var(--text-2);
+  border: 1.5px solid var(--border);
+  color: var(--ink-1);
   padding: 14px 18px;
   border-radius: var(--r-md);
   font-size: calc(15px * var(--q-scale, 1));
@@ -493,34 +504,34 @@ tbody tr:last-child td { border-bottom: none; }
   transition: all var(--t-fast);
 }
 .choice-text { flex: 1; min-width: 0; overflow-wrap: break-word; }
-.choice-btn.selected .choice-key { background: var(--gold); border-color: var(--gold); color: var(--navy-900); }
+.choice-btn.selected .choice-key { background: var(--navy); border-color: var(--navy); color: white; }
 .choice-btn:hover:not(:disabled) {
-  background: var(--navy-tint);
-  border-color: var(--navy);
-  color: var(--navy);
-  transform: none;
-  box-shadow: none;
+  background: var(--navy-50);
+  border-color: var(--navy-500);
+  color: var(--ink-1);
 }
 .choice-btn.selected {
-  background: var(--navy);
-  color: white;
+  background: var(--navy-100);
+  color: var(--navy);
   border-color: var(--navy);
-  box-shadow: var(--s-sm);
+  /* The extra pixel of edge is a shadow, so picking moves nothing. */
+  box-shadow: inset 0 0 0 1px var(--navy);
   font-weight: 500;
 }
 /* Hovering the picked choice must still read as picked. It used to fall back
    to the pale hover style, so the choice just clicked looked unpicked until
    the pointer moved away. */
 .choice-btn.selected:hover:not(:disabled) {
-  background: var(--navy-700);
-  border-color: var(--navy-700);
-  color: white;
+  background: var(--navy-100);
+  border-color: var(--navy);
+  color: var(--navy);
+  box-shadow: inset 0 0 0 1px var(--navy);
 }
 /* A touch screen keeps :hover on whatever was last tapped. There it only ever
    made the choice just picked look unpicked, so on touch it changes nothing. */
 @media (hover: none) {
-  .choice-btn:hover:not(:disabled) { background: var(--white); border-color: var(--border); color: var(--text-2); }
-  .choice-btn.selected:hover:not(:disabled) { background: var(--navy); border-color: var(--navy); color: white; }
+  .choice-btn:hover:not(:disabled) { background: var(--white); border-color: var(--border); color: var(--ink-1); }
+  .choice-btn.selected:hover:not(:disabled) { background: var(--navy-100); border-color: var(--navy); color: var(--navy); }
 }
 .choice-btn:active:not(:disabled) {
   background: var(--navy-tint) !important;
@@ -533,7 +544,7 @@ box that fills with a tick — a student must be able to see that several
    answers are wanted without having to click one to find out. */
 .choice-btn.tickable .choice-key { border-radius: 5px; background: var(--white); border-width: 2px; }
 .choice-btn.tickable.selected .choice-key {
-  background: var(--white); border-color: var(--white); color: var(--navy);
+  background: var(--navy); border-color: var(--navy); color: white;
   font-size: 15px; font-weight: 800;
 }
 
@@ -548,15 +559,17 @@ box that fills with a tick — a student must be able to see that several
   min-width: 0;
   background: var(--white);
   padding: 30px;
+  border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: var(--s-md);
+  box-shadow: var(--s-xs);
 }
 .side-panel {
   flex: 1;
   background: var(--white);
   padding: 22px;
+  border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  box-shadow: var(--s-md);
+  box-shadow: var(--s-xs);
   position: sticky;
   /* clear of the sticky exam header, which it used to slide under */
   top: 84px;
@@ -605,7 +618,7 @@ box that fills with a tick — a student must be able to see that several
   touch-action: manipulation;
 }
 .exam-shell .q-bookmark.on,
-.exam-shell .q-bookmark.on:hover:not(:disabled) { background: #FFF6E5; border-color: #F0CA80; color: #A56B0A; }
+.exam-shell .q-bookmark.on:hover:not(:disabled) { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn); }
 
 .q-figure {
   position: relative;
@@ -684,7 +697,7 @@ box that fills with a tick — a student must be able to see that several
 .exam-dialog { max-width: 460px; width: 100%; margin: auto; padding: 0; overflow: hidden; box-shadow: var(--s-xl); }
 .submit-list { border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 12px; }
 .submit-list.warn { background: var(--warn-bg); border: 1px solid var(--warn-bd); color: var(--warn); }
-.submit-list.flag { background: var(--surface-2); border: 1px solid var(--line); color: #A56B0A; }
+.submit-list.flag { background: var(--surface-2); border: 1px solid var(--line); color: var(--warn); }
 .submit-list.ok   { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok); }
 .submit-list-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .submit-chips {
@@ -816,7 +829,7 @@ input:checked + .slider::before { transform: translateX(26px); }
      screen Submit otherwise sat below the fold. The phone sheet (≤759px)
      sets its own position. */
   .side-panel { padding: 16px; }
-  .header { padding: 14px 20px; }
+
 }
 
 /* 759, not 768: a tablet held upright (768px and up) keeps the navigator
@@ -878,7 +891,7 @@ input:checked + .slider::before { transform: translateX(26px); }
   .exam-shell .bb-next:hover:not(:disabled) { background: var(--navy); color: white; }
   .exam-shell .bb-next { flex: 0 0 auto; min-width: 104px; }
   .exam-shell .bb-finish,
-  .exam-shell .bb-finish:hover:not(:disabled) { background: linear-gradient(135deg, #27AE60, #1E8449); }
+  .exam-shell .bb-finish:hover:not(:disabled) { background: var(--ok); }
 
   .side-panel {
     position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
@@ -1105,7 +1118,7 @@ input:checked + .slider::before { transform: translateX(26px); }
   font-size: 17px;
 }
 .ws-given-label {
-  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
   color: var(--info);
 }
 
@@ -1117,7 +1130,7 @@ input:checked + .slider::before { transform: translateX(26px); }
   align-items: center; gap: 8px;
 }
 .ws-step-no {
-  font-family: var(--font-mono); font-size: 12px; color: var(--ink-4);
+  font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-4);
   text-align: right;
 }
 
@@ -1242,7 +1255,7 @@ input:checked + .slider::before { transform: translateX(26px); }
 .ws-rubric-head {
   display: grid; grid-template-columns: 1fr 90px 1fr 32px;
   gap: 8px; margin-bottom: 6px;
-  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
   color: var(--ink-4);
 }
 .ws-marked {
@@ -1277,7 +1290,7 @@ input:checked + .slider::before { transform: translateX(26px); }
    render as expected. */
 .ws-answer-label {
   display: block; margin-bottom: 6px;
-  font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
   color: var(--ink-4);
 }
 .ws-answer .math-field-host math-field {
@@ -1388,7 +1401,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
 .wr-field { display: block; margin-bottom: 12px; }
 .wr-label {
   display: block; margin-bottom: 5px;
-  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
   color: var(--ink-4);
 }
 .wr-palette {
@@ -1456,7 +1469,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
 }
 .q-maths-part { display: inline-flex; align-items: center; gap: 7px; }
 .q-maths-tag {
-  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  font-size: 12.5px; font-weight: 600;
   color: var(--ink-4);
 }
 
@@ -1485,11 +1498,11 @@ button.card { color: var(--ink-1); background: var(--surface); }
 /* Student home on a phone (StudentShell, StudentSummary). At 390px the four
    tabs ran past the edge, hiding Exams, and the results table hid its Review
    button off to the side. */
-.student-main { padding: 32px 24px; }
+.student-main { padding: 14px var(--edge) 24px; }
 @media (max-width: 480px) {
-  .student-main { padding: 20px 16px; }
+  .student-main { padding: 10px var(--edge) 20px; }
   .student-tabs { padding: 0 4px !important; justify-content: space-between; }
-  .student-tabs button { padding: 12px 7px !important; font-size: 13px !important; gap: 5px !important; }
+  .student-tabs button { padding: 10px 7px !important; font-size: 13px !important; gap: 5px !important; }
   .hide-narrow { display: none; }
 }
 /* A small Android phone (360px) still ran the bar 15px past the edge and
@@ -1538,7 +1551,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .dash-menu-bars { display: grid; gap: 4px; width: 18px; }
   .dash-menu-bars span { display: block; height: 2px; border-radius: 1px; background: currentColor; }
   .dash-menu-live {
-    background: #E74C3C; color: white; font-size: 11px; font-weight: 700;
+    background: var(--live); color: white; font-size: 11px; font-weight: 700;
     padding: 1px 6px; border-radius: 99px; line-height: 1.5;
   }
 
@@ -1561,7 +1574,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .dash-tab.is-active, .dash-tab.is-active:hover:not(:disabled) { color: var(--navy); background: var(--navy-tint); }
   .dash-tab-badge {
     position: absolute; top: 3px; left: calc(50% + 5px);
-    background: #E74C3C; color: #fff; font-size: 10px; font-weight: 700; line-height: 1.5;
+    background: var(--live); color: #fff; font-size: 10px; font-weight: 700; line-height: 1.5;
     padding: 0 5px; border-radius: 99px;
   }
   .dash-main { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
@@ -1594,7 +1607,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   }
   .tbl-stack td::before {
     content: attr(data-label); flex: 0 0 auto; margin-right: auto; text-align: left;
-    font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-4);
+    font-size: 12.5px; font-weight: 600; color: var(--ink-4);
   }
   /* Where the values are wide — a title to edit, a row of sections — the
      label sits above, and the value has the whole width. */
@@ -1627,7 +1640,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
 }
 .trash-heading {
   display: flex; align-items: center; gap: 8px; margin: 0 0 8px;
-  font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-4); font-weight: 700;
+  font-size: 11.5px; color: var(--ink-4); font-weight: 700;
 }
 .trash-heading span {
   letter-spacing: 0; font-size: 11px; padding: 1px 7px; border-radius: 99px;
@@ -1641,21 +1654,24 @@ button.card { color: var(--ink-1); background: var(--surface); }
 .ws-qty-key { font-weight: 700; color: var(--navy); margin-right: 2px; }
 .ws-qty .ws-text-answer { font-size: 16px; }
 
-/* ── Section switch (StudentShell) ── */
-.section-switch {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 24px; background: var(--navy-50, #F0F4FA); border-bottom: 1px solid var(--line);
+/* ── Tabs and section switch, one bar (StudentShell) ── */
+.student-bar {
+  display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: center; gap: 12px;
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  position: sticky; top: 0; z-index: 20;
 }
-.section-switch label {
-  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
-  font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+.student-bar .student-tabs { flex: 1 1 auto; min-width: 0; }
+.section-switch { flex: 0 0 auto; padding-right: var(--edge); background: var(--surface); }
+/* The first tab's words start on the page's left edge. */
+.student-tabs { padding: 0 calc(var(--edge) - 12px); }
+.section-switch select { width: auto; min-width: 120px; max-width: 260px; padding: 5px 10px; font-size: 13.5px; font-weight: 600; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (max-width: 759px) {
+  .student-bar { display: contents; }
+  .section-switch { padding: 6px var(--edge); border-bottom: 1px solid var(--line-soft); }
+  .section-switch select { width: 100%; max-width: none; font-size: 16px; }
+  .student-tabs { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--line); }
 }
-.section-switch select { width: auto; min-width: 0; max-width: 100%; flex: 0 1 320px; padding: 7px 10px; font-size: 14px; font-weight: 600; }
-@media (max-width: 480px) {
-  .section-switch { padding: 8px 16px; }
-  .section-switch select { flex: 1 1 auto; font-size: 16px; }
-}
-
 
 /* ---- Manage Exams: a card per paper ---------------------------------- */
 .mx-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
@@ -1704,7 +1720,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
 
 .mx-fields { display: grid; grid-template-columns: minmax(0, 2fr) auto minmax(0, 1.3fr); gap: 12px 18px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .mx-field { min-width: 0; }
-.mx-label { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-4); }
+.mx-label { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-4); }
 .mx-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
 .mx-row .btn { width: auto; }
 .mx-row input.mx-time { flex: 0 0 76px; width: 76px; padding: 7px 10px; font-size: 13px; }
@@ -1734,4 +1750,478 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .mx-actions .btn { min-height: 38px; }
   .mx-actions-end { margin-left: 0; }
   .mx-base-options { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- The airfoil band: login only ---------------------------------------
+   The one decorated thing in the portal. The moving version pitches the wing
+   and runs the streamlines; it is SMIL inside the file, so it costs no script
+   and stops with the page. */
+.flow-band {
+  background: var(--navy) url(/airfoil-flow.svg) no-repeat 100% 50% / auto 165%;
+  color: white;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-band { background-image: url(/airfoil-flow-still.svg); }
+}
+
+/* Figures read as one strip, not a row of separate cards. The 1px gaps show
+   the strip's own background through, which draws the rules between cells. */
+.stat-strip {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 1px;
+  background: var(--line-soft); border: 1px solid var(--line); border-radius: var(--r-md);
+  overflow: hidden; margin-bottom: 14px;
+}
+.stat-cell { background: var(--surface); padding: 8px var(--inset); min-width: 0; }
+.stat-cell-label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.stat-cell-value { font-size: 21px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; color: var(--ink-1); font-variant-numeric: tabular-nums; }
+
+/* Student home: everything on one screen from a laptop up. */
+.home-wrap { width: 100%; }
+.home-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: start; }
+.home-heading { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--ink-1); }
+.home-score { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--ink-3); }
+.home-score strong { display: inline-block; min-width: 4ch; font-size: 14.5px; font-weight: 700; text-align: right; margin-right: 8px; }
+.home-score span { display: inline-block; min-width: 7ch; }
+.home-score em { font-style: normal; font-weight: 600; margin-left: 8px; }
+
+/* Section tiles: as many to a row as fit. */
+.section-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.section-tile, .section-tile:hover:not(:disabled) {
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 48px; padding: 8px var(--inset);
+  background: var(--surface); color: var(--ink-1); border: 1px solid var(--line); border-radius: var(--r-md);
+  font-size: 14px; font-weight: 600; text-align: left;
+}
+.section-tile:hover:not(:disabled) { background: var(--navy-50); border-color: var(--navy-500); }
+.section-tile > svg:first-child { color: var(--navy); }
+.section-tile span { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
+.lesson-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; }
+.exam-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); gap: 10px; }
+.exam-card { flex-wrap: wrap; gap: 10px 16px; }
+.exam-card-actions { margin-left: 0; }
+
+/* A list of rows in one card. */
+.row-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.row-list > * + * { border-top: 1px solid var(--line-soft); }
+.row-list-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 7px var(--inset);
+  background: transparent; border-radius: 0; color: var(--ink-1); font-size: 13.5px; font-weight: 500; text-align: left;
+}
+button.row-list-item, button.row-list-item:hover:not(:disabled) { color: var(--ink-1); }
+button.row-list-item:hover:not(:disabled) { background: var(--navy-50); }
+
+/* Sidebar footer */
+.dash-side-icon, .dash-side-icon:hover:not(:disabled) {
+  flex: 0 0 auto; width: 32px; height: 32px; padding: 0;
+  background: transparent; color: rgba(255,255,255,.84); border: 1px solid rgba(255,255,255,.2); border-radius: var(--r-sm);
+}
+.dash-side-icon:hover:not(:disabled) { background: rgba(255,255,255,.1); color: white; }
+
+/* Every filter bar: one line of equal boxes where it fits. */
+.filter-row.card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px var(--inset); margin-bottom: 10px; }
+.filter-row .btn.sm { height: 36px; }
+.filter-note { font-size: 12.5px; color: var(--ink-3); }
+.mx-search input.input { height: 38px; }
+
+/* Results: filters on one line, stats beside the spread of scores */
+.dash-filters.card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px var(--inset); margin-bottom: 10px; }
+.dash-filter-field { flex: 0 1 130px; min-width: 84px; }
+.dash-filter-field .input { width: 100%; }
+.dash-filter-grow { flex: 1 1 200px; }
+.dash-filter-check { flex: 0 0 auto; min-width: 0; display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-3); cursor: pointer; white-space: nowrap; }
+.res-tail { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+.dash-filters .btn.sm { height: 36px; }
+@media (min-width: 1280px) { .dash-filters.card { flex-wrap: nowrap; } }
+.res-summary { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: center; padding: 8px var(--inset); margin-bottom: 10px; }
+.res-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 12px; }
+.tbl-results .res-actions > div { justify-content: flex-end; }
+.res-stat-label { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.res-stat-value { font-size: 20px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; color: var(--ink-1); }
+.res-pending { grid-column: 1 / -1; font-size: 12.5px; font-weight: 600; color: var(--warn); }
+.res-chart { min-width: 0; }
+
+/* ---- Login ----------------------------------------------------------------
+   Side by side from a laptop up, the band stacked over the form on a phone. */
+.login { min-height: 100vh; min-height: 100dvh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); background: var(--paper); }
+.login-band { display: flex; flex-direction: column; justify-content: space-between; gap: 32px; padding: 40px 48px; background-size: 130% auto; background-position: 83% 42%; }
+.login-logo { height: 68px; width: auto; max-width: 100%; object-fit: contain; object-position: left; align-self: flex-start; }
+.login-band h1 { font-weight: 600; font-size: 38px; line-height: 1.12; letter-spacing: -0.02em; color: white; margin: 0; max-width: 13em; }
+.login-side { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 32px 24px 20px; min-width: 0; }
+.login-form { width: 100%; max-width: 410px; padding: 0; overflow: hidden; box-shadow: var(--s-md); }
+.login-modes { display: flex; padding: 5px; gap: 5px; background: var(--navy-50); border-bottom: 1px solid var(--line); }
+.login-mode, .login-mode:hover:not(:disabled) { flex: 1; width: auto; padding: 10px 0; background: transparent; color: var(--ink-3); font-size: 13.5px; border-radius: var(--r-sm); }
+.login-mode.is-on, .login-mode.is-on:hover:not(:disabled) { background: var(--surface); color: var(--navy); box-shadow: var(--s-sm); }
+.login-body { padding: 24px 26px 26px; }
+.login-body input.input { font-size: 16px; height: 44px; }
+.login-note { margin-top: 16px; padding: 11px 12px; background: var(--navy-50); border-radius: var(--r-sm); display: flex; align-items: flex-start; gap: 10px; }
+.login-note p { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.login-foot { margin: 22px 0 0; font-size: 12px; color: var(--ink-4); text-align: center; }
+@media (max-width: 899px) {
+  .login { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  /* The wing flies level with the logo, clear of the heading below it. */
+  .login-band { padding: 20px 20px 22px; gap: 16px; background-size: 80% auto; background-position: right -34px; }
+  .login-logo { height: 52px; }
+  .login-band h1 { font-size: 24px; }
+    .login-side { justify-content: flex-start; padding: 16px 14px 18px; }
+  .login-body { padding: 20px 18px 20px; }
+}
+@media (max-width: 759px) {
+  /* Four figures fit one row of a phone; six wrap to three a row. */
+  :root { --edge: 12px; --inset: 12px; }
+  .section-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lesson-grid, .exam-grid { grid-template-columns: minmax(0, 1fr); }
+  .filter-row .dash-filter-field { flex: 1 1 40% !important; margin-left: 0 !important; }
+  .filter-row .dash-filter-grow { flex-basis: 100% !important; }
+  .filter-note { flex: 1 1 100%; order: 1; }
+  /* One swipeable line of sections rather than a block of them. */
+  .student-chips { flex-wrap: nowrap !important; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .student-chips > * { flex-shrink: 0; }
+  .stat-strip { display: flex; flex-wrap: wrap; margin-bottom: 10px; }
+  .stat-cell { flex: 1 1 30%; }
+  .stat-strip-4 .stat-cell { flex-basis: 20%; }
+  .stat-cell { padding: 7px 8px; text-align: center; }
+  .stat-cell-label { justify-content: center; font-size: 12px; }
+  .stat-cell-label svg { display: none; }
+  .stat-cell-value { font-size: 18px; }
+}
+
+/* The home screens and Results stack below a laptop. */
+@media (max-width: 1024px) {
+  /* Fingers, not a pointer. */
+  .dash-side nav button { min-height: 38px; }
+  .btn.sm { min-height: 34px; }
+  .btn.icon-btn { width: 36px; height: 36px; }
+  /* The section chips' tiny remove button keeps its look and gains a finger-
+     sized target around it. */
+  button[aria-label^="Remove "] { position: relative; }
+  button[aria-label^="Remove "]::after { content: ''; position: absolute; inset: -11px; }
+  .home-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .exam-grid { grid-template-columns: minmax(0, 1fr); }
+  .dash-filters .dash-filter-field .input { height: 40px; }
+  .res-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .res-tail { margin-left: 0; width: 100%; justify-content: space-between; }
+  /* One submission in three short lines, not a card of seven labelled rows. */
+  .tbl-results tr { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 1px 10px; align-items: center; padding: 8px 12px; margin-bottom: 6px; }
+  .tbl-results td { padding: 0 !important; display: block; text-align: left !important; }
+  .tbl-results td::before { content: none !important; }
+  .tbl-results .res-name { grid-column: 1 / 4; grid-row: 1; font-size: 14px; font-weight: 600; }
+  .tbl-results .res-score { grid-column: 4; grid-row: 1; text-align: right !important; }
+  .tbl-results .res-paper { grid-column: 1 / -1; grid-row: 2; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis; }
+  .tbl-results .res-section { grid-column: 1; grid-row: 3; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap !important; }
+  .tbl-results .res-time { grid-column: 2; grid-row: 3; }
+  .tbl-results .res-flags { grid-column: 3; grid-row: 3; }
+  .tbl-results .res-actions { grid-column: 4; grid-row: 3; justify-self: end; }
+  .tbl-results .btn.icon-btn { width: 32px; height: 32px; }
+  .tbl-results .res-actions > div { justify-content: flex-end; }
+  .tbl-results td[colspan] { grid-column: 1 / -1; text-align: center !important; }
+  /* Attendance: who, which section, and where they stand, in two lines. */
+  .tbl-attendance tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 10px; align-items: center; padding: 8px 12px; margin-bottom: 6px; }
+  .tbl-attendance td { display: block; padding: 0 !important; text-align: left !important; }
+  .tbl-attendance td::before { content: none !important; }
+  .tbl-attendance .att-no { display: none; }
+  .tbl-attendance .att-name { grid-column: 1; grid-row: 1; font-size: 14px; }
+  .tbl-attendance .att-section { grid-column: 1; grid-row: 2; font-size: 12.5px; color: var(--ink-3) !important; }
+  .tbl-attendance .att-status { grid-column: 2; grid-row: 1 / 3; }
+  .tbl-attendance td[colspan] { grid-column: 1 / -1; text-align: center !important; }
+  /* Students: the bin sits at the end of the sections, not on a line of its own. */
+  .tbl-stack-block td[data-label="Edit section"] { padding-right: 46px !important; }
+  .tbl-stack-block td[data-label="Edit section"]::before { display: none; }
+  .tbl-stack-block td[data-label=""]:last-child { position: absolute; right: 12px; bottom: 10px; padding: 0 !important; }
+  .tbl-stack-block td[data-label=""]:last-child::before { content: none; }
+}
+@media (max-width: 759px) {
+  /* Too narrow for three columns: stacked, against the row's right edge. */
+  .home-score { white-space: nowrap; text-align: right; }
+  .home-score-head { text-align: right; }
+  .home-score strong { display: block; min-width: 0; margin: 0; }
+  .home-score span { display: inline; min-width: 0; }
+  .home-score em { margin-left: 6px; }
+  /* In a column a flex basis is a height, which left a gap inside each card. */
+  .exam-card > div:first-child { flex: 0 0 auto !important; }
+}
+
+/* Manage Exams, tightened: no rules between the blocks, labels in line. */
+.mx-toolbar { margin-bottom: 10px; gap: 8px; }
+.mx-segments button { min-height: 36px; padding: 4px 11px; }
+.mx-toolbar > .btn.sm { height: 38px; }
+.mx-list { gap: 8px; margin-bottom: 14px; }
+.mx-card { padding: 10px 14px; gap: 7px; border-left-width: 3px; }
+.mx-title textarea.input { padding: 3px 8px; margin-left: -8px; font-size: 14.5px; border-color: transparent; background: transparent; }
+.mx-title textarea.input:hover, .mx-title textarea.input:focus { border-color: var(--line); background: var(--surface); }
+.mx-status { min-height: 30px; padding: 3px 11px; font-size: 12.5px; }
+.mx-chip { min-height: 26px; padding: 2px 9px; }
+.mx-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 0; border: 0; grid-template-columns: none; }
+.mx-field { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.mx-label { margin: 0; white-space: nowrap; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.mx-coteach { margin-top: 0; }
+.mx-row input.mx-time { height: 30px !important; padding: 0 8px; flex-basis: 64px; width: 64px; }
+.mx-row input.mx-password { height: 30px !important; padding: 0 8px; flex: 0 1 130px; }
+.mx-row:has(.mx-password) { flex-wrap: nowrap; }
+.mx-actions .btn { padding: 4px 9px; }
+/* On a wide screen the title, its switches and its status share one line. */
+@media (min-width: 1200px) {
+  .mx-card { grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 12px; }
+  .mx-head { display: contents; }
+  .mx-title { grid-column: 1; grid-row: 1; }
+  .mx-chips { grid-column: 2; grid-row: 1; flex-wrap: nowrap; }
+  .mx-status { grid-column: 3; grid-row: 1; }
+  .mx-fields, .mx-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 1024px) {
+  .mx-title textarea.input { min-height: 34px; }
+  .mx-chips .mx-chip, .mx-head .mx-status, .mx-row .btn.mx-icon { min-height: 34px; min-width: 34px; }
+  .mx-row input.mx-time, .mx-row input.mx-password { height: 34px !important; }
+  /* The Edit section cell already shows these. */
+  .tbl-stack-block td[data-label="Section"] { display: none; }
+}
+@media (max-width: 759px) {
+  .mx-card { padding: 10px 12px; }
+  .mx-fields { display: flex; flex-flow: row wrap; align-items: flex-start; gap: 8px 12px; }
+  .mx-field { flex-wrap: wrap; gap: 2px 6px; min-width: 0; flex: 0 0 auto; }
+  .mx-field:first-child { flex: 1 1 100%; }
+  /* Takes what is left of the line, and a line of its own before it would
+     squeeze below a usable width. */
+  .mx-field:last-child { flex: 1 1 200px; }
+  .mx-label { margin: 0; flex: 1 1 100%; }
+  .mx-row { width: 100%; }
+  .mx-field:nth-child(2) .mx-row { width: auto; }
+  .mx-row input.mx-password { flex: 1 1 90px; min-width: 90px; }
+  .mx-actions-end { margin-left: 0; }
+  /* The three used most keep their words. The rest are icons; the words stay
+     in the page for screen readers, and each button still has its title. */
+  .mx-actions .btn { font-size: 0; gap: 0; min-width: 38px; min-height: 36px; padding: 0 9px; }
+  .mx-actions > .btn:nth-child(-n+3) { font-size: 12.5px; gap: 5px; }
+}
+
+/* ==========================================================================
+   Depth. Compact is not the same as flat: surfaces float on the page, controls
+   press in, and things you can act on sit a little proud of what you can't.
+   ========================================================================== */
+
+/* Dropdowns: our own arrow. The browser's sits on the border and indents the
+   text differently from a text box beside it, so a row of filters never lined
+   up. !important on the padding: several screens set a tight one of their own,
+   and the words must never run under the arrow. */
+select, select.input {
+  -webkit-appearance: none; appearance: none;
+  padding-right: 32px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2356657A' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  text-overflow: ellipsis;
+}
+
+/* Boxes you type in sit slightly into the page. */
+input:not([type='checkbox']):not([type='radio']), textarea, select, .input {
+  border-color: rgba(10,35,66,.1);
+  box-shadow: inset 0 1px 2px rgba(10,35,66,.05);
+}
+select, select.input { box-shadow: 0 1px 2px rgba(10,35,66,.06); }
+input:not([type='checkbox']):not([type='radio']):focus, textarea:focus, select:focus, .input:focus {
+  border-color: var(--navy);
+  box-shadow: 0 0 0 3px rgba(10,35,66,.1);
+}
+
+/* Cards float rather than being outlined. */
+.card { border-color: rgba(10,35,66,.05); box-shadow: var(--s-sm); }
+.main-panel, .side-panel { border-color: rgba(10,35,66,.05); box-shadow: var(--s-sm); }
+
+/* Buttons stand up off the card and press in. */
+.btn {
+  background: linear-gradient(180deg, #143660 0%, var(--navy) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 1px 2px rgba(6,24,41,.22), 0 8px 16px -8px rgba(10,35,66,.55);
+  transition: transform var(--t-1), box-shadow var(--t-1), background var(--t-1), color var(--t-1);
+}
+.btn:hover:not(:disabled) { background: linear-gradient(180deg, #1A4274 0%, #0E2F58 100%); }
+.btn.ghost {
+  background: var(--surface); color: var(--ink-2); border-color: rgba(10,35,66,.07);
+  box-shadow: 0 1px 2px rgba(10,35,66,.07), 0 4px 10px -6px rgba(10,35,66,.2);
+}
+.btn.ghost:hover:not(:disabled) { background: var(--surface); color: var(--navy); border-color: rgba(10,35,66,.14); }
+.btn.gold { background: linear-gradient(180deg, #D6AC45 0%, var(--gold) 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 1px 2px rgba(6,24,41,.2), 0 8px 16px -8px rgba(154,118,32,.7); }
+.btn.gold:hover:not(:disabled) { background: linear-gradient(180deg, #DFB754 0%, #CBA038 100%); }
+.btn.danger { background: var(--surface); box-shadow: 0 1px 2px rgba(10,35,66,.07), 0 4px 10px -6px rgba(179,50,31,.3); }
+.btn:disabled { box-shadow: none; }
+.btn:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 2px rgba(6,24,41,.2); }
+@media (hover: hover) {
+  .btn:hover:not(:disabled) { transform: translateY(-1px); }
+}
+
+.dash-refresh { width: auto; }
+
+/* Icon chips: the small rounded squares that carry a screen's colour. */
+.chip {
+  flex: 0 0 auto; width: 36px; height: 36px; border-radius: 11px;
+  display: inline-grid; place-items: center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
+}
+.chip-navy { background: var(--navy-100); color: var(--navy); }
+.chip-gold { background: var(--gold-100); color: var(--gold-700); }
+.chip-blue { background: var(--info-bg); color: var(--info); }
+.chip-ok   { background: var(--ok-bg); color: var(--ok); }
+.chip-bad  { background: var(--bad-bg); color: var(--bad); }
+
+/* Figures: separate floating tiles, chip beside the number. */
+.stat-strip { gap: 10px; background: none; border: 0; border-radius: 0; overflow: visible; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.stat-cell {
+  display: flex; align-items: center; gap: 11px;
+  background: var(--surface); padding: 10px var(--inset); border-radius: var(--r-md);
+  box-shadow: var(--s-sm);
+}
+.stat-cell-label { line-height: 1.3; }
+.stat-cell-value { line-height: 1.2; }
+
+.row-list { border: 0; border-radius: var(--r-md); box-shadow: var(--s-sm); }
+.res-summary { border-radius: var(--r-md); }
+.dash-filters.card, .filter-row.card { border-radius: var(--r-md); }
+
+/* Student header and tabs: the band casts a soft shadow, the tabs are pills. */
+.header { position: relative; z-index: 21; box-shadow: 0 8px 20px -10px rgba(6,24,41,.55); border-bottom-width: 2px; }
+.student-bar { background: var(--paper); border-bottom: 0; padding: 10px 0 2px; align-items: center; }
+.student-tabs { background: none; gap: 4px; padding: 4px calc(var(--edge) - 4px); display: flex; overflow-x: auto; scrollbar-width: none; }
+.section-switch { background: none; }
+.section-switch select { border-radius: var(--r-sm); background-color: var(--surface); }
+.student-tab, .student-tab:hover:not(:disabled) {
+  appearance: none; width: auto; display: flex; align-items: center; gap: 7px; white-space: nowrap;
+  padding: 8px 14px; border: 0; border-radius: 999px; background: transparent;
+  color: var(--ink-3); font-size: 13.5px; font-weight: 600; cursor: pointer;
+}
+.student-tab:hover:not(:disabled) { background: rgba(10,35,66,.05); color: var(--navy); }
+.student-tab.is-on, .student-tab.is-on:hover:not(:disabled) {
+  background: linear-gradient(180deg, #143660 0%, var(--navy) 100%); color: white;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 8px 16px -8px rgba(10,35,66,.6);
+}
+
+/* Section picker: a greeting, and a tile per subject. */
+.greet { margin: 4px 0 14px; }
+.greet p { margin: 0; font-size: 14px; color: var(--ink-3); }
+.greet h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -.02em; color: var(--navy); }
+.section-grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+.section-tile, .section-tile:hover:not(:disabled) {
+  position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 18px;
+  width: 100%; min-height: 132px; padding: 14px 16px; border: 0; border-radius: 18px; text-align: left;
+  color: white; font-size: 16px; font-weight: 700;
+  transition: transform var(--t-2), box-shadow var(--t-2);
+}
+.tile-navy, .tile-navy:hover:not(:disabled)   { background: linear-gradient(150deg, #173D6C 0%, var(--navy) 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 16px 26px -14px rgba(10,35,66,.75); }
+.tile-gold, .tile-gold:hover:not(:disabled)   { background: linear-gradient(150deg, #DDB655 0%, #BE922A 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 16px 26px -14px rgba(154,118,32,.85); color: var(--navy-900); }
+.tile-steel, .tile-steel:hover:not(:disabled) { background: linear-gradient(150deg, #2C6FBC 0%, #1E4A82 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 16px 26px -14px rgba(30,74,130,.8); }
+.tile-deep, .tile-deep:hover:not(:disabled)   { background: linear-gradient(150deg, #0E2F58 0%, #061829 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 16px 26px -14px rgba(6,24,41,.8); }
+.tile-blue, .tile-blue:hover:not(:disabled)   { background: linear-gradient(150deg, #3A7BC8 0%, #1F5AA6 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 16px 26px -14px rgba(31,90,166,.8); }
+.tile-chip { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+.tile-go { position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.2); transition: background var(--t-1); }
+.tile-name { position: relative; z-index: 1; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; padding-right: 6px; }
+.tile-ghost { position: absolute; right: -12px; bottom: -16px; opacity: .13; pointer-events: none; }
+.tile-gold .tile-chip, .tile-gold .tile-go { background: rgba(255,255,255,.32); }
+@media (hover: hover) {
+  .section-tile:hover:not(:disabled) { transform: translateY(-3px); }
+  .section-tile:hover .tile-go { background: rgba(255,255,255,.34); }
+}
+.section-tile:active:not(:disabled) { transform: translateY(0); }
+
+/* Manage Exams: the status filter is a floating pill group. */
+.mx-segments { border: 0; border-radius: 12px; padding: 3px; gap: 2px; background: var(--surface); box-shadow: var(--s-sm); overflow: visible; }
+.mx-segments button { border: 0 !important; border-radius: 9px; min-height: 32px; }
+.mx-segments button:hover:not(:disabled) { background: var(--navy-50); color: var(--navy); }
+.mx-segments button.is-on, .mx-segments button.is-on:hover:not(:disabled) { background: linear-gradient(180deg, #143660 0%, var(--navy) 100%); color: white; box-shadow: 0 6px 12px -6px rgba(10,35,66,.6); }
+.mx-chip { border-color: rgba(10,35,66,.08); box-shadow: 0 1px 2px rgba(10,35,66,.06); }
+.mx-card { border-left-width: 0; box-shadow: var(--s-sm); }
+.mx-search input.input { background: var(--surface); box-shadow: var(--s-sm); border-color: transparent; }
+.mx-actions .btn.mx-delete, .mx-actions .btn.mx-delete:hover:not(:disabled) { color: var(--bad); border-color: var(--bad-bd); }
+.mx-actions .btn.mx-delete:hover:not(:disabled) { background: var(--bad-bg); }
+
+@media (max-width: 1024px) {
+  /* The thumb bar floats off the bottom of the screen. */
+  .dash-tabbar {
+    left: 10px; right: 10px; bottom: calc(8px + env(safe-area-inset-bottom));
+    padding: 5px; border: 0; border-radius: 20px;
+    background: linear-gradient(180deg, #143660 0%, var(--navy) 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 16px 28px -10px rgba(6,24,41,.65);
+  }
+  .dash-tab { color: rgba(255,255,255,.76); border-radius: 15px; }
+  .dash-tab:hover:not(:disabled) { color: rgba(255,255,255,.76); }
+  .dash-tab.is-active, .dash-tab.is-active:hover:not(:disabled) { background: white; color: var(--navy); box-shadow: 0 6px 12px -6px rgba(0,0,0,.5); }
+  .dash-main { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+  .tbl-stack tr { border: 0; box-shadow: var(--s-sm); }
+}
+@media (max-width: 759px) {
+  .student-bar { padding: 0; }
+  .section-switch { padding: 8px var(--edge) 0; border: 0; background: var(--paper); }
+  .student-tabs { position: sticky; top: 0; z-index: 20; border: 0; background: var(--paper); padding: 6px calc(var(--edge) - 2px) !important; justify-content: space-between; gap: 2px !important; }
+  .student-tab, .student-tab:hover:not(:disabled) { padding: 8px 10px !important; gap: 5px !important; font-size: 13px !important; }
+  .stat-strip { gap: 6px; }
+  .stat-cell { display: block; padding: 8px 6px; }
+  .stat-cell .chip { display: none; }
+  .greet { margin: 2px 0 10px; }
+  .greet h1 { font-size: 24px; }
+  .section-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .section-tile, .section-tile:hover:not(:disabled) { min-height: 104px; padding: 11px 12px; gap: 12px; border-radius: 16px; font-size: 14.5px; }
+  .tile-name { font-size: 14.5px; }
+  .tile-chip { width: 34px; height: 34px; border-radius: 10px; }
+  .tile-go { top: 11px; right: 11px; width: 26px; height: 26px; }
+  .tile-ghost { width: 72px; height: 72px; }
+}
+@media (max-width: 380px) {
+  .student-tab, .student-tab:hover:not(:disabled) { flex: 1 1 0; flex-direction: column; min-width: 0; padding: 6px 2px !important; border-radius: 12px; font-size: 11.5px !important; gap: 2px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .section-tile { transition: none; }
+  .btn:hover:not(:disabled), .section-tile:hover:not(:disabled) { transform: none; }
+}
+
+/* A paper, on the Exams and Seatwork tabs: same family as the section tiles.
+   A coloured band for what it is and where it stands, then white for the title
+   and the buttons, which sit at the foot so a row of papers lines them up. */
+.exam-grid { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.paper-tile { flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 0; background: var(--surface); border-radius: 18px; box-shadow: var(--s-md); overflow: hidden; }
+.paper-band {
+  position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px;
+  padding: 11px 14px; color: white; font-size: 13.5px; font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14);
+}
+.paper-kind { position: relative; z-index: 1; }
+.paper-time { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; margin-right: 2px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.paper-band .tile-chip { width: 34px; height: 34px; border-radius: 10px; }
+.paper-exam .paper-band     { background: linear-gradient(150deg, #173D6C 0%, var(--navy) 100%); }
+.paper-seatwork .paper-band { background: linear-gradient(150deg, #2C6FBC 0%, #1E4A82 100%); }
+.paper-resume .paper-band   { background: linear-gradient(150deg, #DDB655 0%, #BE922A 100%); color: var(--navy-900); }
+.paper-resume .tile-chip    { background: rgba(255,255,255,.32); }
+.paper-done .paper-band     { background: linear-gradient(150deg, #24884C 0%, var(--ok) 100%); }
+.paper-later .paper-band    { background: linear-gradient(150deg, #6D7C91 0%, #4C5B70 100%); }
+.paper-body { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; min-width: 0; }
+.paper-body h3 { margin: 0; font-size: 15.5px; font-weight: 600; line-height: 1.3; color: var(--ink-1); overflow-wrap: anywhere; }
+.paper-notes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.paper-notes:empty { display: none; }
+.paper-body .exam-card-actions { margin: auto 0 0; padding-top: 4px; width: 100%; }
+.paper-body .exam-card-actions > div { text-align: left !important; }
+.paper-body .exam-card-btns { width: 100%; }
+.paper-body .exam-card-btns:not(.many-sets) .btn { flex: 1 1 0; }
+.paper-body .exam-card-actions > .btn { width: 100%; }
+.paper-body .exam-card-btns.many-sets { max-width: none; }
+.paper-tile .btn { min-height: 40px; }
+@media (max-width: 759px) {
+  .exam-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .paper-tile { gap: 0 !important; }
+  .paper-band { padding: 9px 12px; }
+  .paper-body { padding: 10px 12px 12px; }
+  .paper-tile .btn { min-height: 44px; }
+}
+
+.modal-head { padding: 24px 28px; }
+@media (max-width: 480px) {
+  .modal-head { padding: 14px 14px; }
+  /* A phone is too narrow to give a window a margin as well. */
+  .dash-modal { width: 100% !important; }
+}
+
+/* The narrowest phones: the wing moves up and shrinks to stay clear of the logo. */
+@media (max-width: 380px) {
+  .login-band { background-size: 58% auto; background-position: right -10px; }
+}
+
+/* Finger-sized where a finger is what there is. */
+@media (pointer: coarse) {
+  .ws-palette-tab { min-height: 34px; }
+  .exam-shell .exam-notice-close, .exam-shell .exam-notice-close:hover:not(:disabled) { width: 36px; height: 36px; }
+  .exam-shell .exam-toast-close, .exam-shell .exam-toast-close:hover:not(:disabled) { width: 36px; height: 36px; }
 }

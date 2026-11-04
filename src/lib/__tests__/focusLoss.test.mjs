@@ -161,11 +161,20 @@ console.log('\n=== an iPad keyboard holds the focus for as long as it is up ==='
 // What the exam screen does on an iPad: the poll asks once a second, and
 // the keyboard is up while an answer box has the focus.
 function ipad() {
-  const w = world({ lossMs: COVER_MS, graceMs: COVER_GRACE_MS, keyboardUp: () => w.boxFocused });
-  w.boxFocused = false;
+  const w = world({ lossMs: COVER_MS, graceMs: COVER_GRACE_MS, keyboardUp: () => w.boxFocused, holdsFocus: true,
+    onForgiven: () => { w.forgiven++; } });
+  w.boxFocused = false; w.forgiven = 0;
   w.tapBox = () => { w.boxFocused = true; w.watcher.typing(); w.focused = false; };
   w.hideKeyboard = () => { w.boxFocused = false; w.watcher.typing(); w.focused = true; w.watcher.cancel(); };
-  w.poll = (seconds) => { for (let i = 0; i < seconds; i++) { if (!w.focused) w.watcher.check(); w.advance(1000); } };
+  // As the exam screen's poll: focus there is noted, focus gone is checked.
+  w.poll = (seconds) => {
+    for (let i = 0; i < seconds; i++) {
+      if (w.focused) w.watcher.focusSeen(); else w.watcher.check();
+      w.advance(1000);
+    }
+  };
+  // Closing the keyboard: the box lets go, and focus does not come back.
+  w.closeKeyboard = () => { w.boxFocused = false; w.watcher.typing(); };
   return w;
 }
 {
@@ -198,9 +207,58 @@ function ipad() {
 }
 {
   const w = ipad();
-  w.tapBox(); w.poll(3); w.boxFocused = false;   // box left, focus still gone
+  w.tapBox(); w.poll(3); w.closeKeyboard();
   w.poll(5);
-  check('focus still gone after the answer box is left: counted', w.losses === 1, String(w.losses));
+  check('keyboard closed, focus still gone: not counted', w.losses === 0, String(w.losses));
+  w.poll(120);
+  check('…however long Safari takes to say it is back', w.losses === 0, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.closeKeyboard();                 // up and down inside one second
+  w.poll(5);
+  check('a keyboard the poll never saw up: not counted either', w.losses === 0, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3); w.boxFocused = false;   // the box let go with no event reaching us
+  w.poll(5);
+  check('the same with no focusout: not counted', w.losses === 0, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3);
+  w.closeKeyboard(); w.blur(); w.poll(10);
+  check('a blur as the keyboard closes: not counted', w.losses === 0 && w.forgiven === 1, `${w.losses}/${w.forgiven}`);
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3);
+  w.blur(); w.advance(100); w.closeKeyboard(); w.poll(10);
+  check('the blur a moment before the box lets go: not counted', w.losses === 0 && w.forgiven === 1, `${w.losses}/${w.forgiven}`);
+}
+{
+  const w = ipad();
+  for (let i = 0; i < 12; i++) { w.tapBox(); w.poll(8); w.closeKeyboard(); w.poll(4); }
+  check('twelve answers, focus never reported back: nothing counted', w.losses === 0, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3); w.closeKeyboard(); w.poll(COVER_GRACE_MS / 1000 + 2);
+  w.blur(); w.advance(COVER_MS + 1);
+  check('keyboard long closed, then Control Centre (a blur): counted', w.losses === 1, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3); w.closeKeyboard(); w.focused = true; w.watcher.cancel(); w.poll(4);
+  w.focused = false; w.poll(3);
+  check('focus seen back, then a window with no blur: counted again', w.losses === 1, String(w.losses));
+}
+{
+  const w = ipad();
+  w.tapBox(); w.poll(3); w.closeKeyboard(); w.focused = true; w.poll(0); w.watcher.focusSeen();
+  w.focused = false; w.poll(3);
+  check('focus back only for an instant is not yet the keyboard settled', w.losses === 0, String(w.losses));
 }
 {
   const w = ipad();
@@ -212,6 +270,12 @@ function ipad() {
   const w = world({ lossMs: COVER_MS, graceMs: COVER_GRACE_MS });   // no keyboardUp: a computer or Android
   w.watcher.typing(); w.focused = false; for (let i = 0; i < 5; i++) { w.watcher.check(); w.advance(1000); }
   check('elsewhere, a poll-only loss while typing still counts', w.losses === 1, String(w.losses));
+}
+{
+  const w = world({ lossMs: COVER_MS, graceMs: COVER_GRACE_MS });
+  w.watcher.typing(); w.advance(100); w.blur(); w.advance(COVER_GRACE_MS + 1);
+  check('elsewhere, a blur that lasts just after a box is used still counts', w.losses === 1, String(w.losses));
+  check('and a keyboard never explains anything there', w.watcher.keyboardExplains() === false);
 }
 check('iPad and iPhone are the devices whose keyboard hides the focus',
   keyboardHidesFocus({ os: 'iPad' }) && keyboardHidesFocus({ os: 'iPhone' })

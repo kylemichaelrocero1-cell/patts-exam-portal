@@ -39,9 +39,17 @@ export function isTypingTarget(el) {
  * it is up, Safari says the page does not have the focus (document.hasFocus()
  * is false) but sends no blur. Only the once-a-second poll sees it, and a
  * student typing for longer than the grace was flagged every time the
- * keyboard came up. So on these devices a loss that only the poll sees,
- * while an answer box has the focus, is the keyboard. A blur event still
- * counts as before.
+ * keyboard came up.
+ *
+ * Closing the keyboard does not end it: the answer box lets go, but Safari can
+ * go on saying the page has no focus for some time after, with nothing to mark
+ * when it changes. A student who closed the keyboard was flagged once the grace
+ * ran out. So on these devices (holdsFocus below), from the first sign of a
+ * keyboard until focus is next seen back:
+ *   - a loss only the poll sees is the keyboard's, up or closed;
+ *   - so is a blur within the grace of the keyboard coming or going.
+ * A blur at any other time still counts, and leaving the page is the
+ * tab-switch check's, which none of this touches.
  */
 export function keyboardHidesFocus(device) {
   return device?.os === 'iPad' || device?.os === 'iPhone';
@@ -51,11 +59,13 @@ export function keyboardHidesFocus(device) {
  * onLoss() is called once per focus loss that lasts. hasFocus() and
  * isHidden() are read when the wait is over. lossMs and graceMs are the
  * waits (normally, and just after an answer box was used). keyboardUp()
- * says the keyboard is up (see keyboardHidesFocus): check() then starts no
- * wait, and a wait it started ends without a loss.
+ * says the keyboard is up. holdsFocus says this device's keyboard hides the
+ * focus (see keyboardHidesFocus): check() then starts no wait while the
+ * keyboard explains it, and a wait the keyboard explains ends in onForgiven()
+ * rather than a loss.
  */
 export function createFocusLossWatcher({
-  onLoss, hasFocus, isHidden, keyboardUp = () => false,
+  onLoss, hasFocus, isHidden, keyboardUp = () => false, holdsFocus = false, onForgiven = () => {},
   lossMs = FOCUS_LOSS_MS, graceMs = KEYBOARD_GRACE_MS,
   now = () => Date.now(), setTimer = setTimeout, clearTimer = clearTimeout,
 }) {
@@ -63,30 +73,49 @@ export function createFocusLossWatcher({
   let lastTyping = -Infinity;
   // This loss has been reported: no second report until focus comes back.
   let reported = false;
+  // A keyboard has been up since focus was last seen back (holdsFocus only).
+  let keyboardInPlay = false;
+  const keyboardExplains = () => holdsFocus && (keyboardUp() || keyboardInPlay);
   const cancel = () => {
     if (pending !== null) { clearTimer(pending); pending = null; }
     reported = false;
   };
   const start = (fromPoll) => {
     if (pending !== null) { clearTimer(pending); pending = null; }
-    const wait = now() - lastTyping < graceMs ? graceMs : lossMs;
+    const nearKeyboard = now() - lastTyping < graceMs;
+    const wait = nearKeyboard ? graceMs : lossMs;
     pending = setTimer(() => {
       pending = null;
-      if (isHidden() || hasFocus() || (fromPoll && keyboardUp())) return;
+      if (isHidden() || hasFocus()) return;
+      // A blur may arrive just before the answer box lets go, so the keyboard
+      // is looked for both when the wait began and now it is over.
+      if (fromPoll ? keyboardExplains() : holdsFocus && (nearKeyboard || now() - lastTyping < graceMs)) {
+        onForgiven();
+        return;
+      }
       reported = true;
       onLoss();
     }, wait);
   };
   return {
     /** An answer box gained or lost focus, so a keyboard is on its way. */
-    typing() { lastTyping = now(); },
+    typing() { lastTyping = now(); if (holdsFocus) keyboardInPlay = true; },
     blur: () => start(false),
     /**
      * A poll found the page without focus. Some windows that float over the
      * browser may take focus without the page being sent a blur; this starts
      * the same wait, once, and never re-reports a loss already counted.
      */
-    check() { if (pending === null && !reported && !keyboardUp()) start(true); },
+    check() { if (pending === null && !reported && !keyboardExplains()) start(true); },
+    /** Would a keyboard explain the page having no focus right now? */
+    keyboardExplains,
+    /**
+     * A poll found the page with the focus. Once that is so with the keyboard
+     * settled, a loss with no blur is a window over the page again.
+     */
+    focusSeen() {
+      if (keyboardInPlay && !keyboardUp() && now() - lastTyping >= graceMs) keyboardInPlay = false;
+    },
     /** Focus came back, or the page was hidden (counted elsewhere). */
     cancel,
   };

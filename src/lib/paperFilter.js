@@ -58,3 +58,25 @@ export function resultInView(examId, { titles = {}, meta = {}, course = 'All', s
   if (!showArchived && meta[examId]?.archived_at) return false;
   return course === 'All' || courseOf(titles[examId]) === course;
 }
+
+/**
+ * The papers Manage Exams lists. query matches the title or a section; status
+ * is 'all', 'open' or 'closed'. An archived paper shows only when asked for,
+ * and is never "open", whatever its is_open says.
+ */
+export function managedPapers(exams, { query = '', status = 'all', showArchived = false } = {}) {
+  const q = String(query).trim().toLowerCase();
+  return (exams || [])
+    .filter(e => showArchived || !e.archived_at)
+    .filter(e => status === 'all' || (status === 'open') === isLive(e))
+    .filter(e => !q || `${e.title || ''} ${e.target_section || ''}`.toLowerCase().includes(q));
+}
+
+const isLive = e => Boolean(e.is_open) && !e.archived_at;
+
+/** How many papers each Manage Exams filter would show, for its label. */
+export function managedCounts(exams, showArchived = false) {
+  const list = managedPapers(exams, { showArchived });
+  const open = list.filter(isLive).length;
+  return { all: list.length, open, closed: list.length - open };
+}

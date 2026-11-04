@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import Icon from '../components/Icon';
 import { supabase } from '../supabase';
+import { gradeBaseOf } from '../lib/workedShape.js';
 
-// Per-assessment review controls, plus the action that turns a real paper
-// into a practice copy.
+// A paper's Exam settings: its grade base, retakes and answer review, shuffling,
+// plus the action that turns a real paper into a practice copy.
 //
 // The safety rule this UI has to carry: switching answers on for a paper you
 // still mark hands students the key. So the destructive-feeling option is the
@@ -36,6 +37,7 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   // the column absent, must keep shuffling exactly as it always has.
   const [shufQ, setShufQ] = useState(a.shuffle_questions !== false);
   const [shufC, setShufC] = useState(a.shuffle_choices !== false);
+  const [base, setBase] = useState(gradeBaseOf(a));   // sql/138
   // Kept as-is on save so an existing paper's stored policy is not silently
   // rewritten; nothing in the dashboard reads it any more.
   const policy = a.score_policy || 'latest';
@@ -73,14 +75,14 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
     const { error } = await supabase.from('assessments')
       .update({
         allow_retakes: retakes, show_answers: answers, score_policy: policy,
-        shuffle_questions: shufQ, shuffle_choices: shufC,
+        shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base,
         ...(showKey === null ? {} : { review_shows_key: showKey }),
       })
       .eq('id', a.id);
     setBusy(false);
     if (error) return alert('Could not save: ' + error.message);
     onSaved?.({ ...a, allow_retakes: retakes, show_answers: answers, score_policy: policy,
-                shuffle_questions: shufQ, shuffle_choices: shufC,
+                shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base,
                 ...(showKey === null ? {} : { review_shows_key: showKey }) });
     onClose();
   };
@@ -114,8 +116,39 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="card" style={{ maxWidth: 620, width: '100%', maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
-        <h3 style={{ margin: '0 0 4px' }}>Review settings</h3>
+        <h3 style={{ margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Icon name="settings" size={18} color="var(--navy)" /> Exam settings
+        </h3>
         <p style={{ margin: '0 0 18px', color: 'var(--ink-3)', fontSize: 13.5 }}>{a.title}</p>
+
+        <h4 style={{ margin: '0 0 2px', fontSize: 14 }}>Grade base</h4>
+        <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
+          How the percentage is worked out. The pass mark is 75 either way, and no marks change.
+        </p>
+        <div role="radiogroup" aria-label="Grade base" className="mx-base-options">
+          {[
+            { value: 0, label: '0-base', formula: 'Score ÷ total × 100', example: '50/100 is 50%, Failed' },
+            { value: 50, label: '50-base', formula: '50 + score ÷ total × 50', example: '50/100 is 75%, Passed' },
+          ].map(o => (
+            <label key={o.value} className={`mx-base-option${base === o.value ? ' is-on' : ''}`}>
+              <input type="radio" name="grade-base" checked={base === o.value} onChange={() => setBase(o.value)} />
+              <span>
+                <span style={{ display: 'block', fontWeight: 700, fontSize: 14 }}>{o.label}</span>
+                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>{o.formula}</span>
+                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2, fontWeight: 600 }}>{o.example}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {base !== gradeBaseOf(a) && hasResults && (
+          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, lineHeight: 1.5 }}>
+            {a._resultCount} student{a._resultCount === 1 ? '' : 's'} will see the new percentage as soon as you save.
+          </p>
+        )}
+
+        <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0 14px', paddingTop: 14 }}>
+          <h4 style={{ margin: 0, fontSize: 14 }}>Retakes and answer review</h4>
+        </div>
 
         {/* The warning that matters. Shown before the switch, not after. */}
         {hasResults && !a.show_answers && (

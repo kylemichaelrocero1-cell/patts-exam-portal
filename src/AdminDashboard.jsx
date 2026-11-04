@@ -18,7 +18,7 @@ import { rowsMissingWork, workPatchFrom } from './lib/workRecovery';
 import { submittedDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
-import { paperOptions, resultInView } from './lib/paperFilter';
+import { managedCounts, managedPapers, paperOptions, resultInView } from './lib/paperFilter';
 import { formatName, nameInitials, instructorName as displayInstructor } from './lib/personName';
 import { quantityParts } from './lib/quantityAnswer.js';
 import { sittingSection, sectionOptions, filterLive, compareLive, compareWaiting } from './lib/liveMonitor';
@@ -259,6 +259,9 @@ const [targetSection, setTargetSection] = useState('');
   // Archived papers are hidden from Manage Exams by default. They are still
   // in examsList, so results and class review keep working on them.
   const [showArchived, setShowArchived] = useState(false);
+  // Manage Exams: find a paper (src/lib/paperFilter.js).
+  const [manageQuery, setManageQuery] = useState('');
+  const [manageStatus, setManageStatus] = useState('all');
   const [studentCsvParsed, setStudentCsvParsed] = useState(null); // { students, errors, warnings } for Students tab
   const [studentCsvImporting, setStudentCsvImporting] = useState(false);
   // Every section this instructor teaches: their exams' targets, the sections
@@ -2762,6 +2765,9 @@ async function fetchDashboardData() {
   // instructor's picker.
   const allKnownSections = [...instructorSections].sort((a, b) => a.localeCompare(b));
 
+  const managedList = managedPapers(examsList, { query: manageQuery, status: manageStatus, showArchived });
+  const managedTally = managedCounts(examsList, showArchived);
+
   const paperMeta = Object.fromEntries(examsList.map(e => [e.id, e]));
   const paperView = { titles: examsDict, meta: paperMeta, course: selectedCourse, showArchived: showArchivedResults };
   const resultCounts = {};
@@ -3446,7 +3452,7 @@ async function fetchDashboardData() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
               <div>
                 <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 26, letterSpacing: '-0.02em' }}>Manage Exams</h1>
-                <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>Edit titles, sections, time limits, and passwords.</p>
+                <p style={{ color: 'var(--ink-3)', margin: '4px 0 0', fontSize: 13.5 }}>Open or close a paper, change its settings, and jump to its questions and results.</p>
               </div>
               {examsList.some(e => e.archived_at) && (
                 <button
@@ -3460,260 +3466,301 @@ async function fetchDashboardData() {
               )}
             </div>
 
-            <div className="card" style={{ overflow: 'hidden', marginBottom: 20 }}>
-            <div className="table-scroll">
-            <table className="tbl tbl-stack tbl-stack-block">
-            <thead>
-              <tr>
-              <th>Exam Title</th>
-              <th>Target Section</th>
-              <th>Status</th>
-              <th>Time Limit</th>
-              <th>Exam Password</th>
-              <th>Actions</th>
-            </tr>
-            </thead>
-           <tbody>
-            {examsList.filter(e => showArchived ? true : !e.archived_at).length === 0 && (
-              <tr><td colSpan={6} style={{ color: 'var(--ink-3)', fontSize: 13, padding: '18px 14px' }}>
+            {/* Find a paper: most instructors have a term's worth of them. */}
+            {examsList.length > 0 && (
+              <div className="mx-toolbar">
+                <div className="mx-search">
+                  <Icon name="search" size={15} color="var(--ink-4)" />
+                  <input
+                    type="search"
+                    className="input"
+                    value={manageQuery}
+                    onChange={e => setManageQuery(e.target.value)}
+                    placeholder="Search by title or section"
+                    aria-label="Search papers by title or section"
+                  />
+                </div>
+                <div className="mx-segments" role="group" aria-label="Show papers">
+                  {[['all', 'All'], ['open', 'Open'], ['closed', 'Closed']].map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={manageStatus === id ? 'is-on' : ''}
+                      aria-pressed={manageStatus === id}
+                      onClick={() => setManageStatus(id)}
+                    >
+                      {label} <span>{managedTally[id]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {managedList.length === 0 && (
+              <div className="card" style={{ color: 'var(--ink-3)', fontSize: 13.5, padding: '26px 18px', textAlign: 'center', marginBottom: 20 }}>
                 {examsList.length === 0
                   ? 'No exams yet.'
-                  : 'Every exam is archived. Use “Show archived” to bring one back.'}
-              </td></tr>
+                  : examsList.every(e => e.archived_at) && !showArchived
+                    ? 'Every exam is archived. Use “Show archived” to bring one back.'
+                    : 'No papers match. Try another search or filter.'}
+              </div>
             )}
-            {examsList.filter(e => showArchived ? true : !e.archived_at).map((exam) => (
-              <tr key={exam.id} style={exam.archived_at ? { opacity: 0.55 } : undefined}>
-                <td data-label="Title">
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="text"
+
+            <div className="mx-list">
+            {managedList.map((exam) => {
+              const base = gradeBaseOf(exam);
+              const sat = resultCounts[exam.id] || 0;
+              const titleChanged = (editingTitles[exam.id] ?? exam.title) !== exam.title;
+              const sectionChanged = editingSections[exam.id] !== (exam.target_section ?? '');
+              const timeChanged = editingTimes[exam.id] != (exam.duration_minutes ?? '');
+              const passwordChanged = (editingPasswords[exam.id] ?? '') !== (exam.exam_password || '');
+              const live = exam.is_open && !exam.archived_at;
+              return (
+              <article key={exam.id} className={`card mx-card${live ? ' is-open' : ''}${exam.archived_at ? ' is-archived' : ''}`}>
+
+                {/* Title, and the one thing asked most: is it open? */}
+                <div className="mx-head">
+                  <div className="mx-title">
+                    {/* A text area only so a long title wraps instead of being
+                        cut off on a phone; it is still one line of text. */}
+                    <textarea
+                      rows={1}
                       value={editingTitles[exam.id] ?? exam.title}
-                      onChange={e => setEditingTitles(prev => ({ ...prev, [exam.id]: e.target.value }))}
-                      onKeyDown={e => e.key === 'Enter' && saveTitle(exam.id)}
+                      onChange={e => { const v = e.target.value.replace(/\s*\n\s*/g, ' '); setEditingTitles(prev => ({ ...prev, [exam.id]: v })); }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveTitle(exam.id); } }}
                       className="input"
+                      aria-label="Paper title"
                       title={editingTitles[exam.id] ?? exam.title}
-                      style={{ width: 260, padding: '7px 10px', fontSize: 13 }}
                     />
-                    {(editingTitles[exam.id] ?? exam.title) !== exam.title && (
-                      <button onClick={() => saveTitle(exam.id)} className="btn sm">Save</button>
-                    )}
+                    {titleChanged && <button onClick={() => saveTitle(exam.id)} className="btn sm">Save</button>}
                   </div>
-                </td>
-
-               {/* Section Field */}
-                <td data-label="Sections">
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <SectionPicker
-                      value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
-                      onChange={next => setEditingSections(prev => ({ ...prev, [exam.id]: next }))}
-                      options={allKnownSections}
-                      placeholder="No sections"
-                      compact
-                    />
-                    <button onClick={() => saveSection(exam.id)} className="btn sm" style={{ opacity: editingSections[exam.id] !== (examsList.find(e => e.id === exam.id)?.target_section ?? '') ? 1 : 0.4 }}>Save</button>
-                    {/* Co-instructor buttons per unique section name on this exam */}
-                    {(exam.target_section || '').split(',').map(s => s.trim()).filter(Boolean).map(sec => (
-                      <button
-                        key={sec}
-                        className="btn ghost sm"
-                        onClick={() => { setSectionCoModal(sec); setSectionCoTarget(''); }}
-                        style={{ fontSize: 11, padding: '3px 8px', width: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}
-                        title={`Manage co-instructors for ${sec}`}
-                      >
-                        <Icon name="users" size={12} color="var(--navy)" />
-                        {sec}
-                        {(sectionCoMap[sec] || []).length > 0 && (
-                          <span className="px-pill info" style={{ fontSize: 10, padding: '1px 5px' }}>{(sectionCoMap[sec] || []).length}</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </td>
-
-                {/* Toggle */}
-                <td data-label="Status">
                   <button
+                    type="button"
                     onClick={() => toggleExamStatus(exam.id, exam.is_open)}
-                    className={`px-pill ${exam.is_open ? 'ok' : 'muted'}`}
-                    style={{ border: 'none', cursor: 'pointer' }}
+                    className={`mx-status${live ? ' is-open' : ''}`}
+                    title={live ? 'Open to students. Click to close it.' : 'Students cannot see it. Click to open it.'}
                   >
-                    {exam.archived_at ? <>Archived</> : exam.is_open ? <><Icon name="dot" size={10} /> Open</> : <>Closed</>}
+                    <Icon name={live ? 'unlock' : exam.archived_at ? 'archive' : 'lock'} size={14} />
+                    {exam.archived_at ? 'Archived' : live ? 'Open' : 'Closed'}
                   </button>
+                </div>
+
+                {/* Settings at a glance, each one a switch. */}
+                <div className="mx-chips">
+                  <span className="mx-count"><Icon name="users" size={13} /> {sat} submitted</span>
                   {/* A paper whose questions are in sets (sql/116) offers one
                       Start button per set whatever uses_sets says, so it
                       shows its sets and is not a switch. Otherwise Set A /
                       Set B is a label only; off, one Start button (sql/107). */}
                   {exam.set_labels?.length > 0 ? (
-                    <span className="px-pill brand" title="Students choose their set at the Start button. The sets come from the questions."
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 11.5 }}>
-                      <Icon name="layers" size={12} /> {setsLabel(exam.set_labels)}
+                    <span className="mx-chip is-fixed" title="Students choose their set at the Start button. The sets come from the questions.">
+                      <Icon name="layers" size={13} /> {setsLabel(exam.set_labels)}
                     </span>
                   ) : (
-                  <button
-                    type="button"
-                    onClick={() => toggleSets(exam)}
-                    className="btn ghost sm"
-                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5 }}
-                    title={exam.uses_sets === false
-                      ? 'Students see one Start button. Click to offer Set A and Set B.'
-                      : 'Students choose Set A or Set B. Click for one Start button instead.'}
-                  >
-                    <Icon name={exam.uses_sets === false ? 'minus' : 'layers'} size={12} />
-                    {exam.uses_sets === false ? 'No sets' : 'Sets A/B'}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleSets(exam)}
+                      className="mx-chip"
+                      title={exam.uses_sets === false
+                        ? 'Students see one Start button. Click to offer Set A and Set B.'
+                        : 'Students choose Set A or Set B. Click for one Start button instead.'}
+                    >
+                      <Icon name={exam.uses_sets === false ? 'minus' : 'layers'} size={13} />
+                      {exam.uses_sets === false ? 'No sets' : 'Sets A/B'}
+                    </button>
                   )}
                   {/* Check-in (sql/115): each student waits on the live
                       monitor until let in, every time they open the paper. */}
                   <button
                     type="button"
                     onClick={() => toggleAdmission(exam)}
-                    className="btn ghost sm"
+                    className={`mx-chip${exam.requires_admission ? ' is-on' : ''}`}
                     aria-pressed={!!exam.requires_admission}
-                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5,
-                      ...(exam.requires_admission ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}) }}
                     title={exam.requires_admission
                       ? 'Check-in on: after the password, each student waits on the Live Monitor until you let them in — every time they open the paper. Click to turn off.'
                       : 'Check-in off: the password is enough. Click so that each student waits on the Live Monitor until you let them in.'}
                   >
-                    <Icon name={exam.requires_admission ? 'shield-check' : 'shield'} size={12} color={exam.requires_admission ? 'white' : undefined} />
+                    <Icon name={exam.requires_admission ? 'shield-check' : 'shield'} size={13} />
                     {exam.requires_admission ? 'Check-in on' : 'Check-in off'}
                   </button>
                   {/* The percentage students and this dashboard show (sql/138). */}
                   <button
                     type="button"
                     onClick={() => toggleGradeBase(exam)}
-                    className="btn ghost sm"
-                    aria-label={`Grade base: ${gradeBaseOf(exam)}. Switch to ${gradeBaseOf(exam) === 50 ? 0 : 50}-base.`}
-                    style={{ display: 'flex', width: 'auto', marginTop: 6, padding: '3px 9px', fontSize: 11.5 }}
-                    title={gradeBaseOf(exam) === 50
+                    className={`mx-chip${base === 50 ? ' is-on' : ''}`}
+                    aria-label={`Grade base: ${base}. Switch to ${base === 50 ? 0 : 50}-base.`}
+                    title={base === 50
                       ? '50-base: percentage = 50 + score ÷ total × 50, so half marks is 75%. Pass mark 75. Click for 0-base.'
                       : '0-base: percentage = score ÷ total × 100, so half marks is 50%. Pass mark 75. Click for 50-base.'}
                   >
-                    <Icon name="bar-chart" size={12} />
-                    {gradeBaseOf(exam)}-base
+                    <Icon name="trend-up" size={13} />
+                    {base}-base
                   </button>
-                </td>
+                </div>
 
-                {/* Time */}
-                <td data-label="Time limit">
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="number"
-                      value={editingTimes[exam.id] || ''}
-                      onChange={(e) => handleTimeChange(exam.id, e.target.value)}
-                      className="input"
-                      style={{ width: 64, padding: '7px 10px', fontSize: 13 }}
-                    />
-                    <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>min</span>
-                    <button onClick={() => saveTimeLimit(exam.id)} className="btn sm" style={{ opacity: editingTimes[exam.id] != (examsList.find(e => e.id === exam.id)?.duration_minutes ?? '') ? 1 : 0.4 }}>Save</button>
+                {/* Who sits it, for how long, with what password. */}
+                <div className="mx-fields">
+                  <div className="mx-field">
+                    <span className="mx-label"><Icon name="graduation" size={13} /> Sections</span>
+                    <div className="mx-row">
+                      <SectionPicker
+                        value={editingSections[exam.id] !== undefined ? editingSections[exam.id] : ''}
+                        onChange={next => setEditingSections(prev => ({ ...prev, [exam.id]: next }))}
+                        options={allKnownSections}
+                        placeholder="No sections"
+                        compact
+                      />
+                      {sectionChanged && <button onClick={() => saveSection(exam.id)} className="btn sm">Save</button>}
+                    </div>
+                    {/* Co-instructor buttons per unique section name on this exam */}
+                    {(exam.target_section || '').split(',').map(x => x.trim()).filter(Boolean).length > 0 && (
+                      <div className="mx-row mx-coteach">
+                        <span>Co-instructors:</span>
+                        {(exam.target_section || '').split(',').map(x => x.trim()).filter(Boolean).map(sec => (
+                          <button
+                            key={sec}
+                            className="btn ghost sm"
+                            onClick={() => { setSectionCoModal(sec); setSectionCoTarget(''); }}
+                            title={`Manage co-instructors for ${sec}`}
+                          >
+                            <Icon name="user-plus" size={12} />
+                            {sec}
+                            {(sectionCoMap[sec] || []).length > 0 && (
+                              <span className="px-pill info" style={{ fontSize: 10, padding: '1px 5px' }}>{(sectionCoMap[sec] || []).length}</span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </td>
 
-                {/* Password */}
-                <td data-label="Password">
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type={shownPasswords.has(exam.id) ? 'text' : 'password'}
-                      value={editingPasswords[exam.id] !== undefined ? editingPasswords[exam.id] : ''}
-                      onChange={(e) => setEditingPasswords(prev => ({ ...prev, [exam.id]: e.target.value }))}
-                      placeholder="No password"
-                      autoComplete="new-password"
-                      aria-label={`Password for ${exam.title}`}
-                      className="input"
-                      style={{ width: 110, padding: '7px 10px', fontSize: 13, fontFamily: 'var(--font-mono)' }}
-                    />
-                    <button
-                      type="button"
-                      className="btn ghost sm"
-                      style={{ width: 'auto', padding: '5px 7px' }}
-                      onClick={() => setShownPasswords(prev => {
-                        const next = new Set(prev);
-                        if (next.has(exam.id)) next.delete(exam.id); else next.add(exam.id);
-                        return next;
-                      })}
-                      aria-label={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
-                      title={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
-                    >
-                      <Icon name={shownPasswords.has(exam.id) ? 'eye-off' : 'eye'} size={13} />
-                    </button>
-                    {exam.exam_password && (
+                  <div className="mx-field">
+                    <span className="mx-label"><Icon name="clock" size={13} /> Time limit</span>
+                    <div className="mx-row">
+                      <input
+                        type="number"
+                        value={editingTimes[exam.id] || ''}
+                        onChange={(e) => handleTimeChange(exam.id, e.target.value)}
+                        className="input mx-time"
+                        aria-label={`Time limit in minutes for ${exam.title}`}
+                      />
+                      <span style={{ color: 'var(--ink-3)', fontSize: 13 }}>min</span>
+                      {timeChanged && <button onClick={() => saveTimeLimit(exam.id)} className="btn sm">Save</button>}
+                    </div>
+                  </div>
+
+                  <div className="mx-field">
+                    <span className="mx-label">
+                      <Icon name={exam.exam_password ? 'lock' : 'unlock'} size={13} />
+                      {exam.exam_password ? 'Password set' : 'No password'}
+                    </span>
+                    <div className="mx-row">
+                      <input
+                        type={shownPasswords.has(exam.id) ? 'text' : 'password'}
+                        value={editingPasswords[exam.id] !== undefined ? editingPasswords[exam.id] : ''}
+                        onChange={(e) => setEditingPasswords(prev => ({ ...prev, [exam.id]: e.target.value }))}
+                        placeholder="No password"
+                        autoComplete="new-password"
+                        aria-label={`Password for ${exam.title}`}
+                        className="input mx-password"
+                      />
                       <button
                         type="button"
-                        className="btn ghost sm"
-                        style={{ width: 'auto', padding: '5px 7px' }}
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(exam.exam_password);
-                            setCopiedPassword(exam.id);
-                            setTimeout(() => setCopiedPassword(c => (c === exam.id ? null : c)), 1500);
-                          } catch {
-                            alert('Could not copy. Use the eye button to show the password instead.');
-                          }
-                        }}
-                        aria-label="Copy password"
-                        title="Copy password"
+                        className="btn ghost sm mx-icon"
+                        onClick={() => setShownPasswords(prev => {
+                          const next = new Set(prev);
+                          if (next.has(exam.id)) next.delete(exam.id); else next.add(exam.id);
+                          return next;
+                        })}
+                        aria-label={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
+                        title={shownPasswords.has(exam.id) ? 'Hide password' : 'Show password'}
                       >
-                        <Icon name={copiedPassword === exam.id ? 'check' : 'copy'} size={13} />
+                        <Icon name={shownPasswords.has(exam.id) ? 'eye-off' : 'eye'} size={13} />
                       </button>
-                    )}
-                    <button onClick={() => savePassword(exam.id)} className="btn sm" style={{ opacity: editingPasswords[exam.id] !== (exam.exam_password || '') ? 1 : 0.4 }}>Save</button>
-                  </div>
-                  <span style={{ fontSize: 11, color: 'var(--ink-4)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Icon name={exam.exam_password ? 'lock' : 'unlock'} size={10} />
-                    {exam.exam_password ? 'Password set' : 'No password'}
-                  </span>
-                </td>
-
-                {/* Actions */}
-                <td data-label="">
-                  {/* Six buttons is wide for a phone; let them wrap onto a
-                      second line rather than stretch the table. */}
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button onClick={() => openDupModal(exam)} className="btn ghost sm"><Icon name="copy" size={13} /> Duplicate</button>
-                    <button onClick={() => openShareModal(exam)} className="btn ghost sm" style={{ position: 'relative' }}>
-                      <Icon name="users" size={13} /> Share
-                      {(sharesMap[exam.id] || []).length > 0 && (
-                        <span style={{ position: 'absolute', top: -4, right: -4, width: 14, height: 14, borderRadius: '50%', background: 'var(--navy)', color: 'white', fontSize: 9, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {(sharesMap[exam.id] || []).length}
-                        </span>
+                      {exam.exam_password && (
+                        <button
+                          type="button"
+                          className="btn ghost sm mx-icon"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(exam.exam_password);
+                              setCopiedPassword(exam.id);
+                              setTimeout(() => setCopiedPassword(c => (c === exam.id ? null : c)), 1500);
+                            } catch {
+                              alert('Could not copy. Use the eye button to show the password instead.');
+                            }
+                          }}
+                          aria-label="Copy password"
+                          title="Copy password"
+                        >
+                          <Icon name={copiedPassword === exam.id ? 'check' : 'copy'} size={13} />
+                        </button>
                       )}
-                    </button>
-                    <button onClick={() => openExamStats(exam.id)} className="btn ghost sm"><Icon name="bar-chart" size={13} /></button>
-                    <button onClick={() => setRescoreFor(exam)} className="btn ghost sm" style={{ width: 'auto' }}
-                      title="Mark every submitted paper again after you change a key">
-                      <Icon name="check-circle" size={13} /> Re-score
-                    </button>
-                    <button
-                      onClick={() => setReviewSettingsFor({
-                        ...exam,
-                        _resultCount: results.filter(r => r.exam_id === exam.id).length,
-                      })}
-                      className="btn ghost sm"
-                      title="Retakes, answer review, and duplicating as a mock exam"
-                      style={{ width: 'auto' }}
-                    >
-                      <Icon name="refresh" size={13} /> Review
-                    </button>
+                      {passwordChanged && <button onClick={() => savePassword(exam.id)} className="btn sm">Save</button>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Most-used first; the two that take a paper away apart. */}
+                <div className="mx-actions">
+                  <button
+                    onClick={() => setReviewSettingsFor({ ...exam, _resultCount: sat })}
+                    className="btn sm"
+                    title="Grade base, retakes, answer review and shuffling"
+                  >
+                    <Icon name="settings" size={14} /> Exam settings
+                  </button>
+                  <button
+                    onClick={() => { handleQExamChange(exam.id); setActiveView('questions'); }}
+                    className="btn ghost sm"
+                    title="Add or edit this paper's questions"
+                  >
+                    <Icon name="file-text" size={14} /> Questions
+                  </button>
+                  <button
+                    onClick={() => { setSelectedCourse('All'); setSelectedExam(exam.id); setActiveView('results'); }}
+                    className="btn ghost sm"
+                    title="See this paper's scores on the Results tab"
+                  >
+                    <Icon name="bar-chart" size={14} /> Results
+                  </button>
+                  <button onClick={() => openExamStats(exam.id)} className="btn ghost sm" title="How the class did on each question">
+                    <Icon name="activity" size={14} /> Item analysis
+                  </button>
+                  <button onClick={() => setRescoreFor(exam)} className="btn ghost sm"
+                    title="Mark every submitted paper again after you change a key">
+                    <Icon name="clipboard-check" size={14} /> Re-score
+                  </button>
+                  <button onClick={() => openDupModal(exam)} className="btn ghost sm" title="Make a copy of this paper">
+                    <Icon name="copy" size={14} /> Duplicate
+                  </button>
+                  <button onClick={() => openShareModal(exam)} className="btn ghost sm" title="Give another instructor access">
+                    <Icon name="user-plus" size={14} /> Share
+                    {(sharesMap[exam.id] || []).length > 0 && (
+                      <span className="px-pill info" style={{ fontSize: 10, padding: '1px 5px' }}>{(sharesMap[exam.id] || []).length}</span>
+                    )}
+                  </button>
+                  <span className="mx-actions-end">
                     <button
                       onClick={() => toggleArchive(exam)}
                       className="btn ghost sm"
                       title={exam.archived_at
                         ? 'Bring this back into the list. It stays closed.'
                         : 'Hide it from this list and from students. Questions and results are kept.'}
-                      style={{ width: 'auto' }}
                     >
-                      <Icon name={exam.archived_at ? 'refresh' : 'archive'} size={13} />
-                      {exam.archived_at ? ' Restore' : ' Archive'}
+                      <Icon name={exam.archived_at ? 'undo' : 'archive'} size={14} />
+                      {exam.archived_at ? 'Restore' : 'Archive'}
                     </button>
-                    <button onClick={() => deleteExam(exam.id)} className="btn ghost sm" style={{ color: 'var(--bad)', borderColor: 'var(--bad-bd)' }}><Icon name="trash" size={13} /></button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          </table>
-          </div>{/* end table-scroll */}
-          </div>{/* end card */}
+                    <button onClick={() => deleteExam(exam.id)} className="btn ghost sm mx-delete"
+                      title={`Move to the Trash for ${TRASH_DAYS} days`}>
+                      <Icon name="trash" size={14} /> Delete
+                    </button>
+                  </span>
+                </div>
+              </article>
+              );
+            })}
+            </div>{/* end mx-list */}
 
           {/* Shared With Me */}
           {sharedExamsList.length > 0 && (

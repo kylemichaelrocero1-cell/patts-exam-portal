@@ -4,7 +4,7 @@
 // downloading it is set to.
 //
 //   npm run test:exam-dates
-import { submittedDateTime } from '../examDates.js';
+import { submittedDateTime, shortDateTime } from '../examDates.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -29,6 +29,10 @@ check('a time has a plain space before AM/PM, nothing a spreadsheet would choke 
 check('no timestamp: blanks', JSON.stringify(submittedDateTime(null)) === '{"date":"","time":""}'
   && JSON.stringify(submittedDateTime('')) === '{"date":"","time":""}');
 check('an unreadable one: blanks, not "Invalid Date"', JSON.stringify(submittedDateTime('not a date')) === '{"date":"","time":""}');
+
+check('short form for the Results table, in Philippine time, day rolled over',
+  shortDateTime('2026-09-28T16:30:00Z') === 'Sep 29, 12:30 AM', shortDateTime('2026-09-28T16:30:00Z'));
+check('short form with nothing to show: blank', shortDateTime(null) === '' && shortDateTime('not a date') === '');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

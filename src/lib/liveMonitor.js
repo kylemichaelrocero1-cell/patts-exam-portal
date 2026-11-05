@@ -33,9 +33,20 @@ export function filterLive(rows, { section = '', paper = '', status = '', query 
     && (!needle || (r.name || '').toLowerCase().includes(needle)));
 }
 
-/** Compare two rows: by section then name, or by name alone. */
+/**
+ * Compare two rows: by section then name, by name alone, or 'entered', first
+ * into the paper first. A retake's restart moves the row's start time, so
+ * enteredAt is when this sitting began. A row with no time goes last.
+ */
 export function compareLive(by) {
   const name = (a, b) => (a.name || '').localeCompare(b.name || '');
+  if (by === 'entered') {
+    const at = r => { const t = Date.parse(r.enteredAt); return Number.isNaN(t) ? Infinity : t; };
+    return (a, b) => {
+      const ta = at(a), tb = at(b);
+      return (ta === tb ? 0 : ta < tb ? -1 : 1) || name(a, b);
+    };
+  }
   if (by !== 'section') return name;
   return (a, b) => {
     // Rows with no section go last rather than first.

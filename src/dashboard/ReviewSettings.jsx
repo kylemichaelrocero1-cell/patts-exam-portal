@@ -123,7 +123,7 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
 
         <h4 style={{ margin: '0 0 2px', fontSize: 14 }}>Grade base</h4>
         <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-          How the percentage is worked out. The pass mark is 75 either way, and no marks change.
+          How the percentage is worked out for students with no course set. BSAE and Pre-Eng'g students are 0-base on exams and 50-base on everything else, and every other course is 50-base, whatever this says. The pass mark is 75 either way, and no marks change.
         </p>
         <div role="radiogroup" aria-label="Grade base" className="mx-base-options">
           {[
@@ -142,7 +142,7 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
         </div>
         {base !== gradeBaseOf(a) && hasResults && (
           <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, lineHeight: 1.5 }}>
-            {a._resultCount} student{a._resultCount === 1 ? '' : 's'} will see the new percentage as soon as you save.
+            Students with no course set will see the new percentage as soon as you save.
           </p>
         )}
 

@@ -1,5 +1,5 @@
 // What a student sees the moment a paper is handed in: the percentage on the
-// paper's grade base, the raw score under it, then whether they passed. On
+// base their course sits this paper on, the raw score under it, then whether they passed. On
 // 50-base, 50/100 reads 75%, 50/100, Passed.
 //
 // A paper with worked items the server could not mark has no percentage yet,

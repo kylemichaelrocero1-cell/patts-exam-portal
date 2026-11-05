@@ -3,7 +3,7 @@
 //
 //   npm run test:results-stats
 
-import { scoreFraction, compareByScore, resultStatistics } from '../resultsStats.js';
+import { scoreFraction, compareByScore, compareBySubmitted, resultStatistics } from '../resultsStats.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -35,6 +35,16 @@ console.log('\n=== sorting ===');
   const asc = [top, pending, full9low, eight].sort((a, b) => compareByScore(a, b, 'asc'));
   check('lowest first is 20, 48, 60 with the unmarked paper still last',
     asc[0] === full9low && asc[1] === eight && asc[2] === top && asc[3] === pending);
+}
+
+console.log('\n=== time submitted ===');
+{
+  const first = { id: 'first', submitted_at: '2026-11-05T03:00:00Z' };
+  const last = { id: 'last', submitted_at: '2026-11-05T03:40:00Z' };
+  const none = { id: 'none', submitted_at: null };
+  const order = dir => [none, last, first].sort((a, b) => compareBySubmitted(a, b, dir)).map(r => r.id).join();
+  check('first to submit on top; no time last', order('asc') === 'first,last,none', order('asc'));
+  check('last to submit on top; no time still last', order('desc') === 'last,first,none', order('desc'));
 }
 
 console.log('\n=== statistics ===');

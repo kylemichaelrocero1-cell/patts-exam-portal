@@ -114,7 +114,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
         setData({
           todo: mine.filter(a => !isPaperFinished(a, doneIds.has(a.id)) && availabilityState(a) === 'open'),
           upcoming: mine.filter(a => availabilityState(a) === 'scheduled'),
-          results: withGradeBases(results, behind).sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
+          results: withGradeBases(results, behind, () => student.course).sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at)),
           titles: Object.fromEntries([
             ...mine.map(a => [a.id, a.title]),
             ...behind.map(a => [a.id, a.title]),
@@ -132,7 +132,7 @@ export default function StudentSummary({ student, selectedSection, onGoToTab }) 
       }
     })();
     return () => { cancelled = true; };
-  }, [student.id, selectedSection]);
+  }, [student.id, student.course, selectedSection]);
 
   if (error) {
     return <div className="card" style={{ ...card, maxWidth: 860, margin: '0 auto' }}>{error}</div>;

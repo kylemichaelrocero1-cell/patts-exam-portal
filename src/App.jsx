@@ -97,7 +97,10 @@ export default function App() {
         if (saved) {
           const { student: s, section } = JSON.parse(saved);
           if (s?.id && s?.full_name && !s.role) {
-            setStudent(s);
+            // A saved session may predate a course being set or changed. If this
+            // read fails they carry on with what they had; the login still stands.
+            const { data: fresh } = await supabase.from('users').select('course').eq('id', s.id).maybeSingle();
+            setStudent(fresh ? { ...s, course: fresh.course } : s);
             if (section) setSelectedSection(section);
             await reopenPaper(s.id);
           }

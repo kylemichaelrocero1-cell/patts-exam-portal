@@ -13,6 +13,8 @@ const PARTS = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric', minute: '2-digit', hour12: true,
 });
 
+const DAY = new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' });
+
 /**
  * { date: '2026-09-28', time: '11:42 AM' } in Philippine time, or blanks for
  * a missing or unreadable timestamp. The date is year-month-day so it sorts
@@ -30,4 +32,10 @@ export function submittedDateTime(ts) {
     // a time.
     time: `${p.hour}:${p.minute} ${String(p.dayPeriod || '').toUpperCase()}`.trim(),
   };
+}
+
+/** 'Sep 28, 11:42 AM' in Philippine time for the Results table; '' when unreadable. */
+export function shortDateTime(ts) {
+  const { time } = submittedDateTime(ts);
+  return time ? `${DAY.format(new Date(ts))}, ${time}` : '';
 }

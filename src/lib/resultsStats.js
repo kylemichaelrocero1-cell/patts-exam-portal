@@ -36,6 +36,17 @@ export function compareByScore(a, b, direction = 'desc') {
   return direction === 'asc' ? fa - fb : fb - fa;
 }
 
+/**
+ * Sort comparator on when the paper was handed in: 'asc' puts the first to
+ * submit on top, 'desc' the last. A row with no time goes last either way.
+ */
+export function compareBySubmitted(a, b, direction = 'asc') {
+  const at = r => { const t = Date.parse(r.submitted_at); return Number.isNaN(t) ? null : t; };
+  const ta = at(a), tb = at(b);
+  if (ta === null || tb === null) return (ta === null) - (tb === null);
+  return direction === 'asc' ? ta - tb : tb - ta;
+}
+
 export const SCORE_BRACKETS = [
   { label: '0–49%', min: 0, max: 49, color: '#E74C3C' },
   { label: '50–59%', min: 50, max: 59, color: '#E67E22' },

@@ -586,7 +586,7 @@ export default function ExamList({ embedded = false, kind = null, student, selec
               const isSeatwork = exam.kind === 'seatwork';
 
               // Practice history for this paper, newest first.
-              const myAttempts = withGradeBases(attempts[exam.id], [exam]);
+              const myAttempts = withGradeBases(attempts[exam.id], [exam], () => student.course);
               // Scored as the Summary scores them — points plus worked marks
               // (combinedScore). These pills read score / total_items, the
               // picked-item count alone, so a paper out of 67 said 9/9.

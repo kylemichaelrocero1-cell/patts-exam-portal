@@ -12,10 +12,12 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
          isMissingFunctionError, isMissingTableError } from './lib/assessments';
 import { removalPrompt, removalSummary, purgeLabel, TRASH_DAYS } from './lib/removeStudents';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
+import { COURSES } from './lib/courses';
+import { parseStudentCSV } from './lib/studentCsv';
 import { combinedScore, gradeBaseOf, gradeVerdict, isWorkedSolution, withGradeBases, workedKeyOf, workedItemStats } from './lib/workedShape';
-import { compareByScore, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
+import { compareByScore, compareBySubmitted, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
 import { rowsMissingWork, workPatchFrom } from './lib/workRecovery';
-import { submittedDateTime } from './lib/examDates';
+import { submittedDateTime, shortDateTime } from './lib/examDates';
 import { RESULTS_CSV_HEADERS, resultsCsvRow } from './lib/resultsExport';
 import { firstAttempts } from './lib/retakes';
 import { managedCounts, managedPapers, paperOptions, resultInView } from './lib/paperFilter';
@@ -134,6 +136,7 @@ export default function AdminDashboard({ instructorId, instructorName, onLogout 
 const [editingStudentSections, setEditingStudentSections] = useState({});
   const [selectedStudentIds, setSelectedStudentIds] = useState(new Set());
   const [batchSection, setBatchSection] = useState('');
+  const [batchCourse, setBatchCourse] = useState('');
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [liveSort, setLiveSort] = useState('name');
   const [waitingSort, setWaitingSort] = useState('name');   // check-in list: name | section | arrival
@@ -290,6 +293,7 @@ const [targetSection, setTargetSection] = useState('');
   const [newStudentEmail, setNewStudentEmail] = useState('');
   const [newStudentCode, setNewStudentCode] = useState('');
   const [newStudentSection, setNewStudentSection] = useState('');
+  const [newStudentCourse, setNewStudentCourse] = useState('');
   const [isAddingStudent, setIsAddingStudent] = useState(false);
 
   // --- DUPLICATE STATES ---
@@ -316,11 +320,11 @@ const [targetSection, setTargetSection] = useState('');
   // percentage and verdict are on its own paper's grade base (sql/138). The
   // raw rows stay in state: realtime and the marking screens write to those.
   const gradedResults = useMemo(
-    () => withGradeBases(results, [...examsList, ...sharedExamsList]),
-    [results, examsList, sharedExamsList]);
+    () => withGradeBases(results, [...examsList, ...sharedExamsList], id => students[id]?.course),
+    [results, examsList, sharedExamsList, students]);
   const gradedAttempts = useMemo(
-    () => withGradeBases(practiceAttempts, [...examsList, ...sharedExamsList]),
-    [practiceAttempts, examsList, sharedExamsList]);
+    () => withGradeBases(practiceAttempts, [...examsList, ...sharedExamsList], id => students[id]?.course),
+    [practiceAttempts, examsList, sharedExamsList, students]);
 
   // --- SECTION CO-INSTRUCTOR STATES ---
   const [sectionCoModal, setSectionCoModal] = useState(null); // section name string | null
@@ -595,13 +599,6 @@ const [targetSection, setTargetSection] = useState('');
   // paper is for — never a colleague's (see lib/liveMonitor.js).
   const sittingSectionOf = (studentId, paperId) =>
     sittingSection(students[studentId]?.section, examsList.find(e => e.id === paperId)?.target_section);
-
-  const applyLiveSort = (sortBy) => {
-    setLiveSort(sortBy);
-    const keyOf = s => ({ name: s.student_name, section: sittingSectionOf(s.student_id, s.exam_id) });
-    const cmp = compareLive(sortBy);
-    setLiveSessions(prev => [...prev].sort((a, b) => cmp(keyOf(a), keyOf(b))));
-  };
 
   // A paper in sets is analysed one set at a time, as a student sat it: that
   // set's items and the shared ones, numbered from 1. Listing every set at
@@ -1666,70 +1663,12 @@ const [targetSection, setTargetSection] = useState('');
   };
 
   // --- STUDENT CSV HELPERS ---
-  const parseStudentCSV = (text) => {
-    const rawRows = text.trim().split(/\r?\n/);
-    const rows = rawRows.map(row => {
-      const cells = [];
-      let cell = '', inQ = false;
-      for (const ch of row) {
-        if (ch === '"') { inQ = !inQ; }
-        else if (ch === ',' && !inQ) { cells.push(cell.trim()); cell = ''; }
-        else { cell += ch; }
-      }
-      cells.push(cell.trim());
-      return cells;
-    });
-    const firstCell = rows[0]?.[0]?.toLowerCase().replace(/\s/g, '_');
-    const dataRows = (firstCell === 'full_name' || firstCell === 'name') ? rows.slice(1) : rows;
-    const students = [], errors = [];
-    dataRows.forEach((cols, idx) => {
-      const name = cols[0]?.trim();
-      const email = cols[1]?.trim().toLowerCase();
-      const code = cols[2]?.trim();
-      const section = cols[3]?.trim();
-      if (!name && !email && !code && !section) return;
-      const rowNum = idx + 2;
-      if (!name) { errors.push(`Row ${rowNum}: Full name is required.`); return; }
-      if (!email) { errors.push(`Row ${rowNum}: Email is required.`); return; }
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push(`Row ${rowNum}: "${email}" is not a valid email address.`); return; }
-      if (!code) { errors.push(`Row ${rowNum}: Student ID is required.`); return; }
-      if (!section) { errors.push(`Row ${rowNum}: Section is required.`); return; }
-      students.push({ full_name: name, student_email: email, student_code: code, section });
-    });
-    // Flag in-file duplicates. One student listed twice for two different
-    // sections is a class list, not a mistake — only the same person in the
-    // same section twice is, so the section is part of what makes a row a
-    // duplicate. The identity columns still have to agree with each other.
-    const warnings = [];
-    const seenRows = new Map(), seenEmails = new Map(), seenCodes = new Map();
-    students.forEach((s, i) => {
-      const key = `${s.student_email}||${s.section.toLowerCase()}`;
-      if (seenRows.has(key)) errors.push(`Duplicate row in CSV: "${s.student_email}" is listed in "${s.section}" twice (rows ${seenRows.get(key) + 2} & ${i + 2})`);
-      else seenRows.set(key, i);
-
-      const emailFirst = seenEmails.get(s.student_email);
-      if (emailFirst !== undefined && students[emailFirst].student_code !== s.student_code) {
-        errors.push(`"${s.student_email}" is given two different Student IDs (rows ${emailFirst + 2} & ${i + 2})`);
-      } else if (emailFirst === undefined) seenEmails.set(s.student_email, i);
-
-      // One Student ID against two different emails used to be an error. It is
-      // not: two students really can share an ID (sql/014), and the email is
-      // what tells them apart. Kept as a warning so a genuine typo still gets
-      // looked at, but it no longer blocks the import.
-      const codeFirst = seenCodes.get(s.student_code);
-      if (codeFirst !== undefined && students[codeFirst].student_email !== s.student_email) {
-        warnings.push(`Student ID "${s.student_code}" is shared by ${students[codeFirst].student_email} and ${s.student_email} (rows ${codeFirst + 2} & ${i + 2}). They will be imported as two students.`);
-      } else if (codeFirst === undefined) seenCodes.set(s.student_code, i);
-    });
-    return { students, errors, warnings };
-  };
-
   const downloadStudentCSVTemplate = () => {
     const csv = [
-      'full_name,student_email,student_id,section',
-      '"Juan dela Cruz","juan.delacruz@patts.edu.ph","2021-1-1234","Aero 101"',
-      '"Maria Santos","maria.santos@patts.edu.ph","2021-1-5678","Aero 101"',
-      '"Pedro Reyes","pedro.reyes@patts.edu.ph","2022-2-9012","Aero 102"',
+      'full_name,student_email,student_id,section,course',
+      '"Juan dela Cruz","juan.delacruz@patts.edu.ph","2021-1-1234","Aero 101","BSAE"',
+      '"Maria Santos","maria.santos@patts.edu.ph","2021-1-5678","Aero 101","BSAMT"',
+      '"Pedro Reyes","pedro.reyes@patts.edu.ph","2022-2-9012","Aero 102","PRE-ENG\'G"',
     ].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -1749,7 +1688,7 @@ const [targetSection, setTargetSection] = useState('');
     if (!studentCsvParsed || studentCsvParsed.students.length === 0) return;
     setStudentCsvImporting(true);
     try {
-      const existing = await fetchAllRows(() => supabase.from('users').select('id, student_email, student_code, section'));
+      const existing = await fetchAllRows(() => supabase.from('users').select('id, student_email, student_code, section, course'));
       // student_code is NOT unique any more (sql/014), so a Map of
       // code -> student would silently keep whichever row came back last and
       // hide the other. The rules live in src/lib/studentIdentity.js and are
@@ -1766,6 +1705,8 @@ const [targetSection, setTargetSection] = useState('');
       // the two sections they are in. They must still become one row, or the
       // second section would create a second person with the same email.
       const newByEmail = new Map();
+      // A course in the file is the newest word on it. Blank leaves theirs alone.
+      const courseById = new Map();
 
       studentCsvParsed.students.forEach(s => {
         // Email is the identity; a Student ID identifies only when exactly one
@@ -1785,12 +1726,14 @@ const [targetSection, setTargetSection] = useState('');
           // A copy, so a failed import leaves the parsed file untouched and a
           // retry does not double up the sections it appended last time.
           if (!pending) { const row = { ...s }; newByEmail.set(s.student_email, row); toInsert.push(row); }
-          else if (!sectionsOf(pending.section).includes(s.section)) {
-            pending.section = `${pending.section}, ${s.section}`;
+          else {
+            if (!sectionsOf(pending.section).includes(s.section)) pending.section = `${pending.section}, ${s.section}`;
+            pending.course = pending.course || s.course;
           }
           return;
         }
 
+        if (s.course && s.course !== match.course) courseById.set(match.id, s.course);
         const current = mergeById.get(match.id) || sectionsOf(match.section);
         if (current.includes(s.section)) { alreadyIn.push(s.full_name); return; }
         const next = [...current, s.section];
@@ -1815,6 +1758,12 @@ const [targetSection, setTargetSection] = useState('');
         if (error) mergeFailures.push(m.id);
       }
 
+      const courseFailures = [];
+      for (const [id, course] of courseById) {
+        const { error } = await supabase.from('users').update({ course }).eq('id', id);
+        if (error) courseFailures.push(id);
+      }
+
       // Claim every section the file touched — including one whose students all
       // already existed, which would otherwise stay invisible on the dashboard.
       const touchedSections = [...new Set(studentCsvParsed.students.map(s => s.section))];
@@ -1822,7 +1771,7 @@ const [targetSection, setTargetSection] = useState('');
 
       // A merge can pull in a student who was not on this instructor's roster a
       // moment ago, so rebuild from the server rather than patching local state.
-      if (inserted.length > 0 || finalMerges.length > mergeFailures.length) {
+      if (inserted.length > 0 || finalMerges.length > mergeFailures.length || courseById.size > courseFailures.length) {
         await fetchDashboardData();
       }
 
@@ -1833,6 +1782,9 @@ const [targetSection, setTargetSection] = useState('');
       if (inserted.length > 0) lines.push(`${inserted.length} new student${inserted.length !== 1 ? 's' : ''} added.`);
       if (mergedCount > 0) lines.push(`${mergedCount} existing student${mergedCount !== 1 ? 's' : ''} added to their new section.`);
       if (alreadyIn.length > 0) lines.push(`${alreadyIn.length} already in that section — no change.`);
+      const coursesSet = courseById.size - courseFailures.length;
+      if (coursesSet > 0) lines.push(`${coursesSet} existing student${coursesSet !== 1 ? 's' : ''} had their course updated.`);
+      if (courseFailures.length > 0) lines.push(`${courseFailures.length} course${courseFailures.length !== 1 ? 's' : ''} could not be saved. Please import the file again.`);
       if (lines.length === 0) lines.push('Nothing to import.');
       let msg = lines.join('\n');
       const problems = [
@@ -2084,7 +2036,7 @@ async function fetchDashboardData() {
               .then(data => ({ data, error: null }), error => ({ data: null, error }))
           : Promise.resolve({ data: [] }),
         supabase.from('exam_shares').select('id, exam_id, shared_with').eq('shared_by', instructorId),
-        fetchAllRows(() => supabase.from('users').select('id, full_name, section')),
+        fetchAllRows(() => supabase.from('users').select('id, full_name, section, course')),
         // For each co-managed section, fetch other instructors' exams targeting it
         ...coManagedSectionNames.map(sec =>
           selectAssessments(
@@ -2199,6 +2151,7 @@ async function fetchDashboardData() {
         studentDict[s.id] = {
           name: s.full_name || 'Unknown',
           section: mineOf(s.section).join(', ') || 'Unknown',
+          course: s.course || null,
         };
         studentSecs[s.id] = mineOf(s.section).join(', ');
       });
@@ -2414,7 +2367,7 @@ async function fetchDashboardData() {
   const toggleGradeBase = async (exam) => {
     const next = gradeBaseOf(exam) === 50 ? 0 : 50;
     const example = next === 50 ? '30/60 will read 75%, Passed.' : '30/60 will read 50%, Failed.';
-    if (!window.confirm(`Show "${exam.title}" on ${next}-base?\n\n${example} Students and the Results tab show this straight away. No marks change, and you can switch back.`)) return;
+    if (!window.confirm(`Show "${exam.title}" on ${next}-base for students with no course set?\n\n${example} Students with a course follow their course's rule instead. No marks change, and you can switch back.`)) return;
     try {
       await updateAssessment(exam.id, { grade_base: next });
     } catch (e) {
@@ -2652,6 +2605,44 @@ async function fetchDashboardData() {
     setIsBatchSaving(false);
   };
 
+  // A course belongs to the student, not to a section, so unlike sections it
+  // is written straight. Students see the new percentage on their next load.
+  const saveCourses = async (ids, course) => {
+    const value = course || null;
+    let error = null, done = 0;
+    for (let i = 0; i < ids.length && !error; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      ({ error } = await supabase.from('users').update({ course: value }).in('id', chunk));
+      if (!error) done += chunk.length;
+    }
+    if (error) {
+      console.error('Could not save the course:', error);
+      alert(done > 0
+        ? `Saved the course for ${done} of ${ids.length} students, then it failed. Reloading so the list matches the database.`
+        : 'Could not save the course. Nothing was changed. Please try again.');
+      if (done > 0) await fetchDashboardData();
+      return false;
+    }
+    const saved = new Set(ids);
+    setStudentsList(prev => prev.map(s => saved.has(s.id) ? { ...s, course: value } : s));
+    setStudents(prev => {
+      const next = { ...prev };
+      ids.forEach(id => { if (next[id]) next[id] = { ...next[id], course: value }; });
+      return next;
+    });
+    return true;
+  };
+
+  const batchSetCourse = async () => {
+    const owned = new Set(studentsList.map(s => s.id));
+    const ids = [...selectedStudentIds].filter(id => owned.has(id));
+    if (ids.length === 0 || !batchCourse) return;
+    if (!window.confirm(`Set ${ids.length} student(s) to ${batchCourse}?\n\nThe percentages they see follow their course. No marks change.`)) return;
+    setIsBatchSaving(true);
+    if (await saveCourses(ids, batchCourse)) { setSelectedStudentIds(new Set()); setBatchCourse(''); }
+    setIsBatchSaving(false);
+  };
+
   const createStudent = async () => {
     if (!newStudentName.trim()) return alert('Full name is required.');
     if (!newStudentEmail.trim()) return alert('Student email is required.');
@@ -2703,7 +2694,11 @@ async function fetchDashboardData() {
       if (mergeErr) return alert('Could not add them to your section: ' + mergeErr.message);
 
       await claimSections(want);
-      setNewStudentName(''); setNewStudentEmail(''); setNewStudentCode(''); setNewStudentSection('');
+      if (newStudentCourse) {
+        const { error: courseErr } = await supabase.from('users').update({ course: newStudentCourse }).eq('id', them.id);
+        if (courseErr) console.error('Could not save the course:', courseErr);
+      }
+      setNewStudentName(''); setNewStudentEmail(''); setNewStudentCode(''); setNewStudentSection(''); setNewStudentCourse('');
       // They may not have been on this instructor's roster a moment ago, so
       // rebuild from the server rather than patching local state.
       await fetchDashboardData();
@@ -2725,6 +2720,7 @@ async function fetchDashboardData() {
       student_email: email,
       student_code: code,
       section: newStudentSection.trim(),
+      course: newStudentCourse || null,
     }]).select().single();
 
     if (error) {
@@ -2734,12 +2730,13 @@ async function fetchDashboardData() {
       // from the roster on the next reload unless an exam happened to target it.
       await claimSections(created.section);
       setStudentsList(prev => [...prev, created]);
-      setStudents(prev => ({ ...prev, [created.id]: { name: created.full_name, section: created.section } }));
+      setStudents(prev => ({ ...prev, [created.id]: { name: created.full_name, section: created.section, course: created.course || null } }));
       setEditingStudentSections(prev => ({ ...prev, [created.id]: created.section }));
       setNewStudentName('');
       setNewStudentEmail('');
       setNewStudentCode('');
       setNewStudentSection('');
+      setNewStudentCourse('');
       alert(`Student "${created.full_name}" added successfully.`);
     }
     setIsAddingStudent(false);
@@ -2793,6 +2790,10 @@ async function fetchDashboardData() {
       // picked-item count under it; equal scores fall back to the name.
       if (resultSort === 'score_desc' || resultSort === 'score_asc') {
         return compareByScore(a, b, resultSort === 'score_desc' ? 'desc' : 'asc')
+          || (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
+      }
+      if (resultSort === 'submitted_asc' || resultSort === 'submitted_desc') {
+        return compareBySubmitted(a, b, resultSort === 'submitted_asc' ? 'asc' : 'desc')
           || (students[a.student_id]?.name || '').localeCompare(students[b.student_id]?.name || '');
       }
       if (resultSort === 'name') {
@@ -3216,6 +3217,8 @@ async function fetchDashboardData() {
                   <option value="name">By name</option>
                   <option value="score_desc">Highest first</option>
                   <option value="score_asc">Lowest first</option>
+                  <option value="submitted_asc">First to submit</option>
+                  <option value="submitted_desc">Last to submit</option>
                 </select>
               </div>
               {(paperPicker.hiddenArchived > 0 || showArchivedResults) && (
@@ -3280,10 +3283,11 @@ async function fetchDashboardData() {
                 <table className="tbl tbl-stack tbl-results">
                   <thead>
                     <tr>
-                      <th>Student</th>
+                      <th><span className="row-no">#</span>Student</th>
                       <th>Section</th>
                       {selectedExam === 'All' && <th>Paper</th>}
                       <th>Score</th>
+                      <th>Submitted</th>
                       <th>Time</th>
                       <th>Flags</th>
                       <th></th>
@@ -3291,7 +3295,7 @@ async function fetchDashboardData() {
                   </thead>
                   <tbody>
                     {filteredAndSortedResults.length === 0 ? (
-                      <tr><td colSpan={selectedExam === 'All' ? 7 : 6} style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>No results found.</td></tr>
+                      <tr><td colSpan={selectedExam === 'All' ? 8 : 7} style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>No results found.</td></tr>
                     ) : (
                       filteredAndSortedResults.map((row, index) => {
                         const student = students[row.student_id] || { name: 'Unknown', section: 'Unknown' };
@@ -3308,8 +3312,8 @@ async function fetchDashboardData() {
                         const essayCount = (examQuestionsCache[row.exam_id] || []).filter(q => q.question_type === 'essay').length;
                         return (
                           <tr key={index}>
-                            <td className="tbl-stack-title res-name" style={{ fontWeight: 600 }}>{formatName(student.name)}</td>
-                            <td className="res-section" data-label="Section" style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{student.section}</td>
+                            <td className="tbl-stack-title res-name" style={{ fontWeight: 600 }}><span className="row-no">{index + 1}</span>{formatName(student.name)}</td>
+                            <td className="res-section" data-label="Section" style={{ color: 'var(--ink-3)', fontSize: 12.5 }}>{student.section}{student.course ? ` · ${student.course}` : ''}</td>
                             {selectedExam === 'All' && (
                               <td className="res-paper" data-label="Paper" title={examTitle} style={{ color: 'var(--ink-3)', fontSize: 12.5, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{examTitle}</td>
                             )}
@@ -3345,6 +3349,7 @@ async function fetchDashboardData() {
                                 </span>
                               )}
                             </td>
+                            <td className="res-submitted" data-label="Submitted" style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{shortDateTime(row.submitted_at) || '–'}</td>
                             <td className="res-time" data-label="Time" style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{row.time_taken_seconds > 0 ? formatTime(row.time_taken_seconds) : '–'}</td>
                             <td className="res-flags" data-label="Flags">
                               {row.tab_switches > 0
@@ -3506,8 +3511,8 @@ async function fetchDashboardData() {
                     className={`mx-chip${base === 50 ? ' is-on' : ''}`}
                     aria-label={`Grade base: ${base}. Switch to ${base === 50 ? 0 : 50}-base.`}
                     title={base === 50
-                      ? '50-base: percentage = 50 + score ÷ total × 50, so half marks is 75%. Pass mark 75. Click for 0-base.'
-                      : '0-base: percentage = score ÷ total × 100, so half marks is 50%. Pass mark 75. Click for 50-base.'}
+                      ? 'For students with no course set: 50 + score ÷ total × 50, so half marks is 75%. Everyone else follows their course. Click for 0-base.'
+                      : 'For students with no course set: score ÷ total × 100, so half marks is 50%. Everyone else follows their course. Click for 50-base.'}
                   >
                     <Icon name="trend-up" size={13} />
                     {base}-base
@@ -3782,7 +3787,7 @@ async function fetchDashboardData() {
                 </select>
               </div>
               <div style={{ flex: 1, minWidth: '150px' }}>
-                <label htmlFor="new-grade-base" style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Grade base</label>
+                <label htmlFor="new-grade-base" title="For students with no course set. Everyone else follows their course." style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Grade base (no course set)</label>
                 <select id="new-grade-base" value={newGradeBase} onChange={e => setNewGradeBase(Number(e.target.value))} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
                   <option value={0}>0-base (half marks = 50%)</option>
                   <option value={50}>50-base (half marks = 75%)</option>
@@ -3969,6 +3974,11 @@ async function fetchDashboardData() {
                 <button onClick={batchUpdateSection} disabled={isBatchSaving || selectedStudentIds.size === 0 || !batchSection.trim()} className="btn sm">
                   {isBatchSaving ? 'Saving…' : 'Set section'}
                 </button>
+                <select className="input" aria-label="Course to set for the selected students" value={batchCourse} onChange={e => setBatchCourse(e.target.value)} style={{ flex: '0 1 170px', width: 'auto', minWidth: 0 }}>
+                  <option value="">Course for ticked…</option>
+                  {COURSES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                </select>
+                <button onClick={batchSetCourse} disabled={isBatchSaving || selectedStudentIds.size === 0 || !batchCourse} className="btn sm">Set course</button>
                 {selectedStudentIds.size > 0 && (
                   <>
                     <button onClick={batchDeleteStudents} disabled={isBatchSaving} className="btn sm danger"><Icon name="trash" size={13} /> Remove</button>
@@ -3995,13 +4005,14 @@ async function fetchDashboardData() {
                     </th>
                     <th>Student Name</th>
                     <th>Section</th>
+                    <th>Course</th>
                     <th>Edit Section</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredStudents.length === 0 ? (
-                    <tr><td colSpan="5" style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>
+                    <tr><td colSpan="6" style={{ padding: '24px', textAlign: 'center', color: 'var(--ink-4)' }}>
                       {studentsList.length === 0
                         ? 'No students yet. Add your roster with Import Students from CSV below.'
                         : 'No students match this filter.'}
@@ -4011,7 +4022,7 @@ async function fetchDashboardData() {
                       if (item.type === 'header') {
                         return (
                           <tr key={`sec-${item.section}-${idx}`}>
-                            <td colSpan="5" style={{ padding: '8px 14px', background: 'var(--navy-50)', borderTop: idx > 0 ? '1px solid var(--line)' : 'none', fontWeight: 600, fontSize: 12.5, color: 'var(--navy)', }}>
+                            <td colSpan="6" style={{ padding: '8px 14px', background: 'var(--navy-50)', borderTop: idx > 0 ? '1px solid var(--line)' : 'none', fontWeight: 600, fontSize: 12.5, color: 'var(--navy)', }}>
                               {item.section}
                             </td>
                           </tr>
@@ -4056,6 +4067,12 @@ async function fetchDashboardData() {
                             </div>
                           </td>
                           <td data-label="Section"><span className="px-pill brand">{mySectionsOf(student.section).join(', ') || '—'}</span></td>
+                          <td data-label="Course" onClick={e => e.stopPropagation()}>
+                            <select className="input" aria-label={`Course of ${formatName(student.full_name) || 'this student'}`} value={student.course || ''} onChange={e => saveCourses([student.id], e.target.value)} style={{ minWidth: 112 }}>
+                              <option value="">No course</option>
+                              {COURSES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                            </select>
+                          </td>
                           <td data-label="Edit section" onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                               <SectionPicker
@@ -4093,7 +4110,7 @@ async function fetchDashboardData() {
                   </button>
                 </div>
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--ink-3)' }}>
-                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>full_name, student_email, student_id, section</code> — a student who is already on file is added to the section instead of being duplicated.
+                  CSV columns: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', padding: '1px 5px', borderRadius: 3 }}>full_name, student_email, student_id, section, course</code> — a student who is already on file is added to the section instead of being duplicated. Course is a code such as BSAE or BSAMT.
                 </p>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -4178,6 +4195,13 @@ async function fetchDashboardData() {
                       {[...instructorSections].map(sec => <option key={sec} value={sec} />)}
                     </datalist>
                   </div>
+                  <div style={{ flex: 1, minWidth: '130px' }}>
+                    <label className="label" htmlFor="new-student-course">Course</label>
+                    <select id="new-student-course" className="input" value={newStudentCourse} onChange={e => setNewStudentCourse(e.target.value)}>
+                      <option value="">No course</option>
+                      {COURSES.map(c => <option key={c.code} value={c.code}>{c.code} — {c.name}</option>)}
+                    </select>
+                  </div>
                 </div>
                 <div style={{ marginTop: '14px' }}>
                   <button className="btn" onClick={createStudent} disabled={isAddingStudent || !newStudentName.trim() || !newStudentEmail.trim() || !newStudentCode.trim() || !newStudentSection.trim()} style={{ opacity: isAddingStudent ? 0.7 : 1 }}>
@@ -4220,14 +4244,16 @@ async function fetchDashboardData() {
           const statusOfSitting = s => s.status === 'locked' ? 'locked' : isSessionForceSubmittable(s) ? 'timed_out' : 'active';
           const sittingRows = activeSessions.map(s => ({
             s, name: formatName(s.student_name), section: sittingSectionOf(s.student_id, s.exam_id),
-            paperId: s.exam_id, status: statusOfSitting(s),
+            paperId: s.exam_id, status: statusOfSitting(s), enteredAt: s.created_at,
           }));
           const waitingRows = admissions.filter(r => isWaitingNow(r, admissionClock)).map(r => ({
             r, name: formatName(r.student_name), section: sittingSectionOf(r.student_id, r.assessment_id),
             paperId: r.assessment_id, status: 'waiting', requestedAt: r.requested_at,
           }));
           const placeFilter = { ...liveFilter, status: '' };
-          const shownSittings = filterLive(sittingRows, liveFilter);
+          // Sorted here rather than once in state, so a student who starts
+          // while the monitor is open lands in order and the numbers stay right.
+          const shownSittings = filterLive(sittingRows, liveFilter).sort(compareLive(liveSort));
           // The status filter is for sittings; whoever is waiting is shown
           // unless the section, paper or name filters rule them out.
           const shownWaiting = filterLive(waitingRows, placeFilter)
@@ -4364,8 +4390,9 @@ async function fetchDashboardData() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap', gap: '10px' }}>
                 <span className="px-pill live" style={{ fontSize: '12.5px' }}>{activeSessions.length} active</span>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button className={`btn ghost sm${liveSort === 'name' ? '' : ''}`} onClick={() => applyLiveSort('name')} style={liveSort === 'name' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>A–Z Name</button>
-                  <button className="btn ghost sm" onClick={() => applyLiveSort('section')} style={liveSort === 'section' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>By Section</button>
+                  <button className={`btn ghost sm${liveSort === 'name' ? '' : ''}`} onClick={() => setLiveSort('name')} style={liveSort === 'name' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>A–Z Name</button>
+                  <button className="btn ghost sm" onClick={() => setLiveSort('section')} style={liveSort === 'section' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>By Section</button>
+                  <button className="btn ghost sm" onClick={() => setLiveSort('entered')} style={liveSort === 'entered' ? { background: 'var(--navy)', color: 'white', borderColor: 'var(--navy)' } : {}}>Time Entered</button>
                   {stuckCount > 0 && (
                     <button className="btn ghost sm" onClick={clearStuckSessions}>
                       <Icon name="x" size={14} /> Clear {stuckCount} Finished
@@ -4429,9 +4456,10 @@ async function fetchDashboardData() {
               <table className="tbl tbl-stack">
                 <thead>
                   <tr>
-                    <th>Student Name</th>
+                    <th><span className="row-no">#</span>Student Name</th>
                     <th>Section</th>
                     <th>Exam Taking</th>
+                    <th>Entered</th>
                     <th>Status</th>
                     <th>Answered</th>
                     <th>Violations</th>
@@ -4440,19 +4468,20 @@ async function fetchDashboardData() {
                 </thead>
                 <tbody>
                   {activeSessions.length === 0 ? (
-                    <tr><td colSpan="7" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students are sitting a paper right now. Open one in Manage Exams — students appear here as they start.</td></tr>
+                    <tr><td colSpan="8" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No students are sitting a paper right now. Open one in Manage Exams — students appear here as they start.</td></tr>
                   ) : shownSittings.length === 0 ? (
-                    <tr><td colSpan="7" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No sitting matches these filters. <button type="button" className="btn ghost sm" style={{ width: 'auto', marginLeft: 6 }} onClick={() => setLiveFilter({ section: '', paper: '', status: '', query: '' })}>Clear filters</button></td></tr>
+                    <tr><td colSpan="8" style={{ padding: '32px', textAlign: 'center', color: 'var(--ink-3)' }}>No sitting matches these filters. <button type="button" className="btn ghost sm" style={{ width: 'auto', marginLeft: 6 }} onClick={() => setLiveFilter({ section: '', paper: '', status: '', query: '' })}>Clear filters</button></td></tr>
                   ) : (
-                    shownSittings.map(({ s: session, section }) => (
+                    shownSittings.map(({ s: session, section }, index) => (
                       <tr key={session.id} style={
                         session.status === 'locked' ? { background: 'var(--bad-bg)' }
                         : isSessionForceSubmittable(session) ? { background: 'var(--warn-bg, #FFFDE7)' }
                         : {}
                       }>
-                        <td className="tbl-stack-title" style={{ fontWeight: 600, color: 'var(--ink-1)' }}>{formatName(session.student_name)}</td>
+                        <td className="tbl-stack-title live-name" style={{ fontWeight: 600, color: 'var(--ink-1)' }}><span className="row-no">{index + 1}</span>{formatName(session.student_name)}</td>
                         <td data-label="Section" style={{ color: 'var(--ink-2)' }}>{section || '—'}</td>
                         <td data-label="Paper" style={{ color: 'var(--navy)', fontWeight: 500 }}>{examsDict[session.exam_id] || '—'}</td>
+                        <td data-label="Entered" style={{ color: 'var(--ink-2)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{submittedDateTime(session.created_at).time || '—'}</td>
                         <td data-label="Status">
                           {session.status === 'locked'
                             ? <span className="px-pill bad"><Icon name="lock" size={11} /> LOCKED</span>

@@ -93,7 +93,7 @@ export default function Login({ onLogin }) {
 
       const { data, error } = await supabase
         .from('users')
-        .select('id, full_name, section, student_email, student_code')
+        .select('id, full_name, section, student_email, student_code, course')
         .eq('student_email', email.trim().toLowerCase())
         .eq('student_code', credential.trim());
 

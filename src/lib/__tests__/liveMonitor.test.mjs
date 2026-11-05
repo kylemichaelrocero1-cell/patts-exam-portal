@@ -43,6 +43,19 @@ ck('by section, then name; no section last', J([...rows].sort(compareLive('secti
 ck('sections sort as numbers, not letters', J([{ section: 'S -10', name: 'a' }, { section: 'S -2', name: 'b' }].sort(compareLive('section')).map(r => r.section))
   === J(['S -2', 'S -10']));
 
+{
+  const entered = [
+    { name: 'Late, Mia', enteredAt: '2026-11-05T03:10:00Z' },
+    { name: 'NoTime, Jo' },
+    { name: 'Bad, Time', enteredAt: 'not a date' },
+    { name: 'Zamora, Rey', enteredAt: '2026-11-05T03:00:00Z' },
+    { name: 'Abad, Leo', enteredAt: '2026-11-05T03:00:00Z' },
+  ];
+  ck('by time entered: first in first, same moment by name, no time last',
+    J([...entered].sort(compareLive('entered')).map(r => r.name))
+      === J(['Abad, Leo', 'Zamora, Rey', 'Late, Mia', 'Bad, Time', 'NoTime, Jo']));
+}
+
 console.log('\n=== ENTRIES AND THE WAITING SCREEN ===');
 {
   const ids = new Set(Array.from({ length: 200 }, () => newEntryId()));

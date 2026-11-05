@@ -9,6 +9,8 @@
 // downloaded by every student sitting a paper of plain multiple choice.
 
 import { isTextAnswer, textAnswerKey } from './textAnswer.js';
+import { zeroBaseOnExams } from './courses.js';
+import { paperNoun } from './paperNoun.js';
 
 /** Is this item worked rather than picked? */
 export function isWorkedSolution(q) {
@@ -45,6 +47,17 @@ export function gradeBaseOf(x) {
 }
 
 /**
+ * The base one student sees one paper on. The course decides: BSAE and
+ * PRE-ENG'G are 0-base on exams and 50-base on quizzes, assignments and
+ * seatworks; every other course is 50-base. A student with no course set yet
+ * follows the paper's own setting.
+ */
+export function gradeBaseFor(paper, course) {
+  if (!course) return gradeBaseOf(paper);
+  return zeroBaseOnExams(course) && paperNoun(paper) === 'Exam' ? 0 : 50;
+}
+
+/**
  * A score as a grade on this base.
  *
  *   0-base:  score / total × 100         30/60 is 50%
@@ -76,22 +89,16 @@ export function gradeVerdict({ passed, base = 0 } = {}, { showBase = false } = {
 }
 
 /**
- * Does the screen after Submit show the score? A paper that reveals its answers
- * always has. A 50-base paper does, so a student knows there and then that half
- * marks passed. A 0-base exam keeps it for the Summary tab.
+ * Result rows with each one's base beside it, so combinedScore() and everything
+ * built on it reads the grade that student sees. A row is a result (exam_id) or
+ * a practice attempt (assessment_id). courseOf(studentId) gives the course.
  */
-export function showsScoreOnSubmit(exam, canReview) {
-  return !!canReview || gradeBaseOf(exam) === 50;
-}
-
-/**
- * Result rows with each one's paper's base beside it, so combinedScore() and
- * everything built on it reads the grade the paper asks for. A row is a result
- * (exam_id) or a practice attempt (assessment_id).
- */
-export function withGradeBases(rows, papers) {
-  const base = new Map((papers || []).map(p => [p.id, gradeBaseOf(p)]));
-  return (rows || []).map(r => ({ ...r, grade_base: base.get(r.exam_id ?? r.assessment_id) ?? 0 }));
+export function withGradeBases(rows, papers, courseOf = () => null) {
+  const paper = new Map((papers || []).map(p => [p.id, p]));
+  return (rows || []).map(r => ({
+    ...r,
+    grade_base: gradeBaseFor(paper.get(r.exam_id ?? r.assessment_id), courseOf(r.student_id)),
+  }));
 }
 
 /**

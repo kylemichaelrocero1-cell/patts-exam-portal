@@ -10,7 +10,7 @@
 import {
   isWorkedSolution, linesOf, hasWork, combinedScore, workMarksAvailable,
   finalLineOf, workedKeyOf, workedItemStats,
-  gradeBaseOf, gradeOf, gradeVerdict, showsScoreOnSubmit, withGradeBases,
+  gradeBaseOf, gradeBaseFor, gradeOf, gradeVerdict, withGradeBases,
 } from '../workedShape.js';
 
 let pass = 0, fail = 0;
@@ -181,10 +181,23 @@ console.log('\n=== grade base (sql/138) ===');
   check('verdict: can always name the base', gradeVerdict({ passed: true, base: 0 }, { showBase: true }) === 'Passed · 0-base'
     && gradeVerdict({ passed: true, base: 50 }, { showBase: true }) === 'Passed · 50-base');
 
-  check('after Submit: a 50-base exam shows the score', showsScoreOnSubmit({ grade_base: 50 }, false) === true);
-  check('after Submit: a paper that reveals answers shows it', showsScoreOnSubmit({ grade_base: 0 }, true) === true);
-  check('after Submit: a 0-base exam keeps it for the Summary', showsScoreOnSubmit({ grade_base: 0 }, false) === false);
-  check('after Submit: a paper with no base keeps it too', showsScoreOnSubmit({}, false) === false);
+  {
+    const exam = { title: 'Look-alike Midterm Examination', kind: 'exam', grade_base: 50 };
+    const quiz = { title: 'Look-alike Quiz 1', kind: 'exam', grade_base: 0 };
+    const task = { title: 'Look-alike Assignment 2', kind: 'exam', grade_base: 0 };
+    const seat = { title: 'Look-alike Activity', kind: 'seatwork', grade_base: 0 };
+    for (const c of ['BSAE', "PRE-ENG'G"]) {
+      check(`${c}: 0-base on an exam, whatever the paper says`, gradeBaseFor(exam, c) === 0);
+      check(`${c}: 50-base on a quiz, an assignment and a seatwork`, [quiz, task, seat].every(p => gradeBaseFor(p, c) === 50));
+    }
+    check('another course: 50-base on all of them', [exam, quiz, task, seat].every(p => gradeBaseFor(p, 'BSAMT') === 50));
+    check('no course yet: the paper decides', gradeBaseFor(exam, null) === 50 && gradeBaseFor(quiz, undefined) === 0);
+    const same = withGradeBases(
+      [{ exam_id: 'x', student_id: 'ae', score: 30, total_items: 60 }, { exam_id: 'x', student_id: 'amt', score: 30, total_items: 60 }],
+      [{ id: 'x', ...exam }], id => ({ ae: 'BSAE', amt: 'BSAMT' })[id]);
+    check('same paper, same marks, same section: each sees their own percentage',
+      combinedScore(same[0]).pct === 50 && combinedScore(same[1]).pct === 75, JSON.stringify(same));
+  }
 
   const rows = withGradeBases(
     [{ exam_id: 'a', score: 1 }, { assessment_id: 'b', score: 2 }, { exam_id: 'gone', score: 3 }],

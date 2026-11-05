@@ -1621,6 +1621,7 @@ button.card { color: var(--ink-1); background: var(--surface); }
   .tbl-stack td[data-label=""] { justify-content: flex-end; }
   .tbl-stack td.tbl-stack-title { justify-content: flex-start; text-align: left !important; font-size: 15px; font-weight: 700; color: var(--ink-1); }
   .tbl-stack td[colspan] { display: block; text-align: center !important; }
+  .tbl-stack td.live-name { flex-wrap: nowrap; }
   .tbl-stack td .input, .tbl-stack td select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1833,6 +1834,8 @@ button.row-list-item:hover:not(:disabled) { background: var(--navy-50); }
 @media (min-width: 1280px) { .dash-filters.card { flex-wrap: nowrap; } }
 .res-summary { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 16px; align-items: center; padding: 8px var(--inset); margin-bottom: 10px; }
 .res-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px 12px; }
+/* The running number beside a name: its place in the list as sorted now. */
+.row-no { display: inline-block; flex: none; min-width: 30px; color: var(--ink-3); font-weight: 500; font-variant-numeric: tabular-nums; }
 .tbl-results .res-actions > div { justify-content: flex-end; }
 .res-stat-label { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
 .res-stat-value { font-size: 20px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; color: var(--ink-1); }
@@ -1910,6 +1913,8 @@ button.row-list-item:hover:not(:disabled) { background: var(--navy-50); }
   .tbl-results .res-time { grid-column: 2; grid-row: 3; }
   .tbl-results .res-flags { grid-column: 3; grid-row: 3; }
   .tbl-results .res-actions { grid-column: 4; grid-row: 3; justify-self: end; }
+  /* Its own line: beside the section it leaves neither one room to be read. */
+  .tbl-results .res-submitted { grid-column: 1 / -1; grid-row: 4; }
   .tbl-results .btn.icon-btn { width: 32px; height: 32px; }
   .tbl-results .res-actions > div { justify-content: flex-end; }
   .tbl-results td[colspan] { grid-column: 1 / -1; text-align: center !important; }

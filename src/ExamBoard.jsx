@@ -11,7 +11,7 @@ import {
 } from './lib/answers';
 import { sittingDecision, sittingNotFiled, restartPatch } from './lib/retakes';
 import { hasSavedWork } from './lib/proctoring';
-import { gradeBaseOf, hasWork, isWorkedSolution, showsScoreOnSubmit, workMarksAvailable } from './lib/workedShape.js';
+import { gradeBaseFor, hasWork, isWorkedSolution, workMarksAvailable } from './lib/workedShape.js';
 import ExamResult from './components/ExamResult.jsx';
 import { gateErrorMessage, isSessionExpiredError, isWorthRetrying } from './lib/sessionErrors.js';
 import { sessionReplaced } from './lib/sessionCheck.js';
@@ -1575,18 +1575,15 @@ export default function ExamBoard({ student, exam, examSet, admission, onFinish,
               )}
             </div>
             <div style={{ padding: '28px 32px', textAlign: 'center' }}>
-              {/* On a paper that reveals answers there is no reason to withhold
-                  the mark, and a 50-base paper shows it so a student knows
-                  they passed. Any other exam keeps it for the Summary tab. */}
-              {showsScoreOnSubmit(exam, canReviewAnswers) && (
-                <ExamResult
-                  score={scoreDisplay.score}
-                  total={scoreDisplay.total}
-                  workPending={scoreDisplay.workPending}
-                  base={gradeBaseOf(exam)}
-                  attemptNo={attemptNo}
-                />
-              )}
+              {/* Every student sees their percentage as soon as they submit,
+                  on the base their course sits this paper on. */}
+              <ExamResult
+                score={scoreDisplay.score}
+                total={scoreDisplay.total}
+                workPending={scoreDisplay.workPending}
+                base={gradeBaseFor(exam, student.course)}
+                attemptNo={attemptNo}
+              />
 
               <p style={{ margin: '0 0 22px', color: 'var(--ink-3)', fontSize: 13.5, lineHeight: 1.65 }}>
                 {canReviewAnswers

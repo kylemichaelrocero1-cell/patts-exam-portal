@@ -37,7 +37,8 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
   // the column absent, must keep shuffling exactly as it always has.
   const [shufQ, setShufQ] = useState(a.shuffle_questions !== false);
   const [shufC, setShufC] = useState(a.shuffle_choices !== false);
-  const [base, setBase] = useState(gradeBaseOf(a));   // sql/138
+  const [base, setBase] = useState(gradeBaseOf(a));   // other courses, sql/138
+  const [baseAe, setBaseAe] = useState(gradeBaseOf({ grade_base: a.grade_base_ae ?? a.grade_base }));   // sql/145
   // Kept as-is on save so an existing paper's stored policy is not silently
   // rewritten; nothing in the dashboard reads it any more.
   const policy = a.score_policy || 'latest';
@@ -75,14 +76,14 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
     const { error } = await supabase.from('assessments')
       .update({
         allow_retakes: retakes, show_answers: answers, score_policy: policy,
-        shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base,
+        shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base, grade_base_ae: baseAe,
         ...(showKey === null ? {} : { review_shows_key: showKey }),
       })
       .eq('id', a.id);
     setBusy(false);
     if (error) return alert('Could not save: ' + error.message);
     onSaved?.({ ...a, allow_retakes: retakes, show_answers: answers, score_policy: policy,
-                shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base,
+                shuffle_questions: shufQ, shuffle_choices: shufC, grade_base: base, grade_base_ae: baseAe,
                 ...(showKey === null ? {} : { review_shows_key: showKey }) });
     onClose();
   };
@@ -123,26 +124,34 @@ export default function ReviewSettings({ assessment, sections = [], onClose, onS
 
         <h4 style={{ margin: '0 0 2px', fontSize: 14 }}>Grade base</h4>
         <p style={{ margin: '0 0 10px', fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-          How the percentage is worked out for students with no course set. BSAE and Pre-Eng'g students are 0-base on exams and 50-base on everything else, and every other course is 50-base, whatever this says. The pass mark is 75 either way, and no marks change.
+          How the percentage is worked out for each group. The pass mark is 75 either way, and no marks change.
         </p>
-        <div role="radiogroup" aria-label="Grade base" className="mx-base-options">
-          {[
-            { value: 0, label: '0-base', formula: 'Score ÷ total × 100', example: '50/100 is 50%, Failed' },
-            { value: 50, label: '50-base', formula: '50 + score ÷ total × 50', example: '50/100 is 75%, Passed' },
-          ].map(o => (
-            <label key={o.value} className={`mx-base-option${base === o.value ? ' is-on' : ''}`}>
-              <input type="radio" name="grade-base" checked={base === o.value} onChange={() => setBase(o.value)} />
-              <span>
-                <span style={{ display: 'block', fontWeight: 700, fontSize: 14 }}>{o.label}</span>
-                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>{o.formula}</span>
-                <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2, fontWeight: 600 }}>{o.example}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        {base !== gradeBaseOf(a) && hasResults && (
+        {[
+          { key: 'ae', title: "BSAE and Pre-Eng'g", value: baseAe, set: setBaseAe },
+          { key: 'others', title: 'Other courses, and students with no course set', value: base, set: setBase },
+        ].map(group => (
+          <div key={group.key}>
+            <div style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: 'var(--ink-2)' }}>{group.title}</div>
+            <div role="radiogroup" aria-label={`Grade base: ${group.title}`} className="mx-base-options">
+              {[
+                { value: 0, label: '0-base', formula: 'Score ÷ total × 100', example: '50/100 is 50%, Failed' },
+                { value: 50, label: '50-base', formula: '50 + score ÷ total × 50', example: '50/100 is 75%, Passed' },
+              ].map(o => (
+                <label key={o.value} className={`mx-base-option${group.value === o.value ? ' is-on' : ''}`}>
+                  <input type="radio" name={`grade-base-${group.key}`} checked={group.value === o.value} onChange={() => group.set(o.value)} />
+                  <span>
+                    <span style={{ display: 'block', fontWeight: 700, fontSize: 14 }}>{o.label}</span>
+                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-3)', marginTop: 2 }}>{o.formula}</span>
+                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--ink-2)', marginTop: 2, fontWeight: 600 }}>{o.example}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ))}
+        {(base !== gradeBaseOf(a) || baseAe !== gradeBaseOf({ grade_base: a.grade_base_ae ?? a.grade_base })) && hasResults && (
           <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--warn)', fontWeight: 600, lineHeight: 1.5 }}>
-            Students with no course set will see the new percentage as soon as you save.
+            Students in the group you changed will see the new percentage as soon as you save.
           </p>
         )}
 

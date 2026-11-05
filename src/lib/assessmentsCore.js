@@ -19,7 +19,7 @@
 export const ASSESSMENT_COLUMNS =
   'id, kind, title, description, target_section, instructor_id, is_open, ' +
   'opens_at, closes_at, duration_minutes, has_password, created_at, archived_at, ' +
-  'shuffle_questions, shuffle_choices, uses_sets, requires_admission, set_labels, grade_base, ' +
+  'shuffle_questions, shuffle_choices, uses_sets, requires_admission, set_labels, grade_base, grade_base_ae, ' +
   // score_policy is deliberately absent: it governs what the instructor sees
   // and anon is not granted it (see sql/002b).
   'allow_retakes, show_answers';
@@ -67,6 +67,7 @@ export function normaliseExamRow(row) {
     requires_admission: false, // nor did anyone wait to be let in
     set_labels: [],        // nor were questions in sets
     grade_base: 0,         // and every percentage was the plain one
+    grade_base_ae: 0,
   };
 }
 

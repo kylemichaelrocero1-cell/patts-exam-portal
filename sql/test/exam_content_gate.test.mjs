@@ -93,6 +93,10 @@ for (const f of ['001_assessments_and_lessons', '002_review_mode_and_server_scor
   await x(s138.slice(from, to + grant.length));
 }
 
+// 145's second base and its grant, likewise.
+await x(`ALTER TABLE public.assessments ADD COLUMN IF NOT EXISTS grade_base_ae smallint NOT NULL DEFAULT 0;
+         GRANT SELECT (grade_base_ae) ON public.assessments TO anon, authenticated;`);
+
 // A locked paper, open now, created the way the app creates one today.
 const PAPER = '9b4f3a10-2c1d-4b8e-9f77-5a6d0e2c1b33';
 await x(`INSERT INTO public.assessments (id, kind, title, target_section, instructor_id,

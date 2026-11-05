@@ -13,6 +13,7 @@ import { assessmentsTableAvailable, selectAssessments, INSTRUCTOR_COLUMNS,
 import { removalPrompt, removalSummary, purgeLabel, TRASH_DAYS } from './lib/removeStudents';
 import { violationFeed, hasSavedWork as sessionHasWork, canDismissSession } from './lib/proctoring';
 import { COURSES } from './lib/courses';
+import { paperNoun } from './lib/paperNoun';
 import { parseStudentCSV } from './lib/studentCsv';
 import { combinedScore, gradeBaseOf, gradeVerdict, isWorkedSolution, withGradeBases, workedKeyOf, workedItemStats } from './lib/workedShape';
 import { compareByScore, compareBySubmitted, resultStatistics, scoreFraction, PASS_MARK } from './lib/resultsStats';
@@ -185,7 +186,10 @@ const [targetSection, setTargetSection] = useState('');
   const [newOpensAt, setNewOpensAt] = useState('');        // datetime-local
   const [newClosesAt, setNewClosesAt] = useState('');
   const [newDuration, setNewDuration] = useState(60);
-  const [newGradeBase, setNewGradeBase] = useState(0);        // 0 | 50 (sql/138)
+  const [newGradeBase, setNewGradeBase] = useState(50);       // other courses, 0 | 50 (sql/138)
+  // BSAE and Pre-Eng'g (sql/145). Follows the paper's type until it is chosen.
+  const [newGradeBaseAe, setNewGradeBaseAe] = useState(null);
+  const shownNewBaseAe = newGradeBaseAe ?? (paperNoun({ kind: newKind, title: newTitle }) === 'Exam' ? 0 : 50);
 
   // --- NEW ANALYTICS STATES ---
   const [viewingStudent, setViewingStudent] = useState(null);
@@ -2225,7 +2229,7 @@ async function fetchDashboardData() {
     const useAssessments = assessmentsTableAvailable();
     const table = useAssessments ? 'assessments' : 'exams';
     const row = useAssessments
-      ? { ...base, kind: newKind, opens_at: toIso(newOpensAt), closes_at: toIso(newClosesAt), grade_base: newGradeBase }
+      ? { ...base, kind: newKind, opens_at: toIso(newOpensAt), closes_at: toIso(newClosesAt), grade_base: newGradeBase, grade_base_ae: shownNewBaseAe }
       : base;
 
     const { data: newExam, error } = await supabase.from(table).insert([row]).select().single();
@@ -2255,7 +2259,8 @@ async function fetchDashboardData() {
     setNewOpensAt('');
     setNewClosesAt('');
     setNewDuration(60);
-    setNewGradeBase(0);
+    setNewGradeBase(50);
+    setNewGradeBaseAe(null);
     setCsvExamParsed(null);
     await fetchDashboardData();
     const label = newKind === 'seatwork' ? 'Seatwork' : 'Exam';
@@ -2362,22 +2367,24 @@ async function fetchDashboardData() {
     setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, requires_admission: next } : e));
   };
 
-  // 0-base or 50-base (sql/138). Marks are untouched, so it can go back; but
-  // students see the new percentage at once, so it asks first.
-  const toggleGradeBase = async (exam) => {
-    const next = gradeBaseOf(exam) === 50 ? 0 : 50;
+  // 0-base or 50-base, for one group of students on one paper (sql/138, 145).
+  // Marks are untouched, so it can go back; but students see the new percentage
+  // at once, so it asks first.
+  const toggleGradeBase = async (exam, column) => {
+    const who = column === 'grade_base_ae' ? "BSAE and Pre-Eng'g students" : 'students on other courses';
+    const next = Number(exam[column]) === 50 ? 0 : 50;
     const example = next === 50 ? '30/60 will read 75%, Passed.' : '30/60 will read 50%, Failed.';
-    if (!window.confirm(`Show "${exam.title}" on ${next}-base for students with no course set?\n\n${example} Students with a course follow their course's rule instead. No marks change, and you can switch back.`)) return;
+    if (!window.confirm(`Show "${exam.title}" on ${next}-base for ${who}?\n\n${example} They see this straight away. No marks change, and you can switch back.`)) return;
     try {
-      await updateAssessment(exam.id, { grade_base: next });
+      await updateAssessment(exam.id, { [column]: next });
     } catch (e) {
       console.error('Could not switch the grade base:', e);
       alert(/grade_base/.test(e?.message || '')
-        ? 'Choosing a grade base needs a database update (sql/138) that has not been run yet. Nothing was changed.'
+        ? 'Choosing a grade base needs a database update (sql/145) that has not been run yet. Nothing was changed.'
         : 'Could not switch the grade base. Nothing was changed — please try again.');
       return;
     }
-    setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, grade_base: next } : e));
+    setExamsList(prev => prev.map(e => e.id === exam.id ? { ...e, [column]: next } : e));
   };
 
   // --- NEW: Toggle Exam Open/Close ---
@@ -3429,7 +3436,6 @@ async function fetchDashboardData() {
 
             <div className="mx-list">
             {managedList.map((exam) => {
-              const base = gradeBaseOf(exam);
               const sat = resultCounts[exam.id] || 0;
               const titleChanged = (editingTitles[exam.id] ?? exam.title) !== exam.title;
               const sectionChanged = editingSections[exam.id] !== (exam.target_section ?? '');
@@ -3504,19 +3510,26 @@ async function fetchDashboardData() {
                     <Icon name={exam.requires_admission ? 'shield-check' : 'shield'} size={13} />
                     {exam.requires_admission ? 'Check-in on' : 'Check-in off'}
                   </button>
-                  {/* The percentage students and this dashboard show (sql/138). */}
-                  <button
-                    type="button"
-                    onClick={() => toggleGradeBase(exam)}
-                    className={`mx-chip${base === 50 ? ' is-on' : ''}`}
-                    aria-label={`Grade base: ${base}. Switch to ${base === 50 ? 0 : 50}-base.`}
-                    title={base === 50
-                      ? 'For students with no course set: 50 + score ÷ total × 50, so half marks is 75%. Everyone else follows their course. Click for 0-base.'
-                      : 'For students with no course set: score ÷ total × 100, so half marks is 50%. Everyone else follows their course. Click for 50-base.'}
-                  >
-                    <Icon name="trend-up" size={13} />
-                    {base}-base
-                  </button>
+                  {/* The percentage each group of students sees (sql/138, 145). */}
+                  {[
+                    { column: 'grade_base_ae', label: 'BSAE & Pre-Eng', who: "BSAE and Pre-Eng'g students" },
+                    { column: 'grade_base', label: 'Others', who: 'All other students, including any with no course set' },
+                  ].map(({ column, label, who }) => {
+                    const base = gradeBaseOf({ grade_base: exam[column] });
+                    return (
+                      <button
+                        key={column}
+                        type="button"
+                        onClick={() => toggleGradeBase(exam, column)}
+                        className={`mx-chip${base === 50 ? ' is-on' : ''}`}
+                        aria-label={`${who}: ${base}-base. Switch to ${base === 50 ? 0 : 50}-base.`}
+                        title={`${who}: half marks is ${base === 50 ? '75%' : '50%'}. Pass mark 75. Click for ${base === 50 ? 0 : 50}-base.`}
+                      >
+                        <Icon name="trend-up" size={13} />
+                        {label}: {base}-base
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Who sits it, for how long, with what password. */}
@@ -3787,7 +3800,14 @@ async function fetchDashboardData() {
                 </select>
               </div>
               <div style={{ flex: 1, minWidth: '150px' }}>
-                <label htmlFor="new-grade-base" title="For students with no course set. Everyone else follows their course." style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Grade base (no course set)</label>
+                <label htmlFor="new-grade-base-ae" style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>BSAE & Pre-Eng'g</label>
+                <select id="new-grade-base-ae" value={shownNewBaseAe} onChange={e => setNewGradeBaseAe(Number(e.target.value))} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
+                  <option value={0}>0-base (half marks = 50%)</option>
+                  <option value={50}>50-base (half marks = 75%)</option>
+                </select>
+              </div>
+              <div style={{ flex: 1, minWidth: '150px' }}>
+                <label htmlFor="new-grade-base" style={{ fontWeight: 600, display: 'block', marginBottom: '5px', fontSize: '13px', color: 'var(--text-2)' }}>Other courses</label>
                 <select id="new-grade-base" value={newGradeBase} onChange={e => setNewGradeBase(Number(e.target.value))} style={{ padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: '6px', width: '100%', fontSize: '14px' }}>
                   <option value={0}>0-base (half marks = 50%)</option>
                   <option value={50}>50-base (half marks = 75%)</option>

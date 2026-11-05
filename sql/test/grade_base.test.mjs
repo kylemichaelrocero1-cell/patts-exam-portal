@@ -7,7 +7,8 @@
 //     change the base; the paper's instructor can, and only to 0 or 50;
 //   * every existing paper stays on 0-base, and no stored mark moves;
 //   * a copy of a paper keeps its base, through either copy function;
-//   * 138 runs twice, and its VERIFY row is all true.
+//   * 138 runs twice, and its VERIFY row is all true;
+//   * 145 adds the second base without changing any paper, and a copy keeps both.
 //
 //   npm run test:grade-base
 import { PGlite } from '@electric-sql/pglite';
@@ -123,12 +124,36 @@ ck('138 applies, twice', true);
 ck('an existing paper stays on 0-base',
    (await q(`SELECT grade_base g FROM public.assessments WHERE id=$1`, [SRC]))[0].g === 0);
 
+console.log('\n=== 145: a second base, for BSAE and Pre-Eng\'g ===');
+await x(`UPDATE public.assessments SET grade_base = 50 WHERE id='${SRC}'`);
+await x(fs.readFileSync(`${P}/sql/143_students_have_a_course.sql`, 'utf8'));
+const M145 = fs.readFileSync(`${P}/sql/145_two_grade_bases_on_a_paper.sql`, 'utf8');
+await x(M145);
+ck('a paper starts with both groups on its current base',
+   (await q(`SELECT grade_base_ae g FROM public.assessments WHERE id=$1`, [SRC]))[0].g === 50);
+await x(`UPDATE public.assessments SET grade_base_ae = 0 WHERE id='${SRC}'`);
+await x(M145);
+ck('145 runs twice, and the second run keeps a later choice',
+   (await q(`SELECT grade_base_ae g FROM public.assessments WHERE id=$1`, [SRC]))[0].g === 0);
+{
+  const [v] = await q(M145.slice(M145.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck("145's VERIFY row is all true", Object.values(v).every(b => b === true), JSON.stringify(v));
+}
+await x(`UPDATE public.assessments SET grade_base = 0 WHERE id='${SRC}'`);
+
 console.log('\n=== who reads and who sets ===');
 {
   const r = await asAnon(studentRead);
   ck('a student reads every column the screens select', r.ok, r.message);
   const u = await asAnon(`UPDATE public.assessments SET grade_base = 50 WHERE id='${SRC}'`);
   ck('a student cannot change it', !u.ok && /permission denied/i.test(u.message), u.message);
+  const uAe = await asAnon(`UPDATE public.assessments SET grade_base_ae = 50 WHERE id='${SRC}'`);
+  ck('nor the BSAE setting', !uAe.ok && /permission denied/i.test(uAe.message), uAe.message);
+  const oAe = await asInstructor(`UPDATE public.assessments SET grade_base_ae = 50 WHERE id='${SRC}' RETURNING grade_base_ae`, [], KAI);
+  ck('its instructor can set the BSAE setting', oAe.ok && oAe.rows[0]?.grade_base_ae === 50, oAe.message);
+  const badAe = await asInstructor(`UPDATE public.assessments SET grade_base_ae = 25 WHERE id='${SRC}'`, [], KAI);
+  ck('and only to 0 or 50', !badAe.ok && /grade_base_ae/.test(badAe.message), badAe.message);
+  await asInstructor(`UPDATE public.assessments SET grade_base_ae = 0 WHERE id='${SRC}'`, [], KAI);
   const o = await asInstructor(`UPDATE public.assessments SET grade_base = 50 WHERE id='${SRC}' RETURNING grade_base`, [], KAI);
   ck('its instructor can set 50', o.ok && o.rows[0]?.grade_base === 50, o.message);
   const bad = await asInstructor(`UPDATE public.assessments SET grade_base = 25 WHERE id='${SRC}'`, [], KAI);
@@ -144,10 +169,10 @@ console.log('\n=== a copy keeps its base ===');
 {
   const a = await asInstructor(`SELECT public.duplicate_paper('${SRC}','Copy','AERO 102',NULL) AS id`, [], KAI);
   ck('duplicate_paper runs', a.ok, a.message);
-  ck('and keeps 50-base', (await q(`SELECT grade_base g FROM public.assessments WHERE id=$1`, [a.rows[0].id]))[0].g === 50);
+  ck('and keeps both bases', JSON.stringify((await q(`SELECT grade_base g, grade_base_ae ae FROM public.assessments WHERE id=$1`, [a.rows[0].id]))[0]) === '{"g":50,"ae":0}');
   const b = await asInstructor(`SELECT public.duplicate_assessment('${SRC}','Mock','AERO 103') AS id`, [], KAI);
   ck('duplicate_assessment runs', b.ok, b.message);
-  ck('and keeps 50-base', (await q(`SELECT grade_base g FROM public.assessments WHERE id=$1`, [b.rows[0].id]))[0].g === 50);
+  ck('and keeps both bases', JSON.stringify((await q(`SELECT grade_base g, grade_base_ae ae FROM public.assessments WHERE id=$1`, [b.rows[0].id]))[0]) === '{"g":50,"ae":0}');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

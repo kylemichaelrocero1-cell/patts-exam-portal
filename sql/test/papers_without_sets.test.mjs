@@ -103,6 +103,10 @@ ck('every existing paper keeps its sets',
   await x(s138.slice(from, to + grant.length));
 }
 
+// 145's second base and its grant, likewise.
+await x(`ALTER TABLE public.assessments ADD COLUMN IF NOT EXISTS grade_base_ae smallint NOT NULL DEFAULT 0;
+         GRANT SELECT (grade_base_ae) ON public.assessments TO anon, authenticated;`);
+
 console.log('\n=== who reads and who switches ===');
 {
   const r = await as('anon', null, studentRead);

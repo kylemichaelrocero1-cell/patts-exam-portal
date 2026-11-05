@@ -13,11 +13,11 @@ export const COURSES = [
   { code: 'ATC', name: 'Aircraft Technician Course' },
 ];
 
-// Exams on 0-base, everything else on 50-base. Every other course is 50-base throughout.
-const ZERO_BASE_ON_EXAMS = new Set(['BSAE', "PRE-ENG'G"]);
+// These read a paper's grade_base_ae (sql/145). Everyone else reads its grade_base.
+const ENGINEERING = new Set(['BSAE', "PRE-ENG'G"]);
 
-export function zeroBaseOnExams(course) {
-  return ZERO_BASE_ON_EXAMS.has(course);
+export function isEngineeringCourse(course) {
+  return ENGINEERING.has(course);
 }
 
 const squash = s => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');

@@ -182,16 +182,15 @@ console.log('\n=== grade base (sql/138) ===');
     && gradeVerdict({ passed: true, base: 50 }, { showBase: true }) === 'Passed · 50-base');
 
   {
-    const exam = { title: 'Look-alike Midterm Examination', kind: 'exam', grade_base: 50 };
-    const quiz = { title: 'Look-alike Quiz 1', kind: 'exam', grade_base: 0 };
-    const task = { title: 'Look-alike Assignment 2', kind: 'exam', grade_base: 0 };
-    const seat = { title: 'Look-alike Activity', kind: 'seatwork', grade_base: 0 };
+    const exam = { title: 'Look-alike Midterm Examination', grade_base: 50, grade_base_ae: 0 };
+    const flipped = { title: 'Look-alike Quiz 1', grade_base: 0, grade_base_ae: 50 };
     for (const c of ['BSAE', "PRE-ENG'G"]) {
-      check(`${c}: 0-base on an exam, whatever the paper says`, gradeBaseFor(exam, c) === 0);
-      check(`${c}: 50-base on a quiz, an assignment and a seatwork`, [quiz, task, seat].every(p => gradeBaseFor(p, c) === 50));
+      check(`${c} reads the paper's BSAE setting`, gradeBaseFor(exam, c) === 0 && gradeBaseFor(flipped, c) === 50);
     }
-    check('another course: 50-base on all of them', [exam, quiz, task, seat].every(p => gradeBaseFor(p, 'BSAMT') === 50));
-    check('no course yet: the paper decides', gradeBaseFor(exam, null) === 50 && gradeBaseFor(quiz, undefined) === 0);
+    check('another course reads the other setting', gradeBaseFor(exam, 'BSAMT') === 50 && gradeBaseFor(flipped, 'BSTM') === 0);
+    check('no course yet counts as other courses', gradeBaseFor(exam, null) === 50 && gradeBaseFor(flipped, undefined) === 0);
+    check('a paper from before the second setting has one base for all', gradeBaseFor({ grade_base: 50 }, 'BSAE') === 50);
+    check('no paper at all is 0-base', gradeBaseFor(undefined, 'BSAE') === 0 && gradeBaseFor(undefined, 'BSAMT') === 0);
     const same = withGradeBases(
       [{ exam_id: 'x', student_id: 'ae', score: 30, total_items: 60 }, { exam_id: 'x', student_id: 'amt', score: 30, total_items: 60 }],
       [{ id: 'x', ...exam }], id => ({ ae: 'BSAE', amt: 'BSAMT' })[id]);

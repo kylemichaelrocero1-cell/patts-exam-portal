@@ -1,6 +1,6 @@
 // Course spellings and the roster CSV's course column.
 //   npm run test:courses
-import { COURSES, courseCode, zeroBaseOnExams } from '../courses.js';
+import { COURSES, courseCode, isEngineeringCourse } from '../courses.js';
 import { parseStudentCSV } from '../studentCsv.js';
 
 let pass = 0, fail = 0;
@@ -14,8 +14,8 @@ check('every code and full name reads as itself', COURSES.every(c => courseCode(
 check("the class record's spellings", courseCode("PRE-ENG'G") === "PRE-ENG'G" && courseCode('BSAvTech') === 'BSAvTech' && courseCode('BSAirTrans') === 'BSAirTrans');
 check('case and spaces do not matter', courseCode(' bsae ') === 'BSAE' && courseCode('pre eng') === "PRE-ENG'G" && courseCode('bs air transportation') === 'BSAirTrans');
 check('a course not on the list is refused', courseCode('BSCS') === null && courseCode('') === null && courseCode(null) === null);
-check('only BSAE and Pre-Engineering are 0-base on exams',
-  COURSES.filter(c => zeroBaseOnExams(c.code)).map(c => c.code).join() === "BSAE,PRE-ENG'G");
+check('only BSAE and Pre-Engineering read the BSAE setting',
+  COURSES.filter(c => isEngineeringCourse(c.code)).map(c => c.code).join() === "BSAE,PRE-ENG'G");
 
 console.log('\n=== THE CSV COLUMN ===');
 const H = 'full_name,student_email,student_id,section,course';

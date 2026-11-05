@@ -9,8 +9,7 @@
 // downloaded by every student sitting a paper of plain multiple choice.
 
 import { isTextAnswer, textAnswerKey } from './textAnswer.js';
-import { zeroBaseOnExams } from './courses.js';
-import { paperNoun } from './paperNoun.js';
+import { isEngineeringCourse } from './courses.js';
 
 /** Is this item worked rather than picked? */
 export function isWorkedSolution(q) {
@@ -47,14 +46,14 @@ export function gradeBaseOf(x) {
 }
 
 /**
- * The base one student sees one paper on. The course decides: BSAE and
- * PRE-ENG'G are 0-base on exams and 50-base on quizzes, assignments and
- * seatworks; every other course is 50-base. A student with no course set yet
- * follows the paper's own setting.
+ * The base one student sees one paper on. A paper sets two (sql/145): one for
+ * BSAE and PRE-ENG'G students, and one for everyone else, which includes a
+ * student with no course set.
  */
 export function gradeBaseFor(paper, course) {
-  if (!course) return gradeBaseOf(paper);
-  return zeroBaseOnExams(course) && paperNoun(paper) === 'Exam' ? 0 : 50;
+  return isEngineeringCourse(course)
+    ? gradeBaseOf({ grade_base: paper?.grade_base_ae ?? paper?.grade_base })
+    : gradeBaseOf(paper);
 }
 
 /**

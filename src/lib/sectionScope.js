@@ -22,6 +22,12 @@ export function splitSections(str) {
   return (str || '').split(',').map(s => s.trim()).filter(Boolean);
 }
 
+/** A student's own sections: no repeats, in reading order (Math 2 before Math 10). */
+export function studentSections(str) {
+  return [...new Set(splitSections(str))]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
 /** The sections in `str` that `held` contains, in their original order. */
 export function mySectionsOf(str, held) {
   const has = asSet(held);

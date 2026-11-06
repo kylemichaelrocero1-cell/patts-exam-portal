@@ -134,6 +134,16 @@ export function availabilityState(a, now = new Date()) {
   return 'open';
 }
 
+/** The sections that have a paper a student could start right now. */
+export function sectionsWithOpenPaper(papers, now = new Date()) {
+  const open = new Set();
+  (papers || []).forEach(p => {
+    if (!isAvailableNow(p, now)) return;
+    (p.target_section || '').split(',').map(s => s.trim()).filter(Boolean).forEach(s => open.add(s));
+  });
+  return open;
+}
+
 export function formatWindow(a) {
   const fmt = (iso) => new Date(iso).toLocaleString(undefined, {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',

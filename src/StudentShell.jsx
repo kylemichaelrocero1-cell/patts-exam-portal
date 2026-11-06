@@ -2,6 +2,7 @@ import { useState, lazy, Suspense } from 'react';
 import Icon from './components/Icon';
 import ExamList from './ExamList';
 import { formatName } from './lib/personName.js';
+import { studentSections } from './lib/sectionScope';
 
 // Lazy for the same reason as the instructor side: this pulls in
 // react-markdown + KaTeX (~600kB). A student who only ever sits exams should
@@ -29,8 +30,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
   // Every section the student is enrolled in. With more than one, a switch
   // sits under the header: picking a section used to be final until the
   // student logged out and back in.
-  const sections = [...new Set(String(student.section || '').split(',').map(s => s.trim()).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const sections = studentSections(student.section);
   if (selectedSection && !sections.includes(selectedSection)) sections.unshift(selectedSection);
 
   return (

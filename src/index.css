@@ -1095,6 +1095,8 @@ input:checked + .slider::before { transform: translateX(26px); }
   .lesson-pdf { height: 60vh; min-height: 320px; }
 }
 
+.lesson-frame { display: block; width: 100%; border: 0; background: var(--surface); }
+
 /* KaTeX display equations can overflow on phones — let them scroll */
 .lesson-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
 
@@ -2113,9 +2115,10 @@ input:not([type='checkbox']):not([type='radio']):focus, textarea:focus, select:f
 .tile-steel, .tile-steel:hover:not(:disabled) { background: linear-gradient(150deg, #2C6FBC 0%, #1E4A82 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 16px 26px -14px rgba(30,74,130,.8); }
 .tile-deep, .tile-deep:hover:not(:disabled)   { background: linear-gradient(150deg, #0E2F58 0%, #061829 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.1), 0 16px 26px -14px rgba(6,24,41,.8); }
 .tile-blue, .tile-blue:hover:not(:disabled)   { background: linear-gradient(150deg, #3A7BC8 0%, #1F5AA6 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.2), 0 16px 26px -14px rgba(31,90,166,.8); }
-.tile-chip { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+.tile-chip { flex: none !important; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgba(255,255,255,.18); box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
 .tile-go { position: absolute; top: 14px; right: 14px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.2); transition: background var(--t-1); }
-.tile-name { position: relative; z-index: 1; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; padding-right: 6px; }
+.tile-open { position: relative; z-index: 1; align-self: flex-start; flex: none !important; margin-top: 6px; padding: 2px 9px; border-radius: 999px; background: #fff; color: var(--navy); font-size: 11.5px; font-weight: 600; line-height: 1.5; }
+.tile-name { flex: none !important; position: relative; z-index: 1; font-size: 16px; line-height: 1.25; overflow-wrap: anywhere; padding-right: 6px; }
 .tile-ghost { position: absolute; right: -12px; bottom: -16px; opacity: .13; pointer-events: none; }
 .tile-gold .tile-chip, .tile-gold .tile-go { background: rgba(255,255,255,.32); }
 @media (hover: hover) {

@@ -5,8 +5,9 @@
 //   npm run test:sections-scope
 
 import {
-  splitSections, mySectionsOf, otherSectionsOf, mergeSections,
+  splitSections, mySectionsOf, otherSectionsOf, mergeSections, studentSections,
 } from '../sectionScope.js';
+import { sectionsWithOpenPaper } from '../assessmentsCore.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -118,6 +119,24 @@ console.log('\n=== the one-directional guarantee ===');
   check('no edit of any shape can drop a section the instructor does not hold',
     lost.length === 0, lost.join(' | '));
 }
+
+// A student reaches every section they are in, open paper or not.
+check('all of a student\'s sections, sorted, no repeats',
+  eq(studentSections('Math 10, Esci 316 -2,, Math 2, Math 10'), ['Esci 316 -2', 'Math 2', 'Math 10']));
+check('no sections is an empty list', eq(studentSections(''), []) && eq(studentSections(null), []));
+
+const NOW = new Date('2026-11-06T10:00:00Z');
+const open = sectionsWithOpenPaper([
+  { is_open: true, target_section: 'Math 117 -2A, Esci 316 -2' },
+  { is_open: true, target_section: 'Later', opens_at: '2026-11-07T00:00:00Z' },
+  { is_open: true, target_section: 'Over', closes_at: '2026-11-05T00:00:00Z' },
+  { is_open: false, target_section: 'Closed' },
+  { is_open: true, target_section: null },
+], NOW);
+check('each section of an open paper is marked', open.has('Math 117 -2A') && open.has('Esci 316 -2'));
+check('a paper not yet started, finished or closed marks nothing',
+  !open.has('Later') && !open.has('Over') && !open.has('Closed'));
+check('no papers marks nothing', sectionsWithOpenPaper(null).size === 0);
 
 console.log(`\n${fail ? 'FAILED' : 'OK'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

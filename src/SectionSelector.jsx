@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react';
-import { selectAssessments, isAvailableNow, availabilityState } from './lib/assessments';
+import { useState, useEffect, useMemo } from 'react';
+import { selectAssessments } from './lib/assessments';
+import { sectionsWithOpenPaper } from './lib/assessmentsCore';
+import { studentSections } from './lib/sectionScope';
 import { formatName, givenName } from './lib/personName.js';
 import Icon from './components/Icon';
 
@@ -19,48 +21,24 @@ function greeting() {
 }
 
 export default function SectionSelector({ student, onSelect, onLogout }) {
-  const [sections, setSections] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
+  // Every section they are enrolled in, whether or not a paper is open: lessons,
+  // seatwork, scores and past papers to review all live behind this screen.
+  const sections = useMemo(() => studentSections(student.section), [student.section]);
+  const [openSections, setOpenSections] = useState(() => new Set());
 
-  const enrolledSections = student.section
-    ? student.section.split(',').map(s => s.trim()).filter(Boolean)
-    : [];
-
+  // Only a hint, so that on exam day a student in several sections can see which
+  // one to enter. Nothing waits for it, and if it fails the tiles still work.
   useEffect(() => {
-    async function fetchSections() {
-      try {
-        // Through the assessments reader, not the legacy exams table: mock
-        // exams exist only in assessments, so querying exams meant a section
-        // whose only material is mock exams — Pre-Boards PATTS — never showed
-        // up here, and the student could not get past this screen.
-        const data = await selectAssessments(q => q.eq('is_open', true));
-        if (data) {
-          const openSections = new Set();
-          data.forEach(e => {
-            // A paper scheduled for later still counts: the section should be
-            // reachable so the student can see what is coming.
-            if (!isAvailableNow(e) && availabilityState(e) !== 'scheduled') return;
-            if (e.target_section)
-              e.target_section.split(',').map(s => s.trim()).filter(Boolean).forEach(s => openSections.add(s));
-          });
-          const enrolled = student.section
-            ? student.section.split(',').map(s => s.trim()).filter(Boolean)
-            : [];
-          setSections(enrolled.filter(s => openSections.has(s)).sort());
-        }
-      } catch {
-        setFetchError(true);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    fetchSections();
-  }, [retryCount, student.section]);
+    if (sections.length < 2) return undefined;
+    let cancelled = false;
+    selectAssessments(q => q.eq('is_open', true))
+      .then(papers => { if (!cancelled) setOpenSections(sectionsWithOpenPaper(papers)); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sections.length]);
 
   // One section to choose from is no choice: go straight in.
-  const onlySection = !isLoading && !fetchError && sections.length === 1 ? sections[0] : null;
+  const onlySection = sections.length === 1 ? sections[0] : null;
   useEffect(() => {
     if (onlySection) onSelect(onlySection);
   }, [onlySection, onSelect]);
@@ -83,16 +61,9 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
       </header>
 
       <div className="student-main home-wrap">
-        {isLoading || onlySection ? (
+        {onlySection ? (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-3)' }}>
-            Loading sections…
-          </div>
-        ) : fetchError ? (
-          <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-            <p style={{ margin: '0 0 12px', color: 'var(--danger)', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><Icon name="alert" size={17} /> Could not connect to the server.</p>
-            <button className="btn sm" onClick={() => { setFetchError(false); setIsLoading(true); setRetryCount(c => c + 1); }} style={{ width: 'auto' }}>
-              Retry
-            </button>
+            Loading…
           </div>
         ) : sections.length > 0 ? (
           <>
@@ -109,6 +80,7 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
                     <span className="tile-chip"><Icon name={look.icon} size={20} /></span>
                     <span className="tile-go"><Icon name="arrow-right" size={15} /></span>
                     <span className="tile-name">{sec}</span>
+                    {openSections.has(sec) && <span className="tile-open">Paper open</span>}
                     <Icon className="tile-ghost" name={look.icon} size={96} strokeWidth={1.1} />
                   </button>
                 );
@@ -117,11 +89,9 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
           </>
         ) : (
           <div className="card" style={{ padding: '24px 20px', textAlign: 'center' }}>
-            <p style={{ margin: 0, color: 'var(--text-2)', fontWeight: 600, fontSize: 15 }}>No open exams</p>
+            <p style={{ margin: 0, color: 'var(--text-2)', fontWeight: 600, fontSize: 15 }}>No section yet</p>
             <p style={{ margin: '6px 0 0', color: 'var(--text-3)', fontSize: 13.5 }}>
-              {enrolledSections.length === 0
-                ? 'Your account has no section yet. Ask your instructor to add you.'
-                : 'Wait for your instructor to open one.'}
+              Ask your instructor to add you.
             </p>
           </div>
         )}

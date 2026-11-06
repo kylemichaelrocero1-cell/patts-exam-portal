@@ -8,6 +8,9 @@ import {
   isMissingColumnError, normalizeLessonRow, isPdfLesson,
   validateLessonFile, lessonFilePath, storagePathFromUrl, formatFileSize,
   makeLessonReader, withMaterial,
+  isInteractiveLesson, validateInteractiveFile, MAX_INTERACTIVE_FILE_BYTES, FILE_MATERIALS,
+  needsInteractiveMigration, buildLessonDocument, readLessonMessage,
+  INTERACTIVE_SANDBOX, INTERACTIVE_CSP, MAX_FRAME_HEIGHT,
 } from '../lessonMaterial.js';
 
 let pass = 0, fail = 0;
@@ -49,6 +52,53 @@ check('pdf with a file', isPdfLesson({ material_type: 'pdf', file_url: 'https://
 // render an empty viewer — it falls back to whatever was typed.
 check('pdf without a file is not a pdf lesson', !isPdfLesson({ material_type: 'pdf', file_url: null }));
 check('typed is never a pdf lesson', !isPdfLesson({ material_type: 'typed', file_url: 'x.pdf' }));
+
+console.log('\n=== INTERACTIVE LESSONS ===');
+check('interactive survives normalisation',
+  normalizeLessonRow({ material_type: 'interactive', file_url: 'u' }).material_type === 'interactive');
+check('an interactive lesson with a file', isInteractiveLesson({ material_type: 'interactive', file_url: 'u' }));
+check('interactive without a file is not one', !isInteractiveLesson({ material_type: 'interactive', file_url: null }));
+check('a pdf is not interactive', !isInteractiveLesson({ material_type: 'pdf', file_url: 'u' }));
+check('interactive is not a pdf', !isPdfLesson({ material_type: 'interactive', file_url: 'u' }));
+check('html passes', validateInteractiveFile({ name: 'L13.html', type: 'text/html', size: 50000 }) === null);
+check('html by extension', validateInteractiveFile({ name: 'L13.HTM', type: '', size: 50000 }) === null);
+check('a pdf is not a page', /Only an .html/.test(validateInteractiveFile({ name: 'a.pdf', type: 'application/pdf', size: 10 })));
+check('an oversize page is refused', /limit is/.test(validateInteractiveFile({ name: 'a.html', type: 'text/html', size: MAX_INTERACTIVE_FILE_BYTES + 1 })));
+check('nothing chosen is refused', typeof validateInteractiveFile(null) === 'string');
+check('a page keeps its extension', lessonFilePath('MATH117 L13.html', 's', 'html') === 's-MATH117-L13.html', lessonFilePath('MATH117 L13.html', 's', 'html'));
+check('each kind uploads under its own type',
+  FILE_MATERIALS.pdf.contentType === 'application/pdf' && FILE_MATERIALS.interactive.contentType === 'text/html');
+check('the missing migration is recognised on the row', needsInteractiveMigration(
+  { code: '23514', message: 'new row for relation "lessons" violates check constraint "lessons_material_type_check"' }));
+check('the missing migration is recognised on the file', needsInteractiveMigration(
+  { statusCode: '415', message: 'mime type text/html is not supported' }));
+// A refusal must stay a refusal, not read as "run this script".
+check('permission denied is not the missing migration', !needsInteractiveMigration(
+  { code: '42501', message: 'new row violates row-level security policy' }));
+check('another constraint is not the missing migration', !needsInteractiveMigration(
+  { code: '23514', message: 'violates check constraint "lessons_title_check"' }));
+
+console.log('\n=== THE SANDBOX ===');
+// The line everything else rests on. allow-same-origin with srcdoc would give
+// an uploaded page the portal's own origin and the student's session.
+check('scripts only', INTERACTIVE_SANDBOX === 'allow-scripts');
+check('no outgoing requests', /default-src 'none'/.test(INTERACTIVE_CSP) && !/connect-src/.test(INTERACTIVE_CSP));
+check('no forms', /form-action 'none'/.test(INTERACTIVE_CSP));
+const built = buildLessonDocument('<!doctype html><html><head><title>T</title></head><body>hi</body></html>');
+check('the policy comes before the page', built.indexOf('Content-Security-Policy') < built.indexOf('<title>'));
+check('the page is kept whole', built.includes('<body>hi</body>'));
+check('the document starts with a doctype', built.startsWith('<!doctype html>'));
+check('nothing to show is still a document', buildLessonDocument(null).startsWith('<!doctype html>'));
+
+console.log('\n=== MESSAGES FROM THE FRAME ===');
+check('height', readLessonMessage({ type: 'lesson-height', height: 812.4 }).value === 813);
+check('a huge height is capped', readLessonMessage({ type: 'lesson-height', height: 1e9 }).value === MAX_FRAME_HEIGHT);
+check('a tiny height is raised', readLessonMessage({ type: 'lesson-height', height: -5 }).value === 120);
+check('scroll', readLessonMessage({ type: 'lesson-scroll', top: 40 }).value === 40);
+check('a string height is ignored', readLessonMessage({ type: 'lesson-height', height: '900' }) === null);
+check('NaN is ignored', readLessonMessage({ type: 'lesson-height', height: NaN }) === null);
+check('an unknown message is ignored', readLessonMessage({ type: 'navigate', to: 'https://x' }) === null);
+check('a non-object is ignored', readLessonMessage('lesson-height') === null && readLessonMessage(null) === null);
 
 console.log('\n=== FILE VALIDATION ===');
 check('a real pdf passes', validateLessonFile(

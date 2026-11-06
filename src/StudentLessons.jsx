@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import Icon from './components/Icon';
 import LessonContent from './components/LessonContent';
+import InteractiveLesson from './components/InteractiveLesson';
 import { supabase } from './supabase';
 import { homeReads } from './lib/studentHome';
 import { lessonVisibleTo } from './lib/lessonMarkdown';
 import {
-  LESSON_COLUMNS_STUDENT, makeLessonReader, isPdfLesson, formatFileSize,
+  LESSON_COLUMNS_STUDENT, makeLessonReader, isPdfLesson, isInteractiveLesson, formatFileSize,
 } from './lib/lessonMaterial';
 
 // One reader per module — see LessonsManager.jsx. Falls back to the
@@ -94,27 +95,34 @@ export default function StudentLessons({ student, selectedSection }) {
   // ── Reading view ───────────────────────────────────────────────────
   if (open) {
     const done = !!progress[open.id]?.completed_at;
+    const interactive = isInteractiveLesson(open);
+    const hasFile = isPdfLesson(open) || interactive;
     return (
-      // A PDF page needs more room than a column of prose does.
-      <div style={{ maxWidth: isPdfLesson(open) ? 960 : 780, margin: '0 auto' }}>
+      // A PDF page or a graph needs more room than a column of prose does.
+      <div style={{ maxWidth: hasFile ? 960 : 780, margin: '0 auto' }}>
         <button className="btn ghost sm" style={{ width: 'auto', marginBottom: 18 }} onClick={() => setOpen(null)}>
           <Icon name="arrow-left" size={14} /> All lessons
         </button>
 
-        <div className="card" style={{ padding: '28px 30px' }}>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 27, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
+        <div className="card" style={{ padding: interactive ? '16px 0 0' : '28px 30px', overflow: interactive ? 'hidden' : undefined }}>
+          <div style={interactive ? { padding: '0 16px' } : undefined}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: interactive ? 22 : 27, letterSpacing: '-0.02em', margin: '0 0 6px' }}>
             {open.title}
           </h1>
           {open.published_at && (
-            <p style={{ color: 'var(--ink-4)', fontSize: 12.5, margin: '0 0 22px' }}>
+            <p style={{ color: 'var(--ink-4)', fontSize: 12.5, margin: interactive ? '0 0 10px' : '0 0 22px' }}>
               Posted {new Date(open.published_at).toLocaleDateString()}
             </p>
           )}
           {/* A typed lesson always renders (LessonContent says so when it is
-              empty); on a PDF lesson the markdown is optional notes. */}
-          {(!isPdfLesson(open) || (open.content_md || '').trim()) && (
+              empty); on a PDF or interactive lesson the markdown is optional
+              notes, and a YouTube link there becomes the video guide. */}
+          {(!hasFile || (open.content_md || '').trim()) && (
             <LessonContent markdown={open.content_md} />
           )}
+          </div>
+
+          {interactive && <InteractiveLesson url={open.file_url} title={open.title} scrollPage />}
 
           {isPdfLesson(open) && (
             <div style={{ marginTop: (open.content_md || '').trim() ? 22 : 0 }}>
@@ -235,7 +243,7 @@ export default function StudentLessons({ student, selectedSection }) {
                     background: p?.completed_at ? 'var(--ok-bg)' : 'var(--navy-tint)',
                     color: p?.completed_at ? 'var(--ok)' : 'var(--navy)',
                   }}>
-                    <Icon name={p?.completed_at ? 'check' : isPdfLesson(l) ? 'file-text' : 'book'} size={16} />
+                    <Icon name={p?.completed_at ? 'check' : isInteractiveLesson(l) ? 'sliders' : isPdfLesson(l) ? 'file-text' : 'book'} size={16} />
                   </div>
 
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -244,6 +252,7 @@ export default function StudentLessons({ student, selectedSection }) {
                       {isPdfLesson(l) && (
                         <>PDF{l.file_size ? ` · ${formatFileSize(l.file_size)}` : ''} · </>
                       )}
+                      {isInteractiveLesson(l) && <>Interactive · </>}
                       {p?.completed_at ? 'Completed' : p ? 'Opened' : 'Not started'}
                     </div>
                   </div>

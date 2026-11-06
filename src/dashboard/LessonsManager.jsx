@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
 import LessonContent from '../components/LessonContent';
+import InteractiveLesson from '../components/InteractiveLesson';
 import { supabase } from '../supabase';
 import {
   LESSON_BUCKET, LESSON_COLUMNS_INSTRUCTOR, makeLessonReader, isMissingColumnError,
-  validateLessonFile, lessonFilePath, storagePathFromUrl, formatFileSize,
-  MAX_LESSON_FILE_BYTES,
+  FILE_MATERIALS, needsInteractiveMigration, lessonFilePath, storagePathFromUrl, formatFileSize,
 } from '../lib/lessonMaterial';
 import { isMissingFunctionError } from '../lib/assessmentsCore';
 
@@ -52,6 +52,7 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
   const [materialReady, setMaterialReady] = useState(true);
   const [pendingFile, setPendingFile] = useState(null); // chosen, not yet uploaded
   const [isUploading, setIsUploading] = useState(false);
+  const [showFilePreview, setShowFilePreview] = useState(false);
 
   // Pure IO — no setState — so both the mount effect and the manual reload
   // can share it without the effect calling a state-setting function.
@@ -124,38 +125,58 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
 
   const chooseFile = (file) => {
     if (!file) return;
-    const problem = validateLessonFile(file);
+    const problem = FILE_MATERIALS[editing.material_type].validate(file);
     if (problem) return alert(problem);
     setPendingFile(file);
+    setShowFilePreview(false);
   };
+
+  // Switching kind drops a chosen file: a PDF cannot post as a page. A file
+  // already saved comes back with `keptFile` if they switch back.
+  const setMaterial = (kind) => {
+    if (kind === editing.material_type) return;
+    setEditing({ ...editing, material_type: kind });
+    setPendingFile(null);
+    setShowFilePreview(false);
+  };
+
+  // The saved file, while it still suits the kind selected. Saved as a PDF and
+  // switched to interactive, the old file is not what the lesson will show.
+  const savedLesson = editing?.id ? lessons.find(l => l.id === editing.id) : null;
+  const keptFile = savedLesson?.file_url && savedLesson.material_type === editing?.material_type
+    ? savedLesson : null;
 
   const save = async () => {
     if (!editing?.title?.trim()) return alert('Give the lesson a title.');
-    const isPdf = editing.material_type === 'pdf';
-    if (isPdf && !pendingFile && !editing.file_url) {
-      return alert('Choose the PDF to post, or switch back to a typed lesson.');
+    const fileMaterial = FILE_MATERIALS[editing.material_type] || null;
+    const isInteractive = editing.material_type === 'interactive';
+    if (fileMaterial && !pendingFile && !keptFile) {
+      return alert(`Choose the ${fileMaterial.label} to post, or switch back to a typed lesson.`);
     }
     setIsSaving(true);
 
-    let fileUrl = editing.file_url || null;
-    let fileName = editing.file_name || null;
-    let fileSize = editing.file_size ?? null;
+    let fileUrl = keptFile?.file_url || null;
+    let fileName = keptFile?.file_name || null;
+    let fileSize = keptFile?.file_size ?? null;
 
     // Upload first: if this fails there is nothing to undo, whereas saving the
     // row first would leave a lesson pointing at a file that never arrived.
-    if (isPdf && pendingFile) {
+    if (fileMaterial && pendingFile) {
       setIsUploading(true);
       const seed = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const path = `${instructorId || 'shared'}/${lessonFilePath(pendingFile.name, seed)}`;
+      const path = `${instructorId || 'shared'}/${lessonFilePath(pendingFile.name, seed, fileMaterial.extension)}`;
       const { error: upErr } = await supabase.storage.from(LESSON_BUCKET)
-        .upload(path, pendingFile, { upsert: false, contentType: 'application/pdf' });
+        .upload(path, pendingFile, { upsert: false, contentType: fileMaterial.contentType });
       setIsUploading(false);
       if (upErr) {
         setIsSaving(false);
+        if (isInteractive && needsInteractiveMigration(upErr)) {
+          return alert('Interactive lessons need sql/147_interactive_lessons.sql to be run in the Supabase SQL editor first. Nothing was saved.');
+        }
         return alert(
           /bucket|not found/i.test(upErr.message || '')
             ? 'The lesson-files bucket does not exist yet. Run sql/006_lesson_pdf_material.sql in the Supabase SQL editor, then try again.'
-            : 'Could not upload the PDF: ' + upErr.message);
+            : `Could not upload the ${fileMaterial.label}: ` + upErr.message);
       }
       fileUrl = supabase.storage.from(LESSON_BUCKET).getPublicUrl(path).data.publicUrl;
       fileName = pendingFile.name;
@@ -174,10 +195,10 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
     // A pre-migration database has none of these columns; sending them would
     // fail the whole save on a typed lesson that never needed them.
     if (materialReady) {
-      row.material_type = isPdf ? 'pdf' : 'typed';
-      row.file_url = isPdf ? fileUrl : null;
-      row.file_name = isPdf ? fileName : null;
-      row.file_size = isPdf ? fileSize : null;
+      row.material_type = fileMaterial ? editing.material_type : 'typed';
+      row.file_url = fileMaterial ? fileUrl : null;
+      row.file_name = fileMaterial ? fileName : null;
+      row.file_size = fileMaterial ? fileSize : null;
     }
 
     let error;
@@ -189,7 +210,10 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
     setIsSaving(false);
     if (error) {
       // Don't leave the upload behind for a row that was never written.
-      if (isPdf && pendingFile && fileUrl) await removeStoredFile(fileUrl);
+      if (fileMaterial && pendingFile && fileUrl) await removeStoredFile(fileUrl);
+      if (isInteractive && needsInteractiveMigration(error)) {
+        return alert('Interactive lessons need sql/147_interactive_lessons.sql to be run in the Supabase SQL editor first. Nothing was saved.');
+      }
       if (isMissingColumnError(error)) {
         setMaterialReady(false);
         return alert('Posting material as a PDF needs sql/006_lesson_pdf_material.sql to be run in the Supabase SQL editor first. The typed lesson still saves normally.');
@@ -199,8 +223,8 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
 
     // The file the lesson no longer points at: replaced, or dropped when the
     // instructor switched back to a typed lesson.
-    const stale = editing.file_url && editing.file_url !== fileUrl ? editing.file_url
-                : (!isPdf ? editing.file_url : null);
+    const stale = savedLesson?.file_url && savedLesson.file_url !== (fileMaterial ? fileUrl : null)
+      ? savedLesson.file_url : null;
     if (stale) await removeStoredFile(stale);
 
     setEditing(null);
@@ -247,7 +271,7 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-        <button className="btn sm" style={{ width: 'auto' }} onClick={() => { setEditing({ ...EMPTY }); setPendingFile(null); setShowPreview(false); }}>
+        <button className="btn sm" style={{ width: 'auto' }} onClick={() => { setEditing({ ...EMPTY }); setPendingFile(null); setShowPreview(false); setShowFilePreview(false); }}>
           <Icon name="plus" size={14} /> New lesson
         </button>
       </div>
@@ -299,6 +323,11 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
                         <Icon name="file-text" size={10} style={{ marginRight: 3 }} /> PDF
                       </span>
                     )}
+                    {l.material_type === 'interactive' && (
+                      <span className="px-pill" style={{ marginLeft: 8, fontWeight: 600 }}>
+                        <Icon name="sliders" size={10} style={{ marginRight: 3 }} /> Interactive
+                      </span>
+                    )}
                   </td>
                   <td style={{ color: 'var(--ink-2)' }}>{subjectName(l.subject_id)}</td>
                   <td>
@@ -323,7 +352,7 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
                       {l.is_published ? 'Unpublish' : 'Publish'}
                     </button>
                     <button className="btn ghost sm" style={{ width: 'auto', marginRight: 6 }}
-                      onClick={() => { setEditing({ ...l }); setPendingFile(null); setShowPreview(false); }}>
+                      onClick={() => { setEditing({ ...l }); setPendingFile(null); setShowPreview(false); setShowFilePreview(false); }}>
                       <Icon name="pencil" size={14} /> Edit
                     </button>
                     <button className="btn ghost sm" style={{ width: 'auto' }} onClick={() => remove(l)}>
@@ -373,9 +402,9 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
             <label className="label" style={{ marginTop: 14 }}>How is this posted?</label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
-                className={`btn sm ${editing.material_type === 'pdf' ? 'ghost' : ''}`}
+                className={`btn sm ${editing.material_type === 'typed' ? '' : 'ghost'}`}
                 style={{ width: 'auto' }}
-                onClick={() => setEditing({ ...editing, material_type: 'typed' })}
+                onClick={() => setMaterial('typed')}
               >
                 <Icon name="edit" size={14} /> Typed lesson
               </button>
@@ -383,9 +412,17 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
                 className={`btn sm ${editing.material_type === 'pdf' ? '' : 'ghost'}`}
                 style={{ width: 'auto', opacity: materialReady ? 1 : 0.5 }}
                 disabled={!materialReady}
-                onClick={() => setEditing({ ...editing, material_type: 'pdf' })}
+                onClick={() => setMaterial('pdf')}
               >
                 <Icon name="file-text" size={14} /> PDF file
+              </button>
+              <button
+                className={`btn sm ${editing.material_type === 'interactive' ? '' : 'ghost'}`}
+                style={{ width: 'auto', opacity: materialReady ? 1 : 0.5 }}
+                disabled={!materialReady}
+                onClick={() => setMaterial('interactive')}
+              >
+                <Icon name="sliders" size={14} /> Interactive
               </button>
               {!materialReady && (
                 <span style={{ fontSize: 12.5, color: 'var(--ink-4)', alignSelf: 'center' }}>
@@ -394,54 +431,78 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
               )}
             </div>
 
-            {editing.material_type === 'pdf' && (
-              <div className="card" style={{ padding: 14, marginTop: 10, background: 'var(--surface-2)' }}>
-                {(pendingFile || editing.file_url) ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <Icon name="file-text" size={18} color="var(--navy)" />
-                    <div style={{ flex: '1 1 200px', minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13.5, overflowWrap: 'anywhere' }}>
-                        {pendingFile ? pendingFile.name : editing.file_name || 'Posted PDF'}
+            {FILE_MATERIALS[editing.material_type] && (() => {
+              const material = FILE_MATERIALS[editing.material_type];
+              const isPage = editing.material_type === 'interactive';
+              const picker = (
+                <input type="file" accept={material.accept} style={{ display: 'none' }}
+                  onChange={e => { chooseFile(e.target.files?.[0]); e.target.value = ''; }} />
+              );
+              return (
+                <div className="card" style={{ padding: 14, marginTop: 10, background: 'var(--surface-2)' }}>
+                  {(pendingFile || keptFile) ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                      <Icon name={isPage ? 'sliders' : 'file-text'} size={18} color="var(--navy)" />
+                      <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13.5, overflowWrap: 'anywhere' }}>
+                          {pendingFile ? pendingFile.name : keptFile.file_name || `Posted ${material.label}`}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>
+                          {formatFileSize(pendingFile ? pendingFile.size : keptFile.file_size)}
+                          {pendingFile ? ' · uploads when you save' : ''}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--ink-4)' }}>
-                        {formatFileSize(pendingFile ? pendingFile.size : editing.file_size)}
-                        {pendingFile ? ' · uploads when you save' : ''}
-                      </div>
+                      {isPage && (
+                        <button className="btn ghost sm" style={{ width: 'auto' }} onClick={() => setShowFilePreview(p => !p)}>
+                          <Icon name={showFilePreview ? 'eye-off' : 'eye'} size={13} /> {showFilePreview ? 'Hide' : 'Try it'}
+                        </button>
+                      )}
+                      {!isPage && !pendingFile && keptFile && (
+                        <a className="btn ghost sm" style={{ width: 'auto' }}
+                          href={keptFile.file_url} target="_blank" rel="noopener noreferrer">
+                          <Icon name="external" size={13} /> View
+                        </a>
+                      )}
+                      <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', margin: 0 }}>
+                        <Icon name="upload" size={13} /> {pendingFile ? 'Choose another' : 'Replace'}
+                        {picker}
+                      </label>
+                      {pendingFile && (
+                        <button className="btn ghost sm" style={{ width: 'auto' }} onClick={() => { setPendingFile(null); setShowFilePreview(false); }}>
+                          <Icon name="x" size={13} /> Cancel
+                        </button>
+                      )}
                     </div>
-                    {!pendingFile && editing.file_url && (
-                      <a className="btn ghost sm" style={{ width: 'auto' }}
-                        href={editing.file_url} target="_blank" rel="noopener noreferrer">
-                        <Icon name="external" size={13} /> View
-                      </a>
-                    )}
-                    <label className="btn ghost sm" style={{ width: 'auto', cursor: 'pointer', margin: 0 }}>
-                      <Icon name="upload" size={13} /> {pendingFile ? 'Choose another' : 'Replace'}
-                      <input type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
-                        onChange={e => { chooseFile(e.target.files?.[0]); e.target.value = ''; }} />
+                  ) : (
+                    <label style={{ display: 'block', cursor: 'pointer', textAlign: 'center', padding: '18px 12px' }}>
+                      <Icon name="upload" size={22} color="var(--ink-4)" />
+                      <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 8 }}>Choose a {material.label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 2 }}>
+                        Up to {formatFileSize(material.maxBytes)}
+                        {isPage ? ' · one self-contained page' : ' · students can read it in the portal or download it'}
+                      </div>
+                      {picker}
                     </label>
-                    {pendingFile && (
-                      <button className="btn ghost sm" style={{ width: 'auto' }} onClick={() => setPendingFile(null)}>
-                        <Icon name="x" size={13} /> Cancel
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <label style={{ display: 'block', cursor: 'pointer', textAlign: 'center', padding: '18px 12px' }}>
-                    <Icon name="upload" size={22} color="var(--ink-4)" />
-                    <div style={{ fontWeight: 600, fontSize: 13.5, marginTop: 8 }}>Choose a PDF</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-4)', marginTop: 2 }}>
-                      Up to {formatFileSize(MAX_LESSON_FILE_BYTES)} · students can read it in the portal or download it
+                  )}
+                  {isPage && showFilePreview && (pendingFile || keptFile) && (
+                    <div style={{ marginTop: 12, background: 'var(--surface)', borderRadius: 'var(--r-lg)', overflow: 'hidden' }}>
+                      <InteractiveLesson
+                        key={pendingFile ? pendingFile.name + pendingFile.size : keptFile.file_url}
+                        file={pendingFile || undefined}
+                        url={pendingFile ? undefined : keptFile.file_url}
+                        title={editing.title || 'Lesson preview'}
+                      />
                     </div>
-                    <input type="file" accept="application/pdf,.pdf" style={{ display: 'none' }}
-                      onChange={e => { chooseFile(e.target.files?.[0]); e.target.value = ''; }} />
-                  </label>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
               <label className="label" style={{ margin: 0 }}>
-                {editing.material_type === 'pdf' ? 'Notes — markdown, optional, shown above the PDF' : 'Content — markdown'}
+                {editing.material_type === 'pdf' ? 'Notes — markdown, optional, shown above the PDF'
+                  : editing.material_type === 'interactive' ? 'Notes — markdown, optional, shown above the page. A YouTube link embeds the video.'
+                  : 'Content — markdown'}
               </label>
               <button className="btn ghost sm" style={{ width: 'auto' }} onClick={() => setShowPreview(p => !p)}>
                 <Icon name={showPreview ? 'edit' : 'eye'} size={14} /> {showPreview ? 'Write' : 'Preview'}
@@ -458,7 +519,7 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
                 style={{ minHeight: 260, fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.55, resize: 'vertical' }}
                 value={editing.content_md || ''}
                 onChange={e => setEditing({ ...editing, content_md: e.target.value })}
-                placeholder={editing.material_type === 'pdf'
+                placeholder={editing.material_type !== 'typed'
                   ? 'Optional — what to read, what to focus on, when it is due.'
                   : '# Heading\n\nText with **bold**, a formula $E = mc^2$, and a list:\n\n- point one\n- point two\n\nPaste a YouTube link on its own line to embed it.'}
               />

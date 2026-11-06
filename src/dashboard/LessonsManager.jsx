@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import Icon from '../components/Icon';
 import LessonContent from '../components/LessonContent';
 import InteractiveLesson from '../components/InteractiveLesson';
+import SectionPicker from '../components/SectionPicker';
 import { supabase } from '../supabase';
 import {
   LESSON_BUCKET, LESSON_COLUMNS_INSTRUCTOR, makeLessonReader, isMissingColumnError,
@@ -392,10 +393,13 @@ export default function LessonsManager({ instructorId, instructorSections = [], 
                 </select>
               </div>
               <div style={{ flex: '1 1 240px' }}>
-                <label className="label">Sections — comma separated, blank = everyone</label>
-                <input className="input" value={editing.target_section || ''}
-                  onChange={e => setEditing({ ...editing, target_section: e.target.value })}
-                  placeholder={instructorSections.slice(0, 2).join(', ') || 'AENG 426, AENG 223L'} />
+                <label className="label">Sections — none = everyone</label>
+                <SectionPicker
+                  value={editing.target_section || ''}
+                  onChange={next => setEditing({ ...editing, target_section: next })}
+                  options={instructorSections}
+                  placeholder="Everyone"
+                />
               </div>
             </div>
 

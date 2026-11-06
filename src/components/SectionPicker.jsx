@@ -80,6 +80,8 @@ export default function SectionPicker({
     if (!s || s.includes(',') || selected.includes(s)) { setDraft(''); return; }
     onChange(join([...selected, s]));
     setDraft('');
+    // A new chip can push the button onto the next row; the panel follows it.
+    requestAnimationFrame(place);
   };
 
   const remove = (sec) => onChange(join(selected.filter(s => s !== sec)));

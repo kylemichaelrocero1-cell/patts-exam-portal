@@ -1154,6 +1154,50 @@ input:checked + .slider::before { transform: translateX(26px); }
   box-shadow: 0 0 0 3px var(--navy-50);
   outline: none;
 }
+/* What is being typed should be plain to see. MathLive's defaults are a
+   pale blue for everything: the caret, the empty slots of a fraction, the
+   selection and the box round the part holding the caret all looked alike.
+   Now the caret and the slots are the portal's navy, a selected slot is a
+   clear tint, and the box round the part being typed (the exponent, the
+   denominator) is a faint wash — enough to say where the caret is. */
+.math-field-host math-field {
+  --caret-color: var(--navy-500);
+  --selection-background-color: var(--navy-100);
+  --selection-color: var(--ink-1);
+  --contains-highlight-background-color: rgba(30, 74, 130, 0.07);
+  --placeholder-color: var(--navy-500);
+  --placeholder-opacity: 0.55;
+  --smart-fence-color: var(--ink-4);
+  --smart-fence-opacity: 0.45;
+}
+/* Room for a fraction from the start. The box used to grow by 17–20px the
+   moment a fraction (dy/dx) went in, pushing every line below it down; it
+   is now that tall when empty, so typing one moves nothing. (On a touch
+   screen the keyboard toggle already makes the box this tall.) */
+.math-field-host math-field { min-height: 74px; }
+/* Where the caret is, when it is in an exponent, a fraction or a root: a tag
+   on the field's top edge (MathField.jsx). Absolute, so showing it never
+   moves anything on the page. */
+.math-field-note {
+  position: absolute; top: -9px; right: 10px; z-index: 1;
+  max-width: calc(100% - 20px);
+  padding: 1px 8px;
+  font-size: 11px; font-weight: 600; line-height: 16px;
+  color: #fff; background: var(--navy-500);
+  border-radius: 999px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none;
+}
+/* The maths keyboard's own layer (MathField.jsx): fixed over the page, so
+   opening and closing it never changes the page's height. The room it needs
+   is kept below the page instead, set once while a maths field is on it. */
+#patts-keyboard {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 105;
+  --keyboard-padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+body { padding-bottom: var(--patts-keyboard-room, 0px); }
 /* The menu is clutter for a student — it only offers things like "export as
    MathML". The KEYBOARD TOGGLE is not: on a phone it is the one control that
    summons the maths keyboard back after it has been dismissed, so it is hidden
@@ -1298,7 +1342,7 @@ input:checked + .slider::before { transform: translateX(26px); }
 .ws-answer .math-field-host math-field {
   font-size: 22px;
   padding: 14px 16px;
-  min-height: 58px;
+  min-height: 88px;   /* a fraction fits without the box growing */
 }
 /* A word answer (sql/046). 18px, not the field's 14: below 16px iOS zooms
    the whole page in when the box is tapped. Three classes deep so it outranks

@@ -10,6 +10,7 @@ import { rememberField, FUNCTION_KEYBOARD } from '../lib/mathPalette.js';
 import { displayLatex } from '../lib/mathDisplay.js';
 import { canonicalPrimes } from '../lib/primeTyping.js';
 import { keepInView } from '../lib/keepInView.js';
+import { attachTypingRules, caretContext, placeNote } from '../lib/mathTyping.js';
 
 // A single line of maths, typed the way Google Docs or Symbolab let you type
 // it: 1/2 opens a fraction, ^ raises an exponent, \sqrt builds a radical, and
@@ -37,6 +38,36 @@ import { keepInView } from '../lib/keepInView.js';
 
 let loading = null;
 let keyboardSet = false;
+
+// THE MATHS KEYBOARD NEVER RESIZES THE PAGE. Left in <body>, MathLive pads
+// the body by the keyboard's height when it opens and takes the padding away
+// when it closes. Near the end of a paper that shrank the page under the
+// student, and the browser snapped the view up by the keyboard's height —
+// "the whole screen moves when the keyboard goes down or up". The keyboard
+// now lives in its own fixed layer (#patts-keyboard), which MathLive does
+// not pad for, and the room it needs is added below the page the first time
+// it opens and kept while any maths field is on the page: the page grows
+// once and never shrinks under the student.
+let fieldsMounted = 0;
+let keyboardRoom = 0;
+function keyboardHost() {
+  let host = document.getElementById('patts-keyboard');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'patts-keyboard';
+    document.body.appendChild(host);
+  }
+  return host;
+}
+function reserveKeyboardRoom(height) {
+  if (!(height > keyboardRoom)) return;
+  keyboardRoom = Math.ceil(height);
+  document.documentElement.style.setProperty('--patts-keyboard-room', `${keyboardRoom}px`);
+}
+function releaseKeyboardRoom() {
+  keyboardRoom = 0;
+  document.documentElement.style.removeProperty('--patts-keyboard-room');
+}
 function loadMathlive() {
   // A rejected promise is deliberately NOT cached. Caching one meant a single
   // failed fetch of an 800KB chunk broke the maths editor for the rest of the
@@ -77,6 +108,9 @@ export default function MathField({
   const fieldRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(null);
+  // Where the caret is, when it is not on the main line: the exponent, the
+  // denominator… shown in a small tag on the field's edge.
+  const [place, setPlace] = useState('');
 
   // Latest callbacks, so the listeners below can be attached once and still
   // call through to the current render's handlers. Written in an effect rather
@@ -102,9 +136,17 @@ export default function MathField({
         try {
           window.mathVirtualKeyboard.layouts = ['numeric', FUNCTION_KEYBOARD, 'symbols', 'alphabetic', 'greek'];
         } catch { /* keep the default keyboard */ }
+        try { window.mathVirtualKeyboard.container = keyboardHost(); } catch { /* stays in <body> */ }
         // When the keyboard slides up, the field being typed in may now be
-        // under it: brought just clear of it, and only then.
+        // under it: room is made below the page, and the field brought just
+        // clear of the keyboard, and only then. When it slides DOWN nothing
+        // moves: a student who scrolled up to reread the question stays
+        // there.
         window.mathVirtualKeyboard.addEventListener?.('geometrychange', () => {
+          const kb = window.mathVirtualKeyboard;
+          if (!kb?.visible) return;
+          const h = kb.boundingRect?.height || 0;
+          if (h > 0) reserveKeyboardRoom(h);
           const active = document.activeElement;
           if (active?.tagName === 'MATH-FIELD') keepInView(active);
         });
@@ -127,6 +169,12 @@ export default function MathField({
       // (lib/keepInView.js). The page now moves only when the field is
       // actually hidden. MathLive still scrolls the caret along inside it.
       field.onScrollIntoView = () => keepInView(field);
+      // Exponents that end where students expect, and Backspace that does
+      // not take a fraction apart (lib/mathTyping.js).
+      attachTypingRules(field);
+      const notePlace = () => setPlace(field.hasFocus?.() ? (caretContext(field)?.place || '') : '');
+      field.addEventListener('selection-change', notePlace);
+      field.addEventListener('focusout', () => setPlace(''));
       field.value = canonicalPrimes(value || '').latex;
       if (readOnly) field.readOnly = true;
 
@@ -201,7 +249,13 @@ export default function MathField({
       console.error('The maths editor could not be loaded:', err);
       if (!cancelled) setFailed(err?.message || 'unknown error');
     });
-    return () => { cancelled = true; };
+    fieldsMounted++;
+    return () => {
+      cancelled = true;
+      // The last maths field gone (the paper was submitted or left): the
+      // room kept for the keyboard goes with it.
+      if (--fieldsMounted === 0) releaseKeyboardRoom();
+    };
     // Built once. Value changes are pushed through the effect below.
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -278,6 +332,8 @@ export default function MathField({
           {placeholder || 'Loading the maths keyboard…'}
         </span>
       )}
+      {/* On the field's top edge, so it never pushes the page about. */}
+      {ready && place && <span className="math-field-note" aria-live="polite">{placeNote(place)}</span>}
     </div>
   );
 }

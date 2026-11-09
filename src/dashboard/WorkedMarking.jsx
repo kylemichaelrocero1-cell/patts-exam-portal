@@ -172,7 +172,7 @@ export default function WorkedMarking({
                           : <em style={{ color: 'var(--ink-4)', fontSize: 13 }}>blank</em>}
                         {pr && !pr.blank && (
                           <span className="ws-given-label" style={{ marginLeft: 'auto' }}>
-                            value {pr.value_ok ? '✓' : '✗'} · unit {pr.unit_ok ? '✓' : '✗'}
+                            value {pr.value_ok ? '✓' : '✗'}{pr.no_unit ? '' : ` · unit ${pr.unit_ok ? '✓' : '✗'}`}
                           </span>
                         )}
                       </div>

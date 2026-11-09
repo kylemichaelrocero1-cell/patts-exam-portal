@@ -146,6 +146,16 @@ export function quantityUnitOk(unitText, accepted) {
 const marksOf = (v, fallback) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback);
 
 /**
+ * A part that asks for a plain number, such as a slope (sql/148): no units
+ * and unit_marks 0. It is marked on its value alone, and its unit is never
+ * called wrong.
+ */
+export function hasNoUnit(part) {
+  return typeof part?.unit_marks === 'number' && part.unit_marks === 0
+    && (!Array.isArray(part?.units) || part.units.length === 0);
+}
+
+/**
  * Mark the parts. A value earns its marks when it rounds to the key at the
  * part's places; a unit earns its marks when it is an accepted unit and a
  * number was written beside it. Never quotes the key.
@@ -162,10 +172,11 @@ export function markQuantities(lines, rubric) {
     const number = blank ? null : quantityNumber(text);
     const valueOk = quantityValueOk(number, part.value, part.decimals)
       || quantityValueNear(number, part.value, part.decimals, part.exact, part.tolerance);
-    const unitOk = number !== null && quantityUnitOk(quantityUnitText(text), part.units);
+    const noUnit = hasNoUnit(part);
+    const unitOk = noUnit || (number !== null && quantityUnitOk(quantityUnitText(text), part.units));
     const marks = (valueOk ? marksOf(part.value_marks, 1) : 0) + (unitOk ? marksOf(part.unit_marks, 1) : 0);
     return { key: part.key, blank, value_ok: valueOk, unit_ok: unitOk, marks,
-             of: marksOf(part.value_marks, 1) + marksOf(part.unit_marks, 1) };
+             of: marksOf(part.value_marks, 1) + marksOf(part.unit_marks, 1), no_unit: noUnit };
   });
   const marks = parts.reduce((t, p) => t + p.marks, 0);
   const total = parts.reduce((t, p) => t + p.of, 0);

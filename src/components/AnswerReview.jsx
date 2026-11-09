@@ -108,7 +108,7 @@ export default function AnswerReview({ rows }) {
                       const full = res && Number(res.marks) >= Number(res.of);
                       const notes = !res || full || res.blank ? [] : [
                         res.value_ok ? 'value ✓' : 'value ✗',
-                        ...(res.unit_ok ? ['unit ✓'] : res.value_ok ? ['unit ✗ or missing'] : []),
+                        ...(res.no_unit ? [] : res.unit_ok ? ['unit ✓'] : res.value_ok ? ['unit ✗ or missing'] : []),
                       ];
                       return (
                         <li key={p.key} className="ws-qty-part">

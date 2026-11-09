@@ -20,7 +20,7 @@ import { PGlite } from '@electric-sql/pglite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { quantityNumber, quantityUnitText, quantityUnitKey, quantityValueOk, quantityValueNear, markQuantities,
+import { quantityNumber, quantityUnitText, quantityUnitKey, quantityValueOk, quantityValueNear, markQuantities, hasNoUnit,
          markQuantityAnswer, quantityParts, partLine, splitPartLine, isQuantity } from '../../src/lib/quantityAnswer.js';
 import { markAnswer } from '../../src/lib/workedSolution.js';
 const P = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -259,6 +259,9 @@ console.log('\n=== 123: a value within the part\'s tolerance ===');
   await x(T);
   const [v] = await q(T.slice(T.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
   ck("123 applies twice and its VERIFY row is all true", Object.values(v).every(b => b === true), J(v));
+  // The dashboard's marker is 148's from here on: a part with no unit is
+  // never called a missing unit. Marks are as 123 gives them.
+  await x(fs.readFileSync(P + '/sql/148_a_part_with_no_unit.sql', 'utf8'));
   const r = await asAnon(`SELECT public.quantity_value_near('1', '1', 0, NULL, '0.1')`);
   ck('the tolerance check is not callable from a browser', !r.ok);
 
@@ -305,6 +308,52 @@ console.log('\n=== 123: a value within the part\'s tolerance ===');
   ck('a right method a place off earns the value marks (16/16)', Number(first.marks) === 16, J(first));
   const [{ m: second }] = await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(answers[1]), J(R)]);
   ck('wrong values still earn only their units, and a part without a tolerance stays exact (4/16)', Number(second.marks) === 4, J(second));
+}
+
+console.log('\n=== 148: a part with no unit is marked on its value alone ===');
+{
+  const N = fs.readFileSync(P + '/sql/148_a_part_with_no_unit.sql', 'utf8');
+  await x(N);
+  await x(N);
+  const [v] = await q(N.slice(N.indexOf('-- VERIFY')).replace(/^--.*$/gm, '').trim());
+  ck("148 applies twice and its VERIFY row is all true", Object.values(v).every(b => b === true), J(v));
+  const r = await asAnon(`SELECT public.mark_quantities('[]'::jsonb, '{}'::jsonb)`);
+  ck('the marker is still not callable from a browser', !r.ok);
+
+  const R = { mode: 'quantity', parts: [
+    { key: 'a', value: '12', decimals: 0, units: ['m/s', 'meters per second'], value_marks: 1, unit_marks: 1 },
+    { key: 'b', value: '0.52', decimals: 2, units: [], value_marks: 2, unit_marks: 0, exact: '0.51583', tolerance: '0.001' },
+    { key: 'c', value: '-1.15', decimals: 2, value_marks: 2, unit_marks: 0 },
+    // units listed: a unit is still asked for, even at 0 marks
+    { key: 'd', value: '1.63', decimals: 2, units: ['s'], value_marks: 1, unit_marks: 0 },
+    // no units but unit_marks absent (counts as 1): as before, never earnable
+    { key: 'e', value: '3', decimals: 0, units: [], value_marks: 1 } ] };
+  ck('hasNoUnit reads only an explicit 0 with no units', R.parts.map(hasNoUnit).join() === 'false,true,true,false,false');
+  const answers = [
+    ['a) 12 m/s', 'b) 0.52', 'c) −1.15', 'd) 1.63 s', 'e) 3'],
+    ['a) 11 m/s', 'b) 0.52', 'c) -1.1547', 'd) 1.63'],
+    ['a) 12', 'b) slope = 0.5', 'c) 1.15'],
+    ['b) 0.52 m'],
+    [],
+  ];
+  for (const lines of answers) {
+    const [{ m }] = await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(lines), J(R)]);
+    const js = markQuantities(lines, R);
+    const same = m.marks === js.marks && m.of === js.total && m.reason === js.reason
+      && J(m.parts.map(p => [p.key, p.value_ok, p.unit_ok, p.no_unit, Number(p.marks)]))
+         === J(js.parts.map(p => [p.key, p.value_ok, p.unit_ok, p.no_unit, p.marks]));
+    ck(`marker and dashboard agree on ${J(lines)} (${m.marks}/${m.of}: ${m.reason})`, same, J([m, js]));
+  }
+  const mk = async lines => (await q(`SELECT public.mark_quantities($1::jsonb, $2::jsonb) m`, [J(lines), J(R)]))[0].m;
+  const one = await mk(answers[1]);
+  ck('a plain number is never called a missing unit', one.reason === 'Value wrong: a. Unit wrong or missing: d. Left blank: e.', one.reason);
+  ck('the no-unit parts earn their value marks', Number(one.marks) === 1 + 2 + 2 + 1, J(one));
+  const two = await mk(answers[2]);
+  ck('a wrong plain number is called a wrong value only', two.reason === 'Value wrong: b, c. Unit wrong or missing: a. Left blank: d, e.', two.reason);
+  const three = await mk(answers[3]);
+  ck('a unit typed on a plain number costs nothing', Number(three.marks) === 2 && three.parts[1].unit_ok === true, J(three));
+  const none = await mk(answers[4]);
+  ck('an empty answer is all blank', none.reason === 'Left blank: a, b, c, d, e.' && Number(none.marks) === 0, none.reason);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

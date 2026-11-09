@@ -214,7 +214,8 @@ export default function WorkedSolution({
                 value={typed[p.key] ?? ''}
                 onChange={e => setPart(p.key, e.target.value)}
                 readOnly={readOnly}
-                placeholder="Number and unit…"
+                // A part that asks for a plain number says so in its label (sql/148).
+                placeholder={/\bno unit\b/i.test(p.label) ? 'Number…' : 'Number and unit…'}
                 maxLength={80}
                 autoComplete="off"
                 autoCorrect="off"

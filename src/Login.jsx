@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import Icon from './components/Icon';   // PORTED: new icon component
+import { cameFromSurveyLink } from './lib/surveyInvite';
 
 const MAX_ATTEMPTS = 3;
 const LOCKOUT_SECONDS = 30;
@@ -21,6 +22,9 @@ export default function Login({ onLogin }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
 
   const isInstructor = loginMode === 'instructor';
+  // Opened from the board exam survey link: say so, or the link looks like it
+  // led nowhere. The survey opens once they are signed in.
+  const [forSurvey] = useState(cameFromSurveyLink);
   const isLocked = lockoutUntil > Date.now();
 
   useEffect(() => {
@@ -176,6 +180,15 @@ export default function Login({ onLogin }) {
           </div>
 
           <div className="login-body">
+            {forSurvey && (
+              <div className="login-survey" role="note">
+                <span className="chip chip-gold"><Icon name="message" size={18} /></span>
+                <div>
+                  <strong>Board exam survey</strong>
+                  <span>{isInstructor ? 'Sign in to see the answers' : 'Sign in to answer'}</span>
+                </div>
+              </div>
+            )}
             <div style={{ marginBottom: 14 }}>
               <label className="label">{isInstructor ? 'Faculty Email' : 'Student Email'}</label>
               <input

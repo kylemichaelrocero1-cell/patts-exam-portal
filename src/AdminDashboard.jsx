@@ -78,6 +78,7 @@ const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
 const BoardSurvey = lazy(() => import('./dashboard/BoardSurvey'));
+import { takeSurveyLanding } from './lib/surveyInvite';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -106,7 +107,8 @@ async function fetchAllRows(buildQuery) {
 
 export default function AdminDashboard({ instructorId, instructorName, onLogout }) {
   // Navigation State
-  const [activeView, setActiveView] = useState('results');
+  // Opened from the board exam survey link: its answers, not Results.
+  const [activeView, setActiveView] = useState(() => (takeSurveyLanding() ? 'survey' : 'results'));
   // A new view opens at its top. Moving on from a long scrolled list opened
   // the next one part-way down, with its heading and filters out of sight.
   const dashPanelRef = useRef(null);

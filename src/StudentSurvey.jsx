@@ -80,8 +80,10 @@ function Question({ item, a, set }) {
   );
 }
 
-export default function StudentSurvey({ student }) {
-  const [phase, setPhase] = useState('loading');   // loading | closed | form | done
+// `preview`: an instructor trying the form from the Board Survey page. Nothing
+// is read, saved or remembered.
+export default function StudentSurvey({ student, preview = false }) {
+  const [phase, setPhase] = useState(preview ? 'form' : 'loading');   // loading | closed | form | done
   const [step, setStep] = useState(0);
   const [a, setA] = useState(emptyAnswers);
   const [sending, setSending] = useState(false);
@@ -91,6 +93,7 @@ export default function StudentSurvey({ student }) {
 
   // Their answers: this browser's draft if there is one, else what was saved.
   useEffect(() => {
+    if (preview) return undefined;
     let cancelled = false;
     markSurveySeen(student.id);
     (async () => {
@@ -117,16 +120,17 @@ export default function StudentSurvey({ student }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [student.id]);
+  }, [student.id, preview]);
 
   useEffect(() => {
-    if (phase === 'form') writeDraft(student.id, { step, answers: a, at: Date.now() });
-  }, [phase, step, a, student.id]);
+    if (phase === 'form' && !preview) writeDraft(student.id, { step, answers: a, at: Date.now() });
+  }, [phase, step, a, student.id, preview]);
 
   const set = (kind, id, value) => setA(prev => ({ ...prev, [kind]: { ...prev[kind], [id]: value } }));
 
   // Saves run one after another, so an older step can never land after Submit.
   const save = final => {
+    if (preview) return Promise.resolve(null);
     const answers = cleanAnswers(a);
     const run = chain.current.then(async () => {
       try {
@@ -165,7 +169,7 @@ export default function StudentSurvey({ student }) {
       setError(isMissingFunctionError(err) ? 'The survey is not open yet.' : gateErrorMessage(err));
       return;
     }
-    writeDraft(student.id, null);
+    if (!preview) writeDraft(student.id, null);
     setPhase('done');
     toTop();
   };

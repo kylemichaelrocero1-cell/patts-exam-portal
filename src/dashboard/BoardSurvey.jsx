@@ -7,6 +7,7 @@ import {
 } from '../lib/boardSurvey.js';
 import { isMissingFunctionError } from '../lib/assessmentsCore.js';
 import { formatName } from '../lib/personName';
+import StudentSurvey from '../StudentSurvey';
 
 // Dashboard → Board Survey. What the graduates said in the board exam survey
 // (Survey tab, src/StudentSurvey.jsx): headline numbers, how well PATTS
@@ -176,6 +177,13 @@ export default function BoardSurvey() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('all');
   const [copied, setCopied] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  useEffect(() => {
+    if (!previewing) return undefined;
+    const onKey = e => { if (e.key === 'Escape') setPreviewing(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewing]);
   const link = `${window.location.origin}/?${SURVEY_PARAM}`;
 
   // Read on open and on Refresh (which bumps `reload`).
@@ -243,6 +251,18 @@ export default function BoardSurvey() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* The form exactly as a graduate sees it; nothing is saved. */}
+      {previewing && (
+        <div className="bs-preview" role="dialog" aria-modal="true" aria-label="Survey preview">
+          <div className="bs-preview-bar">
+            <span className="eyebrow" style={{ color: 'white' }}><Icon name="eye" size={14} /> Preview · not saved</span>
+            <button type="button" className="btn ghost sm" onClick={() => setPreviewing(false)}><Icon name="x" size={14} /> Close</button>
+          </div>
+          <div className="bs-preview-body">
+            <StudentSurvey student={{ id: 'preview' }} preview />
+          </div>
+        </div>
+      )}
       <div className="card bs-card">
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', justifyContent: 'space-between' }}>
           <div style={{ minWidth: 0 }}>
@@ -253,6 +273,7 @@ export default function BoardSurvey() {
             <div style={{ fontSize: 12.5, color: 'var(--ink-3)', marginTop: 4, overflowWrap: 'anywhere', fontFamily: 'var(--font-mono)' }}>{link}</div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button type="button" className="btn ghost sm" onClick={() => setPreviewing(true)}><Icon name="eye" size={14} /> Preview</button>
             <button type="button" className="btn ghost sm" onClick={copy}><Icon name="copy" size={14} /> {copied ? 'Copied' : 'Copy link'}</button>
             <button type="button" className="btn ghost sm" onClick={downloadCsv} disabled={!rows?.length}><Icon name="download" size={14} /> CSV</button>
             <button type="button" className="btn ghost sm" onClick={() => { setRows(null); setError(''); setReload(n => n + 1); }}><Icon name="refresh" size={14} /> Refresh</button>

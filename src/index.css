@@ -2350,3 +2350,14 @@ label.sv-legend { margin-bottom: 0; }
 .bs-note-by { margin-top: 4px; font-size: 11.5px; color: var(--ink-4); }
 .bs-details summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--navy); }
 .bs-details[open] summary { margin-bottom: 8px; }
+/* The sign-in page, opened from the board exam survey link. */
+.login-survey { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 11px 12px; border-radius: var(--r-sm); background: var(--gold-50); border: 1px solid var(--gold-100); }
+.login-survey strong { display: block; font-size: 14px; color: var(--ink-1); }
+.login-survey span:not(.chip) { display: block; font-size: 12.5px; color: var(--ink-3); }
+/* Board Survey → Preview: the student's form over the dashboard. */
+.bs-preview { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; background: var(--paper); }
+.bs-preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px var(--edge); background: var(--navy); }
+.bs-preview-bar .eyebrow { display: inline-flex; align-items: center; gap: 6px; }
+.bs-preview-bar .btn.ghost { color: white; border-color: rgba(255,255,255,.3); background: transparent; }
+.bs-preview-bar .btn.ghost:hover:not(:disabled) { background: rgba(255,255,255,.1); color: white; }
+.bs-preview-body { flex: 1 1 auto; overflow-y: auto; padding: 16px var(--edge) 28px; }

@@ -30,6 +30,16 @@ export function showSurveyTab(studentId) {
   } catch { return false; }
 }
 
+/** Was this browser tab opened from the survey link? (The sign-in page says so.) */
+export function cameFromSurveyLink() {
+  try { return sessionStorage.getItem(INVITED) === SURVEY_ID; } catch { return false; }
+}
+
+/** Is the landing on the Survey tab still to come? Asks without using it up. */
+export function surveyLandingPending() {
+  try { return sessionStorage.getItem(OPEN_ONCE) === SURVEY_ID; } catch { return false; }
+}
+
 /** True the first time it is asked after the link was opened: start on the Survey tab. */
 export function takeSurveyLanding() {
   try {

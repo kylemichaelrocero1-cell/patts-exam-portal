@@ -4,6 +4,7 @@ import { sectionsWithOpenPaper } from './lib/assessmentsCore';
 import { studentSections } from './lib/sectionScope';
 import { formatName, givenName } from './lib/personName.js';
 import Icon from './components/Icon';
+import { surveyLandingPending } from './lib/surveyInvite';
 
 // A colour and a glyph per subject family, so a long list can be scanned by eye
 // rather than read. Anything else falls back to the blue book.
@@ -37,8 +38,13 @@ export default function SectionSelector({ student, onSelect, onLogout }) {
     return () => { cancelled = true; };
   }, [sections.length]);
 
-  // One section to choose from is no choice: go straight in.
-  const onlySection = sections.length === 1 ? sections[0] : null;
+  // One section to choose from is no choice: go straight in. Nor is it one for
+  // a graduate who came from the board exam survey link: the survey belongs to
+  // no section, so they go straight to it (Pre-Boards first, if they have it).
+  const [forSurvey] = useState(surveyLandingPending);
+  const onlySection = sections.length === 1 ? sections[0]
+    : forSurvey && sections.length ? (sections.find(s => /pre-?board/i.test(s)) || sections[0])
+      : null;
   useEffect(() => {
     if (onlySection) onSelect(onlySection);
   }, [onlySection, onSelect]);

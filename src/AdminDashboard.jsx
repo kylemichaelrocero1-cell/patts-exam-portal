@@ -77,6 +77,7 @@ const QuantityKey = ({ q }) => (
 const WorkedMarking = lazy(() => import('./dashboard/WorkedMarking'));
 const ReviewSettings = lazy(() => import('./dashboard/ReviewSettings'));
 const PracticeResults = lazy(() => import('./dashboard/PracticeResults'));
+const BoardSurvey = lazy(() => import('./dashboard/BoardSurvey'));
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 
 // PostgREST caps every response at 1000 rows (Supabase's db-max-rows default).
@@ -2899,6 +2900,7 @@ async function fetchDashboardData() {
               { id: 'class',      label: 'Class Review',  icon: 'graduation' },
               { id: 'practice',   label: 'Practice Results', icon: 'practice' },
               { id: 'attendance', label: 'Attendance',    icon: 'calendar' },
+              { id: 'survey',     label: 'Board Survey',  icon: 'message' },
             ] },
             { group: 'Admin', items: [
               { id: 'students',   label: 'Students',      icon: 'users' },
@@ -3002,6 +3004,7 @@ async function fetchDashboardData() {
               students: 'Students',
               live: 'Live Monitor',
               attendance: 'Attendance',
+              survey: 'Board Survey',
               questions: 'Questions',
               transfer: 'Transfer Exams',
               trash: 'Trash',
@@ -3099,6 +3102,12 @@ async function fetchDashboardData() {
               practiceAttempts={gradedAttempts}
               examsList={examsList}
             />
+          </Suspense>
+        )}
+
+        {activeView === 'survey' && (
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading survey…</div>}>
+            <BoardSurvey />
           </Suspense>
         )}
 

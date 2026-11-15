@@ -3,12 +3,14 @@ import Icon from './components/Icon';
 import ExamList from './ExamList';
 import { formatName } from './lib/personName.js';
 import { studentSections } from './lib/sectionScope';
+import { showSurveyTab, takeSurveyLanding } from './lib/surveyInvite';
 
 // Lazy for the same reason as the instructor side: this pulls in
 // react-markdown + KaTeX (~600kB). A student who only ever sits exams should
 // never download it, and on exam day the assessments tab must load fast.
 const StudentLessons = lazy(() => import('./StudentLessons'));
 const StudentSummary = lazy(() => import('./StudentSummary'));
+const StudentSurvey = lazy(() => import('./StudentSurvey'));
 
 const TABS = [
   { id: 'summary',  label: 'Summary',  icon: 'home' },
@@ -16,6 +18,8 @@ const TABS = [
   { id: 'seatwork', label: 'Seatwork', icon: 'clipboard-check' },
   { id: 'exams',    label: 'Exams',    icon: 'exam' },
 ];
+// Only for graduates sent the board exam survey link (src/lib/surveyInvite.js).
+const SURVEY_TAB = { id: 'survey', label: 'Survey', icon: 'message' };
 
 function Loading({ label }) {
   return (
@@ -26,7 +30,9 @@ function Loading({ label }) {
 }
 
 export default function StudentShell({ student, selectedSection, onStartExam, onLogout, onSwitchSection }) {
-  const [tab, setTab] = useState('summary');
+  const [hasSurvey] = useState(() => showSurveyTab(student.id));
+  const [tab, setTab] = useState(() => (hasSurvey && takeSurveyLanding() ? 'survey' : 'summary'));
+  const tabs = hasSurvey ? [...TABS, SURVEY_TAB] : TABS;
   // Every section the student is enrolled in. With more than one, a switch
   // sits under the header: picking a section used to be final until the
   // student logged out and back in.
@@ -70,8 +76,8 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       )}
 
       {/* Tabs */}
-      <div className="student-tabs">
-        {TABS.map(t => {
+      <div className={`student-tabs${tabs.length > 4 ? ' is-five' : ''}`}>
+        {tabs.map(t => {
           const active = tab === t.id;
           return (
             <button
@@ -111,6 +117,14 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
               selectedSection={selectedSection}
               onGoToTab={setTab}
             />
+          </Suspense>
+        </div>
+      )}
+
+      {tab === 'survey' && (
+        <div className="student-main">
+          <Suspense fallback={<Loading label="survey" />}>
+            <StudentSurvey student={student} />
           </Suspense>
         </div>
       )}

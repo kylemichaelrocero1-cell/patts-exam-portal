@@ -4,6 +4,11 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { reloadForUpdate } from './lib/staleBuild.js'
+import { noteSurveyInvite } from './lib/surveyInvite.js'
+
+// Opened from the board exam survey link (…/?survey): show the Survey tab
+// once they are signed in (src/lib/surveyInvite.js).
+noteSurveyInvite();
 
 // A file of the build this page came from is gone: a deploy happened since
 // it was opened. Reload onto the new build (src/lib/staleBuild.js). The

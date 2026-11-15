@@ -31,6 +31,14 @@ check('the mock exam questions the faculty asked for are there',
   ['mocks_helpful', 'mocks_prepared'].every(id => itemById(id)?.step === 'mocks'));
 check('so is what they wish the faculty had done', itemById('wished')?.step === 'faculty' && itemById('faculty_wish')?.kind === 'text');
 check('every text box has a placeholder', ITEMS.filter(i => i.kind === 'text').every(i => i.placeholder));
+check('a PATTS survey: no AeroHub among what they used to review',
+  !JSON.stringify(ITEMS.filter(i => i.options).map(i => i.options)).toLowerCase().includes('aerohub'));
+check('the topics recalled after the exam can be ticked',
+  ['rate_turn', 'mass_flow', 'axes', 'stability'].every(id => SUBJECTS[1].topics.some(t => t.id === id))
+  && ['beams_mixed', 'rope_tension', 'pressure_vessel', 'shaft_key', 'welds', 'friction'].every(id => SUBJECTS[2].topics.some(t => t.id === id))
+  && ['fuel_grades', 'prop_rpm'].every(id => SUBJECTS[3].topics.some(t => t.id === id))
+  && ['oil_canning', 'flight_levels', 'load_limits'].every(id => SUBJECTS[4].topics.some(t => t.id === id))
+  && ['pcar2', 'econ_terms'].every(id => SUBJECTS[5].topics.some(t => t.id === id)));
 
 console.log('\n=== CLEANING ===');
 {

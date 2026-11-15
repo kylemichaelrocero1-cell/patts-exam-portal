@@ -17,29 +17,55 @@ const opts = (...pairs) => pairs.map(([id, label]) => ({ id, label }));
 // ── Topics per subject ──────────────────────────────────────────────────────
 const subject = s => ({ ...s, topics: s.groups.flatMap(g => g.topics) });
 
+// Grouped the way the PRC syllabus runs, with the problem types examinees
+// recalled after the November 2026 exam named as they described them.
 export const SUBJECTS = [
   subject({
     key: 'math', name: 'Mathematics', short: 'Math',
     example: 'e.g. two ships, N 30° E, find the distance',
     groups: [
-      { label: 'Algebra and word problems', topics: opts(
-        ['algebra', 'Algebra'], ['work', 'Work problems'], ['units', 'Unit conversion'],
-        ['age', 'Age problems'], ['mixture', 'Mixture problems'], ['motion', 'Motion and rate problems'],
-        ['logs', 'Logarithms'], ['remainder', 'Remainder and binomial theorems'],
-        ['probstat', 'Probability and statistics'],
+      { label: 'Algebra', topics: opts(
+        ['algebra', 'Algebra'], ['quadratic', 'Quadratic equations and roots'], ['logs', 'Logarithms'],
+        ['remainder', 'Remainder and binomial theorems'], ['progressions', 'Arithmetic and geometric progressions'],
+        ['variation', 'Variation and proportion'], ['complex', 'Complex numbers'],
+        ['matrices', 'Matrices and determinants'], ['vectors', 'Vectors (dot and cross product)'],
       ) },
-      { label: 'Trigonometry and geometry', topics: opts(
+      { label: 'Word problems', topics: opts(
+        ['work', 'Work problems'], ['units', 'Unit conversion'], ['age', 'Age problems'],
+        ['mixture', 'Mixture problems'], ['motion', 'Motion and rate problems'], ['clock', 'Clock problems'],
+        ['digits', 'Number and digit problems'],
+      ) },
+      { label: 'Trigonometry and navigation', topics: opts(
         ['bearing', 'Bearing and azimuth'], ['crab', 'Heading, drift angle and ground speed'],
-        ['trig', 'Trigonometry (sine and cosine laws)'], ['spherical', 'Spherical triangles'],
-        ['lines', 'Lines, slope and distance between points'], ['conics', 'Conic sections'],
-        ['plane_geo', 'Plane geometry'], ['solid_geo', 'Solid geometry'],
+        ['wind_triangle', 'Wind speed and direction from the wind triangle'],
+        ['two_movers', 'Two ships or planes: distance apart after a time'],
+        ['trig', 'Trigonometry (sine and cosine laws)'], ['elevation', 'Angles of elevation and depression'],
+        ['identities', 'Trig identities and equations'], ['spherical', 'Spherical triangles'],
       ) },
-      { label: 'Calculus and motion', topics: opts(
-        ['integration', 'Integration'], ['maxmin', 'Maxima and minima'], ['area_curve', 'Area under the curve'],
-        ['kinematics', 'Kinematics using derivatives'], ['derivatives', 'Derivatives (second, implicit, parametric)'],
-        ['related_rates', 'Related rates'], ['solids_rev', 'Volume of solids of revolution'],
-        ['moments', 'First moment and moment of inertia'], ['diffeq', 'Differential equations'],
-        ['free_fall', 'Free fall'], ['rotation', 'Angular velocity and tip speed'],
+      { label: 'Analytic and solid geometry', topics: opts(
+        ['lines', 'Lines, slope and distance between points'], ['conics', 'Conic sections'],
+        ['polar', 'Polar coordinates'], ['plane_geo', 'Plane geometry'], ['solid_geo', 'Solid geometry'],
+      ) },
+      { label: 'Differential calculus', topics: opts(
+        ['limits', 'Limits and L’Hôpital’s rule'], ['deriv_quotient', 'Derivative of a fraction (quotient rule)'],
+        ['derivatives', 'Derivatives (second, implicit, parametric)'], ['tangent_normal', 'Tangent and normal lines'],
+        ['curvature', 'Radius of curvature'], ['maxmin', 'Maxima and minima'], ['related_rates', 'Related rates'],
+        ['kinematics', 'Kinematics using derivatives'], ['partial', 'Partial derivatives'],
+      ) },
+      { label: 'Integral calculus', topics: opts(
+        ['integration', 'Integration'], ['area_curve', 'Area under the curve'],
+        ['solids_rev', 'Volume of solids of revolution'], ['arc_length', 'Length of an arc'],
+        ['surface_rev', 'Surface area of revolution'], ['moments', 'First moment and moment of inertia'],
+        ['work_calc', 'Work by a variable force (pumping, springs)'],
+      ) },
+      { label: 'Differential equations and motion', topics: opts(
+        ['diffeq', 'Differential equations'], ['growth', 'Exponential growth and decay'],
+        ['cooling', 'Newton’s law of cooling'], ['free_fall', 'Free fall'], ['projectile', 'Projectile motion'],
+        ['rotation', 'Angular velocity and tip speed'],
+      ) },
+      { label: 'Probability and statistics', topics: opts(
+        ['probstat', 'Probability and statistics'], ['counting', 'Permutations and combinations'],
+        ['mean_sd', 'Mean, median and standard deviation'], ['distributions', 'Binomial and normal distributions'],
       ) },
     ],
   }),
@@ -47,23 +73,44 @@ export const SUBJECTS = [
     key: 'aero', name: 'Aerodynamics', short: 'Aero',
     example: 'e.g. wind tunnel, 1:10 model, test speed',
     groups: [
-      { label: 'Problem solving', topics: opts(
-        ['turning', 'Turning flight'], ['bank', 'Bank angle'],
-        ['hydrostatic', 'Hydrostatic equation and standard atmosphere'], ['load_factor', 'Load factor'],
-        ['cd_re', 'Drag coefficient and Reynolds number'], ['v_min_thrust', 'Velocity at minimum thrust required'],
-        ['power_req', 'Power required and available'], ['wind_tunnel', 'Wind tunnel problems'],
-        ['sound', 'Speed of sound and Mach number'], ['glauert', 'Prandtl–Glauert correction'],
-        ['airspeeds', 'True, equivalent and calibrated airspeed'], ['bernoulli', 'Bernoulli and continuity'],
-        ['climb_glide', 'Climb and glide'], ['time_climb', 'Time to climb and ceiling'],
-        ['stall', 'Stall and maneuvering speed'], ['range', 'Range and endurance'],
-        ['polar', 'Drag polar and maximum L/D'], ['thin_airfoil', 'Thin airfoil and flat plate'],
-        ['cm', 'Moment coefficient of wing-body'], ['shocks', 'Shock waves and nozzles'],
+      { label: 'Atmosphere and fluid flow', topics: opts(
+        ['hydrostatic', 'Hydrostatic equation and standard atmosphere'],
+        ['density_alt', 'Pressure and density altitude'], ['viscosity', 'Viscosity and fluid properties'],
+        ['bernoulli', 'Bernoulli and continuity'], ['mass_flow', 'Mass flow rate and area–velocity relation'],
+        ['dynamic_pressure', 'Dynamic and stagnation pressure'], ['pitot', 'Pitot-static tube and airspeed'],
+        ['airspeeds', 'True, equivalent and calibrated airspeed'], ['cd_re', 'Drag coefficient and Reynolds number'],
+        ['wind_tunnel', 'Wind tunnel problems'],
       ) },
-      { label: 'Concepts', topics: opts(
-        ['mcrit', 'Critical Mach, drag divergence and transonic flow'],
-        ['wing_geom', 'Aspect ratio, taper, sweep and winglets'], ['controls', 'Control surfaces, tabs and V-tail'],
-        ['high_lift', 'Slats and flaps'], ['icing', 'Icing and stall'], ['props', 'Propellers and slipstream'],
-        ['helicopter', 'Helicopter aerodynamics'],
+      { label: 'Airfoils and wings', topics: opts(
+        ['lift_eq', 'Lift equation (CL, area, speed)'], ['cp', 'Pressure coefficient'],
+        ['circulation', 'Circulation and Kutta–Joukowski lift'], ['thin_airfoil', 'Thin airfoil and flat plate'],
+        ['induced_drag', 'Induced drag, span efficiency and aspect ratio'], ['polar', 'Drag polar and maximum L/D'],
+        ['skin_friction', 'Skin friction and boundary layer'], ['cm', 'Moment coefficient of wing-body'],
+        ['naca', 'NACA airfoil numbers'],
+      ) },
+      { label: 'Performance', topics: opts(
+        ['v_min_thrust', 'Velocity at minimum thrust required'], ['power_req', 'Power required and available'],
+        ['climb_glide', 'Climb and glide'], ['time_climb', 'Time to climb and ceiling'],
+        ['range', 'Range and endurance'], ['takeoff_landing', 'Takeoff and landing distance'],
+        ['stall', 'Stall and maneuvering speed'], ['ground_effect', 'Ground effect'],
+      ) },
+      { label: 'Maneuvers', topics: opts(
+        ['turning', 'Turning flight'], ['rate_turn', 'Rate and radius of turn'], ['bank', 'Bank angle'],
+        ['load_factor', 'Load factor'], ['pull_up', 'Pull-up and pull-out'],
+      ) },
+      { label: 'High-speed flow', topics: opts(
+        ['sound', 'Speed of sound and Mach number'], ['glauert', 'Prandtl–Glauert correction'],
+        ['isentropic', 'Isentropic flow relations'], ['mach_angle', 'Mach angle and Mach waves'],
+        ['shocks', 'Shock waves and nozzles'], ['mcrit', 'Critical Mach, drag divergence and transonic flow'],
+        ['supersonic', 'Supersonic airfoils and area rule'],
+      ) },
+      { label: 'Stability, control and concepts', topics: opts(
+        ['axes', 'Axes of rotation and the primary controls'], ['stability', 'Static and dynamic stability'],
+        ['longitudinal', 'Neutral point and static margin'], ['lateral', 'Dihedral, Dutch roll and spiral'],
+        ['adverse_yaw', 'Adverse yaw'], ['controls', 'Control surfaces, tabs and V-tail'],
+        ['wing_geom', 'Aspect ratio, taper, sweep and winglets'], ['high_lift', 'Slats and flaps'],
+        ['vortices', 'Wingtip vortices and wake turbulence'], ['icing', 'Icing and stall'],
+        ['props', 'Propellers and slipstream'], ['helicopter', 'Helicopter aerodynamics'],
       ) },
     ],
   }),
@@ -71,20 +118,37 @@ export const SUBJECTS = [
     key: 'asd', name: 'Aircraft Structures and Design', short: 'Structures',
     example: 'e.g. truss, force in member AB, 60°, 5 kN',
     groups: [
-      { label: 'Problem solving', topics: opts(
-        ['truss', 'Statics: force in a truss member'], ['lemac', 'LEMAC / %MAC'], ['cg', 'CG location'],
-        ['forces', 'Concurrent and parallel forces'], ['reactions', 'Support reactions'],
-        ['shear_moment', 'Shear and bending moment'], ['stress_strain', 'Stress and strain'], ['torsion', 'Torsion'],
-        ['section', 'Centroid and moment of inertia'], ['shear_center', 'Shear center and shear flow'],
-        ['columns', 'Columns and buckling'], ['joints', 'Rivets, bolts and joints'], ['safety', 'Margin / factor of safety'],
+      { label: 'Statics', topics: opts(
+        ['truss', 'Statics: force in a truss member'], ['forces', 'Concurrent and parallel forces'],
+        ['rope_tension', 'Rope and cable tension with angles'], ['reactions', 'Support reactions'],
+        ['moments_couples', 'Moments and couples'], ['frames', 'Frames and machines'], ['friction', 'Friction'],
+        ['section', 'Centroid and moment of inertia'],
+      ) },
+      { label: 'Strength of materials', topics: opts(
+        ['stress_strain', 'Stress and strain'], ['thermal_stress', 'Thermal stress'],
+        ['pressure_vessel', 'Thin-walled pressure vessels (sphere, cylinder)'], ['torsion', 'Torsion'],
+        ['shaft_key', 'Shafts and keys'], ['shear_moment', 'Shear and bending moment'],
+        ['beams_mixed', 'Beams with uniform and concentrated loads'], ['bending_stress', 'Bending and shear stress in beams'],
+        ['deflection', 'Beam deflection'], ['combined_stress', 'Combined stresses and Mohr’s circle'],
+        ['columns', 'Columns and buckling'], ['safety', 'Margin / factor of safety'],
+      ) },
+      { label: 'Joints and aircraft structures', topics: opts(
+        ['joints', 'Rivets, bolts and joints'], ['welds', 'Welded joints'],
+        ['shear_center', 'Shear center and shear flow'], ['fuselage', 'Monocoque and semi-monocoque'],
+        ['pressurization', 'Cabin pressurization loads'], ['landing_gear', 'Landing gear'],
+        ['fatigue', 'Fatigue, corrosion and damage'], ['fail_safe', 'Fail-safe, safe-life and damage tolerance'],
+      ) },
+      { label: 'Weight, balance and loads', topics: opts(
+        ['lemac', 'LEMAC / %MAC'], ['cg', 'CG location'], ['cg_shift', 'CG shift after adding or moving weight'],
+        ['vn', 'V-n diagram and flight envelope'], ['load_categories', 'Load factors by category (normal, utility, acrobatic)'],
+        ['gust', 'Gust loads and gust factor'], ['tail', 'Tail loads and stabilizers'],
       ) },
       { label: 'Design concepts', topics: opts(
-        ['vn', 'V-n diagram and flight envelope'], ['gust', 'Gust loads and gust factor'],
-        ['controls', 'Flight controls, tabs and ruddervators'], ['tail', 'Tail loads and stabilizers'],
-        ['high_lift', 'Slats and flaps'], ['wing_design', 'Wing design'],
-        ['aero_design', 'Aero concepts (L/D, drag polar, Mcrit)'], ['fuselage', 'Monocoque and semi-monocoque'],
-        ['landing_gear', 'Landing gear'], ['fatigue', 'Fatigue, corrosion and damage'],
-        ['design_phase', 'Conceptual and preliminary design'],
+        ['design_phase', 'Conceptual and preliminary design'], ['weight_est', 'Weight estimation and sizing'],
+        ['wing_loading', 'Wing loading and power loading'], ['wing_design', 'Wing design'],
+        ['stability_design', 'Static and dynamic stability'], ['controls', 'Flight controls, tabs and ruddervators'],
+        ['high_lift', 'Slats and flaps'], ['aero_design', 'Aero concepts (L/D, drag polar, Mcrit)'],
+        ['materials_asd', 'Material properties (yield, ultimate, modulus)'],
       ) },
     ],
   }),
@@ -92,23 +156,38 @@ export const SUBJECTS = [
     key: 'pp', name: 'Powerplant', short: 'Powerplant',
     example: 'e.g. ideal gas, 2 m³ at 100 kPa to 500 kPa',
     groups: [
-      { label: 'Problem solving', topics: opts(
-        ['ideal_gas', 'Ideal and combined gas laws'], ['vol_eff', 'Volumetric efficiency'],
-        ['prop_eff', 'Propeller efficiency'], ['thermal_eff', 'Thermal efficiency'], ['advance_ratio', 'Advance ratio'],
-        ['processes', 'Gas processes and nonflow work'], ['cp_cv', 'cp, cv, R and specific heat ratio'],
-        ['displacement', 'Displacement, clearance and compression ratio'],
-        ['engine_power', 'Engine power (IHP, BHP, MEP)'], ['sfc', 'Specific fuel consumption'],
-        ['otto_diesel', 'Otto and Diesel cycles'], ['brayton', 'Brayton cycle'],
-        ['stirling', 'Carnot, Stirling and Ericsson cycles'], ['jet_thrust', 'Jet thrust and exit velocity'],
-        ['rocket', 'Rocket thrust and nozzle area'], ['compressor', 'Compressor displacement'],
-        ['std_atm', 'Standard atmosphere'], ['temp', 'Temperature conversion'],
-        ['mechanics', 'Springs, kinematics and kinetics'],
+      { label: 'Thermodynamics', topics: opts(
+        ['ideal_gas', 'Ideal and combined gas laws (PV = mRT)'], ['temp', 'Temperature conversion'],
+        ['cp_cv', 'cp, cv, R and specific heat ratio'], ['processes', 'Gas processes and nonflow work'],
+        ['first_law', 'First law and steady-flow energy'], ['entropy', 'Entropy and the second law'],
+        ['std_atm', 'Standard atmosphere'], ['mechanics', 'Springs, kinematics and kinetics'],
       ) },
-      { label: 'Concepts', topics: opts(
-        ['turbofan', 'Turbojet, turbofan, turboprop and ramjet'], ['supercharging', 'Supercharging and critical altitude'],
-        ['propellers', 'Propeller pitch and feathering'], ['detonation', 'Detonation and preignition'],
-        ['fuel_ignition', 'Fuel and ignition systems'], ['lube_cooling', 'Lubrication and cooling'],
-        ['starting', 'Starting systems and flameout'], ['thrust_rev', 'Thrust reversers'],
+      { label: 'Cycles', topics: opts(
+        ['air_standard', 'Air-standard efficiency from compression ratio'], ['otto_diesel', 'Otto and Diesel cycles'],
+        ['brayton', 'Brayton cycle'], ['stirling', 'Carnot, Stirling and Ericsson cycles'],
+        ['thermal_eff', 'Thermal efficiency'],
+      ) },
+      { label: 'Reciprocating engines', topics: opts(
+        ['displacement', 'Displacement, clearance and compression ratio'], ['engine_power', 'Engine power (IHP, BHP, MEP)'],
+        ['torque_power', 'Torque, RPM and power'], ['mech_eff', 'Mechanical efficiency and friction power'],
+        ['vol_eff', 'Volumetric efficiency'], ['sfc', 'Specific fuel consumption'],
+        ['fuel_air', 'Fuel–air ratio and heating value'], ['compressor', 'Compressor displacement'],
+      ) },
+      { label: 'Propellers', topics: opts(
+        ['prop_eff', 'Propeller efficiency'], ['advance_ratio', 'Advance ratio'],
+        ['prop_rpm', 'Propeller RPM, diameter and tip speed'], ['propellers', 'Propeller pitch and feathering'],
+      ) },
+      { label: 'Jets and rockets', topics: opts(
+        ['jet_thrust', 'Jet thrust and exit velocity'], ['thrust_power', 'Thrust power and propulsive efficiency'],
+        ['bypass', 'Bypass ratio'], ['turbine_work', 'Compressor and turbine work'],
+        ['rocket', 'Rocket thrust and nozzle area'], ['turbofan', 'Turbojet, turbofan, turboprop and ramjet'],
+      ) },
+      { label: 'Systems and operation', topics: opts(
+        ['engine_parts', 'Engine parts and firing order'], ['fuel_grades', 'Fuel grades, colors and weights (AVGAS, Jet A-1)'],
+        ['carburetion', 'Carburetors, fuel injection and carb ice'], ['fuel_ignition', 'Fuel and ignition systems'],
+        ['supercharging', 'Supercharging and critical altitude'], ['detonation', 'Detonation and preignition'],
+        ['lube_cooling', 'Lubrication and cooling'], ['engine_instruments', 'Engine instruments (EGT, manifold pressure)'],
+        ['starting', 'Starting systems and flameout'], ['thrust_rev', 'Thrust reversers'], ['apu', 'APU'],
       ) },
     ],
   }),
@@ -119,19 +198,32 @@ export const SUBJECTS = [
       { label: 'Weight and balance', topics: opts(
         ['weight_balance', 'Weight and balance computation'],
         ['weights', 'Empty weight, payload, tare and residual fuel'], ['stations', 'Stations, datum and buttock lines'],
+        ['load_limits', 'Load factor limits (acrobatic, negative)'],
       ) },
       { label: 'Materials and processes', topics: opts(
         ['materials', 'Aircraft materials and alloys'], ['heat_treat', 'Metal identification and heat treatment'],
         ['welding', 'Forming, joining and welding'], ['composites', 'Composite materials'],
-        ['plastics', 'Plastics'], ['finishes', 'Anodizing, plating and painting'], ['corrosion', 'Corrosion'],
-        ['ndt', 'Hardness tests and NDT'],
+        ['plastics', 'Plastics'], ['wood_fabric', 'Wood, fabric and dope'], ['sealants', 'Sealants and adhesives'],
+        ['finishes', 'Anodizing, plating and painting'], ['corrosion', 'Corrosion'], ['ndt', 'Hardness tests and NDT'],
       ) },
-      { label: 'Hardware, structures and repair', topics: opts(
-        ['hardware', 'Bolts, nuts, rivets and hardware'], ['sheet_metal', 'Sheet metal structures'],
-        ['bend', 'Bend allowance and joggling'], ['joints', 'Types of joints and seams'], ['cables', 'Control cables'],
-        ['tubing', 'Fluid lines, flaring and fittings'], ['hydraulics', 'Hydraulic systems'], ['tools', 'Shop tools'],
-        ['repairs', 'Major and minor repairs'], ['gust_locks', 'Gust locks'],
-        ['inspection', 'Inspections and maintenance records'],
+      { label: 'Hardware and sheet metal', topics: opts(
+        ['hardware', 'Bolts, nuts, rivets and hardware'], ['rivet_layout', 'Rivet spacing, edge distance and pitch'],
+        ['safety_wire', 'Safety wire, cotter pins and torque'], ['sheet_metal', 'Sheet metal structures'],
+        ['bend', 'Bend allowance and joggling'], ['joints', 'Types of joints and seams'],
+        ['oil_canning', 'Oil canning and skin buckling'],
+      ) },
+      { label: 'Systems', topics: opts(
+        ['cables', 'Control cables'], ['tubing', 'Fluid lines, flaring and fittings'], ['hydraulics', 'Hydraulic systems'],
+        ['gear_brakes', 'Tires, wheels and brakes'], ['electrical', 'Wiring and bonding'], ['oxygen', 'Oxygen systems'],
+      ) },
+      { label: 'Repair and maintenance', topics: opts(
+        ['repairs', 'Major and minor repairs'], ['inspection', 'Inspections and maintenance records'],
+        ['drawings', 'Aircraft drawings and blueprints'], ['tools', 'Shop tools'],
+        ['ground_handling', 'Ground handling, jacking and mooring'], ['gust_locks', 'Gust locks'],
+      ) },
+      { label: 'Flight and operations', topics: opts(
+        ['stability_axes', 'Stability and axes of the airplane'], ['flight_levels', 'Flight levels and altimeter settings'],
+        ['charts', 'Jeppesen charts'],
       ) },
     ],
   }),
@@ -139,23 +231,42 @@ export const SUBJECTS = [
     key: 'eemle', name: 'Engineering Economics and Management, Laws and Ethics', short: 'EEMLE',
     example: 'e.g. signing off work you did not check',
     groups: [
-      { label: 'Economics and management', topics: opts(
-        ['rask', 'RASK'], ['cask', 'CASK'], ['airline_finance', 'Financial stability of airlines'],
-        ['econ', 'Interest, depreciation, break-even'], ['annuity', 'Annuities'], ['irr', 'IRR and rate of return'],
+      { label: 'Engineering economics', topics: opts(
+        ['econ', 'Interest, depreciation, break-even'], ['effective_rate', 'Nominal and effective rates'],
+        ['annuity', 'Annuities'], ['depreciation', 'Depreciation methods (straight line, SYD, declining)'],
+        ['worth', 'Present, annual and future worth'], ['irr', 'IRR and rate of return'],
+        ['payback', 'Payback period'], ['bonds_loans', 'Bonds and loan amortization'],
+        ['capitalized', 'Capitalized and annual cost'], ['inflation', 'Inflation'],
+        ['econ_terms', 'Economics terms (supply, demand, market)'],
         ['capital', 'Authorized capital and shares'], ['costs', 'Production and development costs'],
-        ['airline_perf', 'Airline performance'],
       ) },
-      { label: 'Laws, regulations and ethics', topics: opts(
-        ['pcar1', 'PCAR Part 1'], ['pcar_parts', 'Which PCAR Part covers what'], ['situational', 'Situational questions'],
-        ['seaplanes', 'Amphibians and seaplanes'], ['ditching', 'Ditching'], ['vmin', 'Vmin'],
-        ['lightning', 'Lightning arrester'], ['alternate', 'Alternate aerodrome'], ['ethics', 'Code of ethics'],
-        ['pd1570', 'PD 1570 penalties'], ['freedoms', 'Freedoms of the air'],
-        ['air_law', 'Chicago Convention and ICAO Annexes'], ['ra9497', 'RA 9497 (CAAP charter)'],
-        ['caap_dg', 'Functions of the CAAP Director General'],
+      { label: 'Airline economics', topics: opts(
+        ['rask', 'RASK'], ['cask', 'CASK'], ['ask_rpk', 'ASK, RPK and passenger load factor'],
+        ['airline_finance', 'Financial stability of airlines'], ['airline_perf', 'Airline performance'],
+      ) },
+      { label: 'Management', topics: opts(
+        ['mgmt_functions', 'Management functions and organization'], ['project_mgmt', 'Project scheduling (CPM, PERT)'],
+        ['contracts', 'Contracts and specifications'],
+      ) },
+      { label: 'Laws and regulations', topics: opts(
+        ['pd1570', 'PD 1570 penalties'], ['practice', 'Professional practice and the AE board'],
+        ['ra9497', 'RA 9497 (CAAP charter)'], ['caap_dg', 'Functions of the CAAP Director General'],
+        ['pcar1', 'PCAR Part 1'], ['pcar2', 'PCAR Part 2 (personnel licensing)'],
+        ['pcar4', 'PCAR Part 4 (registration and marking)'], ['pcar5', 'PCAR Part 5 (airworthiness)'],
+        ['pcar6', 'PCAR Part 6 (maintenance organizations)'], ['pcar_parts', 'Which PCAR Part covers what'],
+        ['air_law', 'Chicago Convention and ICAO Annexes'], ['freedoms', 'Freedoms of the air'],
+        ['far', 'FAR Part 23 and 25'], ['dangerous_goods', 'Dangerous goods'],
+      ) },
+      { label: 'Airworthiness and operations', topics: opts(
         ['definitions', 'Overhaul, rebuild, major repair definitions'], ['rts', 'Return to service and records'],
-        ['categories', 'Aircraft category and class'], ['crew', 'Flight crew duty time'],
-        ['emergency', 'Emergency landing loads'], ['vspeeds', 'V-speeds and rough air speed'],
-        ['far', 'FAR Part 23 and 25'], ['aerodromes', 'Runways, PCN and aerodromes'],
+        ['ad_sb', 'Airworthiness directives and service bulletins'], ['categories', 'Aircraft category and class'],
+        ['vspeeds', 'V-speeds (Vref) and rough air speed'], ['vmin', 'Vmin'], ['crew', 'Flight crew duty time'],
+        ['emergency', 'Emergency landing loads'], ['ditching', 'Ditching'], ['seaplanes', 'Amphibians and seaplanes'],
+        ['alternate', 'Alternate aerodrome'], ['aerodromes', 'Runways, PCN and aerodromes'],
+        ['lightning', 'Lightning arrester'],
+      ) },
+      { label: 'Ethics', topics: opts(
+        ['ethics', 'Code of ethics'], ['situational', 'Situational questions (e.g. illegal acts)'],
       ) },
     ],
   }),
@@ -242,7 +353,7 @@ export const STEPS = [
     items: [
       { kind: 'many', id: 'used', q: 'What did you use to review?', options: opts(
         ['notes', 'PATTS notes and handouts'], ['mocks', 'PATTS mock exams'], ['center', 'Review center'],
-        ['aerohub', 'AeroHub'], ['books', 'Review books'], ['videos', 'Online videos'], ['group', 'Group study']) },
+        ['books', 'Review books'], ['videos', 'Online videos'], ['group', 'Group study']) },
       { kind: 'many', id: 'wished', q: 'What do you wish the aero faculty had done?', options: opts(
         ['review_class', 'A board review class in 4th year'], ['refresher', 'Refresher sessions after graduation'],
         ['board_problems', 'Board-type problems in regular classes'], ['coverage', 'Teach every board topic'],

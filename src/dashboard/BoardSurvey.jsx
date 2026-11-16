@@ -7,13 +7,15 @@ import {
 } from '../lib/boardSurvey.js';
 import { isMissingFunctionError } from '../lib/assessmentsCore.js';
 import { formatName } from '../lib/personName';
-import StudentSurvey from '../StudentSurvey';
+import StudentSurvey, { Chip } from '../StudentSurvey';
 
 // Dashboard → Board Survey. What the graduates said in the board exam survey
 // (Survey tab, src/StudentSurvey.jsx): headline numbers, how well PATTS
 // prepared them per subject, the mock exams, what they wish the faculty had
 // done, what came out per subject, and every typed answer. Names show only
 // for students who allowed it; the database leaves the rest out (sql/149).
+// "Who can answer" keeps the survey to chosen sections, such as the Pre-Boards
+// class (sql/150).
 
 const PAGE = 1000;
 // The student-facing step titles, as the faculty read them.
@@ -166,13 +168,152 @@ function Stat({ label, value, icon, chip }) {
   );
 }
 
+const isPreBoards = sec => /pre-?board/i.test(sec);
+// Pre-Boards first, then in reading order (Math 2 before Math 10).
+const bySection = (x, y) => (isPreBoards(y) - isPreBoards(x)) || x.localeCompare(y, undefined, { numeric: true });
+const sameSet = (a, b) => a.size === b.size && [...a].every(v => b.has(v));
+const audienceError = err => {
+  if (isMissingFunctionError(err)) return 'Run sql/150 in Supabase first.';
+  const m = String(err?.message || '');
+  if (/at least one section/i.test(m)) return 'Pick at least one section, or nobody could answer.';
+  if (/own sections/i.test(m)) return 'You can only choose your own sections. Refresh the dashboard and try again.';
+  return 'Could not save. Try again.';
+};
+
+/**
+ * Who can answer: anyone with the link, or only students in the sections
+ * ticked here. Each instructor ticks from their own sections; a colleague's
+ * choices show only as a count. The database enforces it (sql/150).
+ */
+function Audience({ sections, reload }) {
+  const [saved, setSaved] = useState(null);           // { open_to, mine, others } as the database has it
+  const [openTo, setOpenTo] = useState('all');
+  const [picked, setPicked] = useState(() => new Set());
+  const [phase, setPhase] = useState('loading');      // loading | missing | ready | saving
+  const [error, setError] = useState('');
+  const [justSaved, setJustSaved] = useState(false);
+
+  const take = data => {
+    setSaved(data);
+    setOpenTo(data.open_to);
+    setPicked(new Set(data.mine || []));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error: err } = await supabase.rpc('board_survey_audience', { p_survey: SURVEY_ID });
+      if (cancelled) return;
+      if (err && isMissingFunctionError(err)) { setPhase('missing'); return; }
+      if (err || !data) { setPhase('ready'); setError('Could not load who can answer. Try Refresh.'); return; }
+      take(data);
+      setError('');
+      setPhase('ready');
+    })();
+    return () => { cancelled = true; };
+  }, [reload]);
+
+  const options = [...new Set([...sections, ...(saved?.mine || [])])].sort(bySection);
+  const others = saved?.others || 0;
+  const dirty = !!saved && (openTo !== saved.open_to || !sameSet(picked, new Set(saved.mine || [])));
+  const nobody = openTo === 'sections' && picked.size === 0 && others === 0;
+
+  const choose = mode => {
+    setOpenTo(mode);
+    setJustSaved(false);
+    // Narrowing with nothing ticked yet: start from the Pre-Boards class.
+    if (mode === 'sections' && picked.size === 0) setPicked(new Set(options.filter(isPreBoards)));
+  };
+  const toggle = sec => {
+    setJustSaved(false);
+    setPicked(prev => {
+      const n = new Set(prev);
+      if (n.has(sec)) n.delete(sec); else n.add(sec);
+      return n;
+    });
+  };
+  const save = async () => {
+    setPhase('saving'); setError('');
+    const { data, error: err } = await supabase.rpc('set_board_survey_audience', {
+      p_survey: SURVEY_ID, p_open_to: openTo, p_sections: [...picked],
+    });
+    setPhase('ready');
+    if (err || !data) { setError(audienceError(err)); return; }
+    take(data);
+    setJustSaved(true);
+  };
+
+  const now = !saved ? '' : saved.open_to === 'all'
+    ? 'Open to anyone with the link'
+    : `Only ${[...(saved.mine || [])].sort(bySection).join(', ') || 'sections chosen by other instructors'}`
+      + (others && saved.mine?.length ? ` and ${others} more chosen by other instructors` : '');
+
+  return (
+    <div className="card bs-card">
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <h3 className="bs-h">Who can answer</h3>
+        {now && <span style={{ fontSize: 12.5, color: 'var(--ink-3)', overflowWrap: 'anywhere' }}>{now}</span>}
+      </div>
+
+      {phase === 'loading' && <div style={{ fontSize: 13, color: 'var(--ink-4)' }}>Loading…</div>}
+      {phase === 'missing' && (
+        <div style={{ fontSize: 13, color: 'var(--ink-3)' }}>
+          Anyone with the link can answer. To keep the survey to your board review class, run sql/150 in Supabase.
+        </div>
+      )}
+
+      {(phase === 'ready' || phase === 'saving') && saved && (
+        <>
+          <div className="mx-segments" role="group" aria-label="Who can answer" style={{ alignSelf: 'flex-start' }}>
+            <button type="button" aria-pressed={openTo === 'all'} className={openTo === 'all' ? 'is-on' : ''} onClick={() => choose('all')}>
+              Anyone with the link
+            </button>
+            <button type="button" aria-pressed={openTo === 'sections'} className={openTo === 'sections' ? 'is-on' : ''} onClick={() => choose('sections')}>
+              Only my sections
+            </button>
+          </div>
+
+          {openTo === 'all' ? (
+            <p className="bs-hint">Any student who signs in from the link can answer.</p>
+          ) : (
+            <>
+              {options.length > 0 ? (
+                <div className="sv-chips" role="group" aria-label="Sections that can answer">
+                  {options.map(sec => (
+                    <Chip key={sec} type="checkbox" name="bs-audience" on={picked.has(sec)} onChange={() => toggle(sec)}>{sec}</Chip>
+                  ))}
+                </div>
+              ) : (
+                <p className="bs-hint">You have no sections yet.</p>
+              )}
+              <p className="bs-hint">
+                Only students in the ticked sections can answer. They also get a Survey tab in the portal, with or without the link.
+                Anyone else who opens the link is told the survey is for the board review class.
+              </p>
+            </>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <button type="button" className="btn sm" onClick={save} disabled={!dirty || nobody || phase === 'saving'}>
+              {phase === 'saving' ? 'Saving…' : 'Save'}
+            </button>
+            {justSaved && !dirty && <span style={{ fontSize: 12.5, color: 'var(--ok)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><Icon name="check" size={14} /> Saved</span>}
+            {nobody && <span style={{ fontSize: 12.5, color: 'var(--ink-3)' }}>Tick at least one section.</span>}
+          </div>
+        </>
+      )}
+      {error && <div className="sv-error" role="alert"><Icon name="alert" size={15} /> {error}</div>}
+    </div>
+  );
+}
+
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'passed', label: 'Passed' },
   { id: 'not_passed', label: 'Did not pass' },
 ];
 
-export default function BoardSurvey() {
+export default function BoardSurvey({ sections = [] }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('all');
@@ -281,6 +422,8 @@ export default function BoardSurvey() {
         </div>
         {error && <div className="sv-error" role="alert"><Icon name="alert" size={15} /> {error}</div>}
       </div>
+
+      <Audience sections={sections} reload={reload} />
 
       {rows !== null && rows.length === 0 && !error && (
         <div className="card bs-card" style={{ alignItems: 'center', padding: 36, color: 'var(--ink-4)' }}>

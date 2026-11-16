@@ -1,9 +1,11 @@
-import { useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
+import { supabase } from './supabase';
 import Icon from './components/Icon';
 import ExamList from './ExamList';
 import { formatName } from './lib/personName.js';
 import { studentSections } from './lib/sectionScope';
 import { showSurveyTab, takeSurveyLanding } from './lib/surveyInvite';
+import { SURVEY_ID } from './lib/boardSurveyId';
 
 // Lazy for the same reason as the instructor side: this pulls in
 // react-markdown + KaTeX (~600kB). A student who only ever sits exams should
@@ -18,7 +20,8 @@ const TABS = [
   { id: 'seatwork', label: 'Seatwork', icon: 'clipboard-check' },
   { id: 'exams',    label: 'Exams',    icon: 'exam' },
 ];
-// Only for graduates sent the board exam survey link (src/lib/surveyInvite.js).
+// Only for graduates sent the board exam survey link, or in a section the
+// survey is kept to (src/lib/surveyInvite.js).
 const SURVEY_TAB = { id: 'survey', label: 'Survey', icon: 'message' };
 
 function Loading({ label }) {
@@ -30,9 +33,24 @@ function Loading({ label }) {
 }
 
 export default function StudentShell({ student, selectedSection, onStartExam, onLogout, onSwitchSection }) {
-  const [hasSurvey] = useState(() => showSurveyTab(student.id));
-  const [tab, setTab] = useState(() => (hasSurvey && takeSurveyLanding() ? 'survey' : 'summary'));
+  // Whether the board exam survey is kept to chosen sections, and if this
+  // student is in one (sql/150). One small read; if it fails, or the database
+  // predates 150, the tab follows the link alone, as it did before.
+  const [surveyAccess, setSurveyAccess] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    supabase.rpc('board_survey_for_me', {
+      p_student_id: student.id,
+      p_session_token: localStorage.getItem('local_session_token'),
+      p_survey: SURVEY_ID,
+    }).then(({ data, error }) => { if (!cancelled && !error && data) setSurveyAccess(data); }, () => {});
+    return () => { cancelled = true; };
+  }, [student.id]);
+  const hasSurvey = showSurveyTab(student.id, surveyAccess);
+  const [tab, setTab] = useState(() => (showSurveyTab(student.id) && takeSurveyLanding() ? 'survey' : 'summary'));
   const tabs = hasSurvey ? [...TABS, SURVEY_TAB] : TABS;
+  // The tab can go once the database answers (kept to sections they are not in).
+  const shown = tab === 'survey' && !hasSurvey ? 'summary' : tab;
   // Every section the student is enrolled in. With more than one, a switch
   // sits under the header: picking a section used to be final until the
   // student logged out and back in.
@@ -78,7 +96,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       {/* Tabs */}
       <div className={`student-tabs${tabs.length > 4 ? ' is-five' : ''}`}>
         {tabs.map(t => {
-          const active = tab === t.id;
+          const active = shown === t.id;
           return (
             <button
               key={t.id}
@@ -97,11 +115,11 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
       {/* ExamList is mounted per-kind rather than shared, so switching tabs
           resets its internal state cleanly and each list only ever shows one
           kind. `key` forces the remount. */}
-      {(tab === 'seatwork' || tab === 'exams') && (
+      {(shown === 'seatwork' || shown === 'exams') && (
         <ExamList
-          key={`${tab}-${selectedSection}`}
+          key={`${shown}-${selectedSection}`}
           embedded
-          kind={tab === 'seatwork' ? 'seatwork' : 'exam'}
+          kind={shown === 'seatwork' ? 'seatwork' : 'exam'}
           student={student}
           selectedSection={selectedSection}
           onStartExam={onStartExam}
@@ -109,7 +127,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
         />
       )}
 
-      {tab === 'summary' && (
+      {shown === 'summary' && (
         <div className="student-main">
           <Suspense fallback={<Loading label="summary" />}>
             <StudentSummary
@@ -121,7 +139,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
         </div>
       )}
 
-      {tab === 'survey' && (
+      {shown === 'survey' && (
         <div className="student-main">
           <Suspense fallback={<Loading label="survey" />}>
             <StudentSurvey student={student} />
@@ -129,7 +147,7 @@ export default function StudentShell({ student, selectedSection, onStartExam, on
         </div>
       )}
 
-      {tab === 'lessons' && (
+      {shown === 'lessons' && (
         <div className="student-main">
           <Suspense fallback={<Loading label="lessons" />}>
             <StudentLessons student={student} selectedSection={selectedSection} />

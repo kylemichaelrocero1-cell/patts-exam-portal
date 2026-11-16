@@ -15,6 +15,8 @@ import { gateErrorMessage, isSessionExpiredError } from './lib/sessionErrors.js'
 // last step. Every Next saves to the database (sql/149), so a survey left
 // halfway still counts; Submit marks it finished. A draft also stays in this
 // browser, so a refresh loses nothing. The questions are src/lib/boardSurvey.js.
+// An instructor can keep the survey to chosen sections (sql/150); a student
+// outside them who opens the link is told who it is for.
 
 const LAST = STEPS.length - 1;
 const draftKey = id => `patts_board_survey_${SURVEY_ID}_draft_${id}`;
@@ -25,7 +27,10 @@ const writeDraft = (id, d) => {
   try { if (d) localStorage.setItem(draftKey(id), JSON.stringify(d)); else localStorage.removeItem(draftKey(id)); } catch { /* private mode */ }
 };
 
-function Chip({ type, name, on, onChange, children }) {
+// The database refusing a save from outside the chosen sections (sql/150).
+const isOutsideError = err => /only for the board review class/i.test(String(err?.message || ''));
+
+export function Chip({ type, name, on, onChange, children }) {
   return (
     <label className={`sv-chip${on ? ' is-on' : ''}`}>
       <input type={type} name={name} checked={on} onChange={onChange} />
@@ -83,7 +88,7 @@ function Question({ item, a, set }) {
 // `preview`: an instructor trying the form from the Board Survey page. Nothing
 // is read, saved or remembered.
 export default function StudentSurvey({ student, preview = false }) {
-  const [phase, setPhase] = useState(preview ? 'form' : 'loading');   // loading | closed | form | done
+  const [phase, setPhase] = useState(preview ? 'form' : 'loading');   // loading | closed | outside | form | done
   const [step, setStep] = useState(0);
   const [a, setA] = useState(emptyAnswers);
   const [sending, setSending] = useState(false);
@@ -106,6 +111,8 @@ export default function StudentSurvey({ student, preview = false }) {
       if (cancelled) return;
       if (err && isMissingFunctionError(err)) { setPhase('closed'); return; }
       if (err) setError(gateErrorMessage(err));
+      // Kept to sections they are not in. A database without 150 never says so.
+      if (data?.may_answer === false) { setPhase('outside'); return; }
       // Saved somewhere else since this draft was written: the saved copy wins.
       const savedLater = data?.updated_at && draft?.at && Date.parse(data.updated_at) > draft.at;
       if (draft?.answers && !savedLater) {
@@ -158,13 +165,17 @@ export default function StudentSurvey({ student, preview = false }) {
     if (step < LAST) {
       // Not waited on: the next step shows at once. A session that has ended
       // is said here rather than only at Submit.
-      save(false).then(err => { if (err && isSessionExpiredError(err)) setError(gateErrorMessage(err)); });
+      save(false).then(err => {
+        if (isOutsideError(err)) setPhase('outside');
+        else if (err && isSessionExpiredError(err)) setError(gateErrorMessage(err));
+      });
       go(step + 1);
       return;
     }
     setSending(true); setError('');
     const err = await save(true);
     setSending(false);
+    if (isOutsideError(err)) { setPhase('outside'); return; }
     if (err) {
       setError(isMissingFunctionError(err) ? 'The survey is not open yet.' : gateErrorMessage(err));
       return;
@@ -184,6 +195,18 @@ export default function StudentSurvey({ student, preview = false }) {
         <div className="card sv-done">
           <span className="chip chip-navy"><Icon name="clock" size={18} /></span>
           <h2>Not open yet</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'outside') {
+    return (
+      <div className="sv-wrap">
+        <div className="card sv-done" role="status">
+          <span className="chip chip-navy"><Icon name="lock" size={18} /></span>
+          <h2>For the board review class</h2>
+          <p>This survey is for graduates in the board review class. If you took the board exam, ask your instructor to add you to it.</p>
         </div>
       </div>
     );

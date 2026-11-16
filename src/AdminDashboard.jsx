@@ -3109,7 +3109,7 @@ async function fetchDashboardData() {
 
         {activeView === 'survey' && (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--ink-3)' }}>Loading survey…</div>}>
-            <BoardSurvey />
+            <BoardSurvey sections={[...instructorSections]} />
           </Suspense>
         )}
 

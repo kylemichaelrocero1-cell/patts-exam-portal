@@ -1,8 +1,10 @@
 // Who sees the Survey tab. The board exam survey is for graduates, not for
 // everyone in the portal, so the tab shows only:
 //   * in a browser tab opened from the survey link (…/?survey), which the
-//     faculty post in the graduates' classrooms; or
-//   * to a student who has opened the survey on this device before.
+//     faculty post in the graduates' classrooms;
+//   * when an instructor has kept the survey to chosen sections (sql/150), to
+//     a student in one of them, link or not, and to no one else without it;
+//   * otherwise, to a student who has opened the survey on this device before.
 // The link's ?survey is noted before anything renders and taken off the
 // address, so a reload or a shared screenshot doesn't carry it on.
 import { SURVEY_ID, SURVEY_PARAM } from './boardSurveyId.js';
@@ -23,11 +25,19 @@ export function noteSurveyInvite() {
   } catch { /* private mode or no history: the tab just won't show */ }
 }
 
-/** Should this student see the Survey tab? */
-export function showSurveyTab(studentId) {
-  try {
-    return sessionStorage.getItem(INVITED) === SURVEY_ID || localStorage.getItem(seenKey(studentId)) === '1';
-  } catch { return false; }
+/**
+ * Should this student see the Survey tab? `access` is what the database said
+ * (board_survey_for_me, sql/150): `{ restricted, may_answer }`, or null until
+ * it answers, or for good on a database without 150.
+ *
+ * The link always shows the tab, even to a student outside the chosen
+ * sections: the survey then tells them who it is for, rather than the link
+ * seeming to do nothing.
+ */
+export function showSurveyTab(studentId, access = null) {
+  if (cameFromSurveyLink()) return true;
+  if (access?.restricted) return access.may_answer === true;
+  try { return localStorage.getItem(seenKey(studentId)) === '1'; } catch { return false; }
 }
 
 /** Was this browser tab opened from the survey link? (The sign-in page says so.) */

@@ -313,7 +313,7 @@ export const STEPS = [
     id: 'you', title: 'About you', sub: 'About 5 minutes. Skip anything you don’t remember.',
     items: [
       { kind: 'one', id: 'result', q: 'Your result', optional: true, options: opts(
-        ['passed', 'Passed'], ['not_passed', 'Did not pass'], ['waiting', 'Still waiting'], ['private', 'Prefer not to say']) },
+        ['passed', 'Passed'], ['not_passed', 'Did not pass'], ['private', 'Prefer not to say']) },
       { kind: 'one', id: 'take', q: 'Was this your first take?', options: opts(['first', 'First take'], ['retake', 'Retake']) },
       { kind: 'one', id: 'graduated', q: 'Year you graduated from PATTS', options: opts(
         ['2026', '2026'], ['2025', '2025'], ['2024', '2024'], ['earlier', '2023 or earlier']) },
@@ -371,8 +371,6 @@ export const STEPS = [
   {
     id: 'last', title: 'Last step',
     items: [
-      { kind: 'one', id: 'recommend', q: 'Would you recommend PATTS BSAE to someone aiming for the boards?',
-        options: opts(['yes', 'Yes'], ['no', 'No'], ['unsure', 'Not sure']) },
       { kind: 'one', id: 'mentor', q: 'Would you share tips with the next batch?', options: YES_NO },
       { kind: 'text', id: 'message', q: 'A message for the next batch', optional: true,
         placeholder: 'What you’d tell yourself a year ago' },

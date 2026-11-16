@@ -447,7 +447,6 @@ export default function BoardSurvey({ sections = [] }) {
             <Stat label="Passed" value={`${passed} / ${rows.length}`} icon="trophy" chip="gold" />
             <Stat label="Mock exams helpful" value={pct(shareOf(itemById('mocks_helpful'), list, ['helpful', 'very']))} icon="practice" chip="navy" />
             <Stat label="Mocks added to preparedness" value={pct(shareOf(itemById('mocks_prepared'), list, ['a_lot', 'somewhat']))} icon="trend-up" chip="ok" />
-            <Stat label="Would recommend PATTS" value={pct(shareOf(itemById('recommend'), list, ['yes']))} icon="graduation" chip="blue" />
           </div>
 
           {shown.length === 0 ? (

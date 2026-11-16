@@ -33,6 +33,8 @@ check('so is what they wish the faculty had done', itemById('wished')?.step === 
 check('every text box has a placeholder', ITEMS.filter(i => i.kind === 'text').every(i => i.placeholder));
 check('a PATTS survey: no AeroHub among what they used to review',
   !JSON.stringify(ITEMS.filter(i => i.options).map(i => i.options)).toLowerCase().includes('aerohub'));
+check('no "Still waiting" result, and no "would you recommend PATTS" question',
+  !itemById('result').options.some(o => o.id === 'waiting') && !itemById('recommend'));
 check('the topics recalled after the exam can be ticked',
   ['rate_turn', 'mass_flow', 'axes', 'stability'].every(id => SUBJECTS[1].topics.some(t => t.id === id))
   && ['beams_mixed', 'rope_tension', 'pressure_vessel', 'shaft_key', 'welds', 'friction'].every(id => SUBJECTS[2].topics.some(t => t.id === id))
